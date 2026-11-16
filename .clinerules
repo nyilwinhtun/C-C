@@ -1,0 +1,26 @@
+# Project Rules & Tech Stack Guidelines
+
+## 1. Core Tech Stack (Strictly Enforced)
+- **Framework:** React 18/19 + Vite + TypeScript (Strict mode, NO `any` types allowed).
+- **Styling:** Tailwind CSS (v4) + `shadcn/ui` components. Always use `cn()` utility from `@/lib/utils` for conditional classes.
+- **Icons:** `lucide-react` ONLY. Do not install other icon libraries.
+- **Client State:** `zustand` (with `persist` middleware for drafts/settings).
+- **Server/Async State:** `@tanstack/react-query` (`useQuery` and `useMutation` for all async/API calls).
+- **Forms & Validation:** `react-hook-form` + `zod` + `@hookform/resolvers/zod`. Always infer TypeScript types directly from Zod schemas using `z.infer<typeof schema>`.
+
+## 2. Folder Architecture
+Keep code modular and organized under `src/`:
+- `src/api/` - API functions & mock/real AI service calls
+- `src/components/ui/` - shadcn/ui components
+- `src/components/shared/` - Reusable layout components (Sidebar, Header, ThemeToggle)
+- `src/features/generator/` - AI Content Generator (schemas, components, hooks)
+- `src/features/planner/` - Content Calendar & Scheduling
+- `src/features/vault/` - Saved Ideas & Templates
+- `src/store/` - Zustand stores
+- `src/types/` - Global TypeScript interfaces
+
+## 3. Coding & UX Standards
+- Support both English and Myanmar Unicode text cleanly (`leading-relaxed` for Myanmar script readability).
+- Always include proper Loading skeletons/spinners (`Loader2` from `lucide-react`), Error boundaries/states, and Toast notifications (`sonner`) for user actions (Copy, Save, Generate).
+- Ensure responsive design (Mobile drawer + Desktop fixed sidebar).
+- Before finishing any task, verify there are no TypeScript errors (`npx tsc --noEmit`).
