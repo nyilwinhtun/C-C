@@ -8,26 +8,31 @@ import { fileURLToPath } from 'node:url'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss(), VitePWA({
-    register: true,
-    includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
+    registerType: 'autoUpdate',
+    devOptions: {
+      enabled: true,
+    },
+    includeAssets: ['favicon.svg', 'pwa-192x192.png', 'pwa-512x512.png'],
     manifest: {
       name: 'Content Creator',
       short_name: 'CC',
       description: 'Content Creator Web App',
-      theme_color: '#ffffff',
-      background_color: '#ffffff',
+      theme_color: '#0f172a',
+      background_color: '#0f172a',
       display: 'standalone',
       orientation: 'portrait',
       icons: [
         {
-          src: 'pwa-192x192.png',
+          src: '/pwa-192x192.png',
           sizes: '192x192',
           type: 'image/png',
+          purpose: 'any maskable',
         },
         {
-          src: 'pwa-512x512.png',
+          src: '/pwa-512x512.png',
           sizes: '512x512',
           type: 'image/png',
+          purpose: 'any maskable',
         },
       ],
     },

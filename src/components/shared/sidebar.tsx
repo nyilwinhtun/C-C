@@ -15,6 +15,7 @@ import {
   SheetClose,
 } from "@/components/ui/sheet"
 import { t } from "@/locales/translations"
+import { CCLogo } from "@/components/shared/cc-logo"
 import { useUIStore, type UIState } from "@/store/useUIStore"
 import { useShallow } from "zustand/react/shallow"
 import type { NavItem } from "@/types"
@@ -107,9 +108,7 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
       >
         <div className="flex h-12 items-center justify-between gap-2 border-b border-border px-3">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="h-6 w-6 shrink-0 rounded-md bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold">
-              CC
-            </div>
+            <CCLogo size={28} className="h-7 w-7 shrink-0 rounded-lg shadow-sm" />
             {!collapsed && (
               <span className="font-semibold text-sm tracking-tight leading-relaxed truncate">
                 {t(language, "sidebar.title")}
@@ -160,7 +159,10 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
         <Sheet open={mobileOpen} onOpenChange={onMobileToggle} className="border-l">
           <SheetContent className="w-[260px]">
             <SheetHeader className="pb-4 px-4">
-              <SheetTitle>{t(language, "sidebar.mobile_nav_title")}</SheetTitle>
+              <div className="flex items-center gap-2 mb-1">
+                <CCLogo size={26} className="h-6.5 w-6.5 shrink-0 rounded-lg shadow-sm" />
+                <SheetTitle>{t(language, "sidebar.mobile_nav_title")}</SheetTitle>
+              </div>
               <SheetDescription>{t(language, "sidebar.mobile_nav_description")}</SheetDescription>
               <SheetClose
                 onClick={() => onMobileToggle(false)}

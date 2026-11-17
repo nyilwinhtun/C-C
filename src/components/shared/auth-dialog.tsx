@@ -12,79 +12,83 @@ import { t } from "@/locales/translations";
 
 export function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const language = useUIStore((state) => state.language);
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const setAuth = useUIStore((state) => state.setAuth);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setLoading(true);
 
     try {
-      if (mode === "signin") {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) throw error;
-        toast.success(t(language, "auth.signInSuccess"));
-        onOpenChange(false);
-      } else {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-        if (error) throw error;
-        toast.success(t(language, "auth.signUpSuccess"));
-        onOpenChange(false);
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (signInError) throw signInError;
+
+      if (data?.session) {
+        setAuth(
+          data.session.user
+            ? { id: data.session.user.id, email: data.session.user.email ?? "" }
+            : null,
+          data.session.access_token
+        );
       }
+      toast.success(t(language, "auth.signInSuccess"));
+      onOpenChange(false);
     } catch (err: any) {
-      setError(err.message || t(language, "auth.error"));
-      toast.error(err.message || t(language, "auth.error"));
+      const msg = err?.message || t(language, "auth.error");
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogTitle>{mode === "signin" ? t(language, "auth.title") : t(language, "auth.signUpTitle")}</DialogTitle>
-        <DialogDescription>{mode === "signin" ? t(language, "auth.signInDesc") : t(language, "auth.signUpDesc")}</DialogDescription>
+        <DialogTitle>{t(language, "auth.title")}</DialogTitle>
+        <DialogDescription>{t(language, "auth.signInDesc")}</DialogDescription>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <Label htmlFor="auth-email">{t(language, "auth.email")}</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="dialog-auth-email">{t(language, "auth.email")}</Label>
             <Input
-              id="auth-email"
+              id="dialog-auth-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              disabled={false}
+              disabled={loading}
             />
           </div>
 
-          <div>
-            <Label htmlFor="auth-password">{t(language, "auth.password")}</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="dialog-auth-password">{t(language, "auth.password")}</Label>
             <Input
-              id="auth-password"
+              id="dialog-auth-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              disabled={loading}
             />
           </div>
 
           {error && (
-            <div className="alert alert-error">{error}</div>
+            <div className="rounded-md bg-destructive/15 p-3 text-sm text-destructive">
+              {error}
+            </div>
           )}
 
-          <div className="flex gap-3">
-            <Button type="button" variant="outline" onClick={() => setMode(mode === "signin" ? "signup" : "signin")}>
-              {mode === "signin" ? t(language, "auth.createAccount") : t(language, "auth.signIn")}
-            </Button>
-            <Button type="submit" >{mode === "signin" ? t(language, "auth.signIn") : t(language, "auth.signUp")}</Button>
-          </div>
+          <Button type="submit" disabled={loading} className="w-full">
+            {loading ? t(language, "auth.signingIn") : t(language, "auth.signIn")}
+          </Button>
         </form>
       </DialogContent>
     </Dialog>

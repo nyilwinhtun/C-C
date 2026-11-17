@@ -8,6 +8,7 @@ import { PlannerPage } from "@/features/planner/page"
 import { VaultPage } from "@/features/vault/page"
 import { Header } from "@/components/shared/header"
 import { Sidebar } from "@/components/shared/sidebar"
+import { PWAInstallBanner } from "@/components/shared/pwa-install-banner"
 import { useUIStore } from "@/store/useUIStore"
 import { useContentStore } from "@/store/useContentStore"
 import { useShallow } from "zustand/react/shallow"
@@ -71,6 +72,7 @@ export function Layout() {
           <Page />
         </main>
       </div>
+      <PWAInstallBanner />
     </div>
   )
 }

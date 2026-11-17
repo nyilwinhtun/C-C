@@ -3,12 +3,13 @@
 import { useState } from "react"
 import { t } from "@/locales/translations"
 import { useShallow } from "zustand/react/shallow"
-import { Menu, Settings, Globe } from "lucide-react"
+import { Menu, Settings, Globe, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/shared/theme-toggle"
 import { useUIStore } from "@/store/useUIStore"
-import { AuthDialog } from "@/components/shared/auth-dialog"
 import { SettingsDialog } from "@/components/shared/settings-dialog"
+import { supabase } from "@/lib/supabase"
+import { toast } from "@/components/ui/sonner"
 
 interface HeaderProps {
   title: string
@@ -16,15 +17,30 @@ interface HeaderProps {
 }
 
 export function Header({ title, onMenuToggle }: HeaderProps) {
-  const { language, setLanguage, user } = useUIStore(
+  const { language, setLanguage, user, signOut } = useUIStore(
     useShallow((state) => ({
       language: state.language,
       setLanguage: state.setLanguage,
       user: state.user,
+      signOut: state.signOut,
     }))
   )
-  const [authOpen, setAuthOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
+
+  const handleSignOut = async () => {
+    setLoggingOut(true)
+    try {
+      const { error } = await supabase.auth.signOut()
+      if (error) throw error
+    } catch (err: any) {
+      console.error("Sign out error", err)
+    } finally {
+      signOut()
+      setLoggingOut(false)
+      toast.success(t(language, "auth.signOutSuccess"))
+    }
+  }
 
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-border bg-background/80 backdrop-blur-md sticky top-0 z-20">
@@ -52,23 +68,17 @@ export function Header({ title, onMenuToggle }: HeaderProps) {
             {language === "en" ? "EN" : "MY"}
           </span>
         </Button>
-        {user ? (
+        {user && (
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setAuthOpen(true)}
-            aria-label={t(language, "header.signIn")}
+            onClick={handleSignOut}
+            disabled={loggingOut}
+            aria-label={t(language, "header.signOut")}
+            className="flex items-center gap-1.5"
           >
-            {t(language, "header.signIn")}
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setAuthOpen(true)}
-            aria-label={t(language, "header.signIn")}
-          >
-            {t(language, "header.signIn")}
+            <LogOut className="h-4 w-4" aria-hidden="true" />
+            <span>{t(language, "header.signOut")}</span>
           </Button>
         )}
         <Button
@@ -81,7 +91,6 @@ export function Header({ title, onMenuToggle }: HeaderProps) {
         </Button>
         <ThemeToggle />
       </div>
-      <AuthDialog open={authOpen} onOpenChange={setAuthOpen} />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   )
