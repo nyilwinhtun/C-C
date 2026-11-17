@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { Copy, Plus, Trash2 } from "lucide-react"
+import { Calendar, Copy, Pencil, Plus, Trash2 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
 import type { SavedVaultItem } from "@/store/useContentStore"
@@ -38,12 +38,21 @@ const PLATFORMS: { value: "facebook" | "tiktok" | "youtube" | "instagram"; label
 
 type PlatformFilter = "all" | "facebook" | "tiktok" | "youtube" | "instagram"
 
+function getTodayIsoDate(): string {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, "0")
+  const day = String(now.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
 export function VaultPage() {
   const { language } = useUIStore(useShallow((state) => ({ language: state.language })))
   const STATUS_LABEL: Record<string, string> = {
     idea: t(language, "vault.statusIdea"),
     draft: t(language, "vault.statusDraft"),
     scheduled: t(language, "vault.statusScheduled"),
+    posted: t(language, "vault.statusPosted"),
   }
   const { savedVault, saveToVault, updateVaultItem, deleteVaultItem } =
     useContentStore(
@@ -58,6 +67,9 @@ export function VaultPage() {
   const [search, setSearch] = useState("")
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>("all")
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [editingItem, setEditingItem] = useState<SavedVaultItem | null>(null)
+  const [scheduleDates, setScheduleDates] = useState<Record<string, string>>({})
+  const todayIso = getTodayIsoDate()
 
   const form = useForm<VaultItemFormValues>({
     resolver: zodResolver(vaultItemSchema),
@@ -65,35 +77,74 @@ export function VaultPage() {
   })
 
   const filteredItems = savedVault.filter((item) => {
-    const text = `${item.title} ${item.content}`.toLowerCase()
+    const text = `${item.title} ${item.content} ${item.tags.join(" ")}`.toLowerCase()
     const matchesSearch = text.includes(search.toLowerCase())
     const matchesPlatform =
       platformFilter === "all" || item.platform === platformFilter
     return matchesSearch && matchesPlatform
   })
 
-  const handleSubmit = useCallback(
-    (values: VaultItemFormValues) => {
-      saveToVault({
-        title: values.title,
-        platform: values.platform,
-        content: values.content,
-        tags: values.tags
-          .split(",")
-          .map((tag) => tag.trim())
-          .filter(Boolean),
+  const openCreateDialog = useCallback(() => {
+    setEditingItem(null)
+    form.reset({ title: "", platform: "instagram", content: "", tags: "" })
+    setDialogOpen(true)
+  }, [form])
+
+  const openEditDialog = useCallback(
+    (item: SavedVaultItem) => {
+      setEditingItem(item)
+      const validPlatform = PLATFORMS.some((p) => p.value === item.platform)
+        ? (item.platform as VaultItemFormValues["platform"])
+        : "instagram"
+      form.reset({
+        title: item.title,
+        platform: validPlatform,
+        content: item.content,
+        tags: item.tags.join(", "),
       })
-      form.reset()
-      setDialogOpen(false)
-      toast.success(t(language, "vault.saveSuccess"))
+      setDialogOpen(true)
     },
-    [form, saveToVault]
+    [form]
   )
 
-  const handleCopy = useCallback(async (text: string) => {
-    await navigator.clipboard.writeText(text)
-    toast.success(t(language, "vault.copy"))
-  }, [])
+  const handleSubmit = useCallback(
+    (values: VaultItemFormValues) => {
+      const parsedTags = values.tags
+        .split(",")
+        .map((tag) => tag.trim().replace(/^#/, ""))
+        .filter(Boolean)
+
+      if (editingItem) {
+        updateVaultItem(editingItem.id, {
+          title: values.title,
+          platform: values.platform,
+          content: values.content,
+          tags: parsedTags,
+        })
+        toast.success(t(language, "vault.updateSuccess"))
+      } else {
+        saveToVault({
+          title: values.title,
+          platform: values.platform,
+          content: values.content,
+          tags: parsedTags,
+        })
+        toast.success(t(language, "vault.saveSuccess"))
+      }
+      form.reset()
+      setEditingItem(null)
+      setDialogOpen(false)
+    },
+    [editingItem, form, language, saveToVault, updateVaultItem]
+  )
+
+  const handleCopy = useCallback(
+    async (text: string) => {
+      await navigator.clipboard.writeText(text)
+      toast.success(t(language, "vault.copy"))
+    },
+    [language]
+  )
 
   const handleStatusChange = useCallback(
     (id: string, status: SavedVaultItem["status"]) => {
@@ -102,14 +153,20 @@ export function VaultPage() {
     [updateVaultItem]
   )
 
-  const handleDateChange = useCallback(
-    (id: string, value: string, item: SavedVaultItem) => {
-      updateVaultItem(id, {
-        scheduledDate: value || undefined,
-        status: value ? "scheduled" : item.status,
+  const handleScheduleOneClick = useCallback(
+    (item: SavedVaultItem) => {
+      const date = scheduleDates[item.id] ?? item.scheduledDate ?? todayIso
+      if (!date) {
+        toast.error(t(language, "vault.pickDate"))
+        return
+      }
+      updateVaultItem(item.id, {
+        scheduledDate: date,
+        status: item.status === "posted" ? "posted" : "scheduled",
       })
+      toast.success(t(language, "vault.scheduleSuccess", { date }))
     },
-    [updateVaultItem]
+    [language, scheduleDates, todayIso, updateVaultItem]
   )
 
   const handleDelete = useCallback(
@@ -122,9 +179,17 @@ export function VaultPage() {
 
 
   const renderDialog = () => (
-    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+    <Dialog
+      open={dialogOpen}
+      onOpenChange={(open) => {
+        setDialogOpen(open)
+        if (!open) setEditingItem(null)
+      }}
+    >
       <DialogContent>
-        <DialogTitle>{t(language, "vault.newIdea")}</DialogTitle>
+        <DialogTitle>
+          {editingItem ? t(language, "vault.editIdea") : t(language, "vault.newIdea")}
+        </DialogTitle>
         <DialogDescription>{t(language, "vault.desc")}</DialogDescription>
         <Separator className="my-4" />
         <form onSubmit={form.handleSubmit(handleSubmit)} className="grid gap-3">
@@ -178,7 +243,7 @@ export function VaultPage() {
           <CardTitle className="text-xl">{t(language, "vault.title")}</CardTitle>
           <CardDescription>{t(language, "vault.emptySubtitle")}</CardDescription>
         </div>
-        <Button onClick={() => setDialogOpen(true)}>
+        <Button onClick={openCreateDialog}>
           <Plus className="h-4 w-4 mr-2" aria-hidden="true" />
           {t(language, "vault.newIdea")}
         </Button>
@@ -218,7 +283,7 @@ export function VaultPage() {
             onChange={(e) => setSearch(e.target.value)}
             className="w-full sm:w-[280px]"
           />
-          <Button onClick={() => setDialogOpen(true)}>
+          <Button onClick={openCreateDialog}>
             <Plus className="h-4 w-4 mr-2" aria-hidden="true" />
             {t(language, "vault.newIdea")}
           </Button>
@@ -259,7 +324,7 @@ export function VaultPage() {
                       </span>
                     </div>
                   </div>
-                  <div className="flex flex-col gap-2 w-full sm:flex-row sm:w-auto">
+                  <div className="flex flex-col gap-2 w-full sm:flex-row sm:w-auto sm:items-center">
                     <Select
                       value={item.status}
                       onChange={(e) =>
@@ -272,14 +337,30 @@ export function VaultPage() {
                       <SelectItem value="idea">{t(language, "vault.statusIdea")}</SelectItem>
                       <SelectItem value="draft">{t(language, "vault.statusDraft")}</SelectItem>
                       <SelectItem value="scheduled">{t(language, "vault.statusScheduled")}</SelectItem>
+                      <SelectItem value="posted">{t(language, "vault.statusPosted")}</SelectItem>
                     </Select>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       <Input
                         type="date"
-                        defaultValue={item.scheduledDate ?? ""}
-                        onChange={(e) => handleDateChange(item.id, e.target.value, item)}
-                        className="h-8 w-[170px] px-2 text-xs"
+                        value={scheduleDates[item.id] ?? item.scheduledDate ?? todayIso}
+                        onChange={(e) =>
+                          setScheduleDates((prev) => ({
+                            ...prev,
+                            [item.id]: e.target.value,
+                          }))
+                        }
+                        className="h-8 w-[145px] px-2 text-xs"
                       />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="h-8 px-2.5 text-xs shrink-0"
+                        onClick={() => handleScheduleOneClick(item)}
+                      >
+                        <Calendar className="h-3 w-3 mr-1" aria-hidden="true" />
+                        {t(language, "vault.schedule")}
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -298,10 +379,14 @@ export function VaultPage() {
                   </div>
                 )}
               </CardContent>
-              <CardFooter className="gap-2">
+              <CardFooter className="flex-wrap gap-2">
                 <Button variant="outline" size="sm" onClick={() => handleCopy(item.content)}>
                   <Copy className="h-3 w-3 mr-1.5" aria-hidden="true" />
                   {t(language, "vault.copy")}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => openEditDialog(item)}>
+                  <Pencil className="h-3 w-3 mr-1.5" aria-hidden="true" />
+                  {t(language, "vault.edit")}
                 </Button>
                 <Button variant="destructive" size="sm" onClick={() => handleDelete(item.id)}>
                   <Trash2 className="h-3 w-3 mr-1.5" aria-hidden="true" />

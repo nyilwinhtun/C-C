@@ -20,8 +20,16 @@ export interface SavedVaultItem {
   content: string
   platform: string
   tags: string[]
-  status: "idea" | "draft" | "scheduled"
+  status: "idea" | "draft" | "scheduled" | "posted"
   scheduledDate?: string
+}
+
+export interface ContentBackupData {
+  version?: number
+  exportedAt?: string
+  brandSignature?: string
+  savedVault?: SavedVaultItem[]
+  generatedHistory?: GeneratedItem[]
 }
 
 interface ContentState {
@@ -33,9 +41,15 @@ interface ContentState {
   setDraftInput: (input: Partial<GeneratorFormValues>) => void
   addGeneratedItem: (item: Omit<GeneratedItem, "id" | "createdAt">) => void
   setBrandSignature: (signature: string) => void
-  saveToVault: (item: Omit<SavedVaultItem, "id" | "status">) => void
+  saveToVault: (
+    item: Omit<SavedVaultItem, "id" | "status"> & {
+      status?: SavedVaultItem["status"]
+      scheduledDate?: string
+    }
+  ) => void
   updateVaultItem: (id: string, updates: Partial<SavedVaultItem>) => void
   deleteVaultItem: (id: string) => void
+  importBackup: (data: ContentBackupData) => void
   loadVaultFromSupabase: () => Promise<void>
   setUserId: (userId: string | null) => void
 }
@@ -79,12 +93,12 @@ export const useContentStore = create<ContentState>()(
 
       setBrandSignature: (brandSignature) => set({ brandSignature }),
 
-      saveToVault: (item: Omit<SavedVaultItem, "id" | "status">) =>
+      saveToVault: (item) =>
         set((state) => {
           const entry: SavedVaultItem = {
             ...item,
             id: crypto.randomUUID(),
-            status: "idea",
+            status: item.status ?? (item.scheduledDate ? "scheduled" : "idea"),
           }
           const next = { savedVault: [entry, ...state.savedVault] }
           void syncVaultItemToSupabase(entry)
@@ -105,6 +119,36 @@ export const useContentStore = create<ContentState>()(
           void deleteVaultItemFromSupabase(id)
           return next
         }),
+
+      importBackup: (data) =>
+        set((state) => ({
+          brandSignature:
+            typeof data.brandSignature === "string"
+              ? data.brandSignature
+              : state.brandSignature,
+          savedVault: Array.isArray(data.savedVault)
+            ? data.savedVault.map((item) => ({
+                id: item.id || crypto.randomUUID(),
+                title: String(item.title ?? ""),
+                content: String(item.content ?? ""),
+                platform: String(item.platform ?? "instagram"),
+                tags: Array.isArray(item.tags) ? item.tags.map(String) : [],
+                status:
+                  item.status === "idea" ||
+                  item.status === "draft" ||
+                  item.status === "scheduled" ||
+                  item.status === "posted"
+                    ? item.status
+                    : item.scheduledDate
+                      ? "scheduled"
+                      : "idea",
+                scheduledDate: item.scheduledDate || undefined,
+              }))
+            : state.savedVault,
+          generatedHistory: Array.isArray(data.generatedHistory)
+            ? data.generatedHistory.slice(0, 10)
+            : state.generatedHistory,
+        })),
 
       loadVaultFromSupabase: async () => {
         const { user } = useUIStore.getState()

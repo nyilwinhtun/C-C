@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { t } from "@/locales/translations"
 import { useUIStore } from "@/store/useUIStore"
-import { useContentStore } from "@/store/useContentStore"
+import { useContentStore, type ContentBackupData } from "@/store/useContentStore"
 import { useShallow } from "zustand/react/shallow"
-import { Eye, EyeOff, Link, ShieldAlert } from "lucide-react"
+import { Download, Eye, EyeOff, Link, ShieldAlert, Upload } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 
 import { Button } from "@/components/ui/button"
@@ -82,17 +82,22 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       }))
     )
 
-  const { brandSignature, setBrandSignature } = useContentStore(
-    useShallow((state) => ({
-      brandSignature: state.brandSignature,
-      setBrandSignature: state.setBrandSignature,
-    }))
-  )
+  const { brandSignature, savedVault, generatedHistory, setBrandSignature, importBackup } =
+    useContentStore(
+      useShallow((state) => ({
+        brandSignature: state.brandSignature,
+        savedVault: state.savedVault,
+        generatedHistory: state.generatedHistory,
+        setBrandSignature: state.setBrandSignature,
+        importBackup: state.importBackup,
+      }))
+    )
 
   const [apiKey, setApiKey] = useState(aiApiKey)
   const [signature, setSignature] = useState(brandSignature)
   const [showKey, setShowKey] = useState(false)
   const [loading, setLoading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const providerInfo = PROVIDER_INFO[aiProvider]
   const currentPresets = PRESET_MODELS[aiProvider]
@@ -125,9 +130,64 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   const selectedModelValue = isCustomMode ? "custom" : isPreset ? aiModel : "custom"
 
+  const handleExportBackup = () => {
+    const payload: ContentBackupData = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      brandSignature: signature,
+      savedVault,
+      generatedHistory,
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    const dateStamp = new Date().toISOString().slice(0, 10)
+    link.href = url
+    link.download = `content-creator-backup-${dateStamp}.json`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+    toast.success(t(language, "settings.exportSuccess"))
+  }
+
+  const handleRestoreFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      const parsed = JSON.parse(text) as ContentBackupData
+      const hasValidField =
+        typeof parsed === "object" &&
+        parsed !== null &&
+        (typeof parsed.brandSignature === "string" ||
+          Array.isArray(parsed.savedVault) ||
+          Array.isArray(parsed.generatedHistory))
+
+      if (!hasValidField) {
+        toast.error(t(language, "settings.restoreError"))
+        return
+      }
+
+      importBackup(parsed)
+      if (typeof parsed.brandSignature === "string") {
+        setSignature(parsed.brandSignature)
+      }
+      toast.success(t(language, "settings.restoreSuccess"))
+    } catch {
+      toast.error(t(language, "settings.restoreError"))
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+      }
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <DialogTitle>{t(language, "settings.title")}</DialogTitle>
           <DialogDescription>{t(language, "settings.description")}</DialogDescription>
@@ -247,12 +307,55 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               value={signature}
               onChange={(e) => setSignature(e.target.value)}
               placeholder={t(language, "settings.brandSignaturePlaceholder")}
-              className="font-myanmar text-sm resize-y"
+              className="font-myanmar text-sm resize-y px-3 py-2.5 leading-relaxed"
               disabled={loading}
             />
             <p className="text-xs text-muted-foreground font-myanmar">
               {t(language, "settings.brandSignatureHint")}
             </p>
+          </div>
+          <Separator />
+          <div className="space-y-2.5">
+            <div>
+              <p className="text-sm font-medium font-myanmar">
+                {t(language, "settings.backupTitle")}
+              </p>
+              <p className="text-xs text-muted-foreground font-myanmar leading-relaxed">
+                {t(language, "settings.backupDesc")}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleExportBackup}
+                disabled={loading}
+                className="font-myanmar"
+              >
+                <Download className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                {t(language, "settings.exportBackup")}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={loading}
+                className="font-myanmar"
+              >
+                <Upload className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                {t(language, "settings.restoreBackup")}
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,application/json"
+                onChange={handleRestoreFile}
+                className="hidden"
+                aria-label={t(language, "settings.restoreBackup")}
+              />
+            </div>
           </div>
           <Separator />
           <div className="flex gap-2">

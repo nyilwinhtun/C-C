@@ -190,7 +190,7 @@ const MYANMAR_HASHTAG_PACKS = [
   {
     id: "food",
     labelKey: "generator.hashtagFood",
-    tags: ["#YangonFoodie", "#MyanmarFood", "#အစားအသောက်", "#စားသောက်ဆိုင်", "#FoodieMyanmar"],
+    tags: ["#MyanmarFoodie", "#MyanmarFood", "#အစားအသောက်", "#စားသောက်ဆိုင်", "#FoodieMyanmar"],
   },
   {
     id: "promo",
@@ -234,16 +234,16 @@ export function GeneratorPage() {
 
   const QUICK_STARTERS = [
     {
-      title: t(language, "generator.starter_street_food"),
-      topic: "Yangon street food guide",
-      platform: "instagram",
+      title: t(language, "generator.starter_flash_sale"),
+      topic: "Limited-time weekend flash sale promotion",
+      platform: "facebook",
       contentType: "post_caption",
-      tone: "engaging",
+      tone: "sales",
       language: "english",
     },
     {
-      title: t(language, "generator.starter_travel_tips"),
-      topic: "Best time to visit Bagan",
+      title: t(language, "generator.starter_tips_guide"),
+      topic: "5 helpful tips for choosing the right product",
       platform: "facebook",
       contentType: "post_caption",
       tone: "educational",
@@ -251,16 +251,16 @@ export function GeneratorPage() {
     },
     {
       title: t(language, "generator.starter_product_launch"),
-      topic: "New organic skincare line launch",
+      topic: "New product arrival and key highlights",
       platform: "tiktok",
       contentType: "video_script",
-      tone: "sales",
+      tone: "engaging",
       language: "english",
     },
     {
-      title: t(language, "generator.starter_weekend_thread"),
-      topic: "Relaxing weekend in Inle Lake",
-      platform: "facebook",
+      title: t(language, "generator.starter_behind_scenes"),
+      topic: "Behind the scenes of our daily workflow",
+      platform: "instagram",
       contentType: "thread",
       tone: "storytelling",
       language: "english",
@@ -628,8 +628,7 @@ export function GeneratorPage() {
       <div className="flex flex-col lg:flex-row gap-6 items-start">
         <div className="w-full flex-1 min-w-0">
           <Card className="border-border/60 shadow-sm">
-            <CardHeader className="pb-4 border-b border-border/60 space-y-1.5">
-              <CardTitle className="leading-[1.85]">{t(language, "generator.title")}</CardTitle>
+            <CardHeader className="pb-4 border-b border-border/60">
               <CardDescription className="leading-[1.85]">{t(language, "generator.desc")}</CardDescription>
             </CardHeader>
             <CardContent className="p-0">

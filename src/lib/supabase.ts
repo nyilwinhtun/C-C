@@ -11,7 +11,7 @@ export interface Database {
           content: string
           platform: string
           tags: string[]
-          status: "idea" | "draft" | "scheduled"
+          status: "idea" | "draft" | "scheduled" | "posted"
           scheduled_date: string | null
           created_at: string
         }
@@ -22,7 +22,7 @@ export interface Database {
           content: string
           platform: string
           tags?: string[]
-          status?: "idea" | "draft" | "scheduled"
+          status?: "idea" | "draft" | "scheduled" | "posted"
           scheduled_date?: string | null
           created_at?: string
         }
@@ -33,7 +33,7 @@ export interface Database {
           content?: string
           platform?: string
           tags?: string[]
-          status?: "idea" | "draft" | "scheduled"
+          status?: "idea" | "draft" | "scheduled" | "posted"
           scheduled_date?: string | null
           created_at?: string
         }

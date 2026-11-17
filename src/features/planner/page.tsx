@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import { Calendar } from "lucide-react"
+import { Calendar, CheckCircle2, Circle, Copy, Plus, X } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
 import type { SavedVaultItem } from "@/store/useContentStore"
@@ -18,20 +18,38 @@ import {
 } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Select, SelectItem } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
+import { Separator } from "@/components/ui/separator"
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
+
+const PLATFORMS = [
+  { value: "facebook", label: "Facebook" },
+  { value: "tiktok", label: "TikTok" },
+  { value: "youtube", label: "YouTube" },
+  { value: "instagram", label: "Instagram" },
+] as const
+
+function getTodayIsoDate(): string {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, "0")
+  const day = String(now.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
 
 function formatDateLabel(isoDate: string, language: Locale): string {
-  const date = new Date(isoDate)
+  const target = new Date(`${isoDate}T00:00:00`)
   const today = new Date()
   today.setHours(0, 0, 0, 0)
-  const target = new Date(date)
-  target.setHours(0, 0, 0, 0)
   const tomorrow = new Date(today)
   tomorrow.setDate(today.getDate() + 1)
 
   if (target.getTime() === today.getTime()) return t(language, "planner.today")
   if (target.getTime() === tomorrow.getTime()) return t(language, "planner.tomorrow")
-  return date.toLocaleDateString(undefined, {
+  return target.toLocaleDateString(undefined, {
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -44,21 +62,35 @@ export function PlannerPage() {
     idea: t(language, "vault.statusIdea"),
     draft: t(language, "vault.statusDraft"),
     scheduled: t(language, "vault.statusScheduled"),
+    posted: t(language, "planner.posted"),
   }
-  const { savedVault, updateVaultItem } = useContentStore(
+  const { savedVault, saveToVault, updateVaultItem } = useContentStore(
     useShallow((state) => ({
       savedVault: state.savedVault,
+      saveToVault: state.saveToVault,
       updateVaultItem: state.updateVaultItem,
     }))
   )
 
+  const todayIso = getTodayIsoDate()
   const [scheduleDates, setScheduleDates] = useState<Record<string, string>>({})
+  const [dateFilter, setDateFilter] = useState("")
+  const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [newPostDate, setNewPostDate] = useState(todayIso)
+  const [newPostTitle, setNewPostTitle] = useState("")
+  const [newPostPlatform, setNewPostPlatform] = useState("facebook")
+  const [newPostContent, setNewPostContent] = useState("")
+  const [newPostTags, setNewPostTags] = useState("")
 
   const scheduledItems = savedVault.filter((item) => Boolean(item.scheduledDate))
   const unscheduledItems = savedVault.filter((item) => !item.scheduledDate)
 
+  const visibleScheduledItems = dateFilter
+    ? scheduledItems.filter((item) => item.scheduledDate === dateFilter)
+    : scheduledItems
+
   const groupedByDate = new Map<string, SavedVaultItem[]>()
-  scheduledItems.forEach((item) => {
+  visibleScheduledItems.forEach((item) => {
     const date = item.scheduledDate!
     const list = groupedByDate.get(date) ?? []
     list.push(item)
@@ -70,7 +102,7 @@ export function PlannerPage() {
 
   const handleSchedule = useCallback(
     (id: string) => {
-      const date = scheduleDates[id]
+      const date = scheduleDates[id] ?? todayIso
       if (!date) {
         toast.error(t(language, "planner.pickDate"))
         return
@@ -81,30 +113,136 @@ export function PlannerPage() {
         delete next[id]
         return next
       })
-      toast.success(t(language, "planner.scheduleSuccess", { date: new Date(date).toLocaleDateString() }))
+      toast.success(
+        t(language, "planner.scheduleSuccess", {
+          date: new Date(`${date}T00:00:00`).toLocaleDateString(),
+        })
+      )
     },
-    [scheduleDates, updateVaultItem]
+    [language, scheduleDates, todayIso, updateVaultItem]
   )
 
-  const handleCopy = useCallback(async (text: string) => {
-    await navigator.clipboard.writeText(text)
-    toast.success(t(language, "generator.copySuccess"))
-  }, [language])
+  const handleTogglePosted = useCallback(
+    (item: SavedVaultItem) => {
+      const nextStatus = item.status === "posted" ? "scheduled" : "posted"
+      updateVaultItem(item.id, { status: nextStatus })
+    },
+    [updateVaultItem]
+  )
+
+  const handleUnschedule = useCallback(
+    (item: SavedVaultItem) => {
+      updateVaultItem(item.id, { scheduledDate: undefined, status: "draft" })
+    },
+    [updateVaultItem]
+  )
+
+  const handleCopy = useCallback(
+    async (text: string) => {
+      await navigator.clipboard.writeText(text)
+      toast.success(t(language, "generator.copySuccess"))
+    },
+    [language]
+  )
+
+  const handleAddPost = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault()
+      if (!newPostDate) {
+        toast.error(t(language, "planner.pickDate"))
+        return
+      }
+      if (newPostTitle.trim().length < 2 || newPostContent.trim().length < 5) {
+        return
+      }
+      const parsedTags = newPostTags
+        .split(",")
+        .map((tag) => tag.trim().replace(/^#/, ""))
+        .filter(Boolean)
+
+      saveToVault({
+        title: newPostTitle.trim(),
+        platform: newPostPlatform,
+        content: newPostContent.trim(),
+        tags: parsedTags,
+        status: "scheduled",
+        scheduledDate: newPostDate,
+      })
+
+      toast.success(
+        t(language, "planner.scheduleSuccess", {
+          date: new Date(`${newPostDate}T00:00:00`).toLocaleDateString(),
+        })
+      )
+      setNewPostTitle("")
+      setNewPostContent("")
+      setNewPostTags("")
+      setNewPostDate(todayIso)
+      setAddDialogOpen(false)
+    },
+    [
+      language,
+      newPostContent,
+      newPostDate,
+      newPostPlatform,
+      newPostTags,
+      newPostTitle,
+      saveToVault,
+      todayIso,
+    ]
+  )
 
   return (
     <div className="flex flex-col gap-6">
       <Card className="flex-1">
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <CardTitle className="text-xl">{t(language, "planner.title")}</CardTitle>
             <CardDescription>{t(language, "planner.desc")}</CardDescription>
           </div>
-          <Badge variant="outline">{scheduledItems.length} {t(language, "planner.scheduled")}</Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <Input
+                type="date"
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+                aria-label={t(language, "planner.filterAllDates")}
+                className="h-8 w-[150px] px-2 text-xs"
+              />
+              {dateFilter && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-xs"
+                  onClick={() => setDateFilter("")}
+                >
+                  <X className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
+                  {t(language, "planner.clearFilter")}
+                </Button>
+              )}
+            </div>
+            <Badge variant="outline">
+              {scheduledItems.length} {t(language, "planner.scheduled")}
+            </Badge>
+            <Button size="sm" onClick={() => setAddDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-1.5" aria-hidden="true" />
+              {t(language, "planner.addPost")}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {sortedDates.length === 0 ? (
-            <div className="flex h-64 flex-col items-center justify-center rounded-lg border-2 border-dashed border-border p-6 text-center text-sm text-muted-foreground leading-relaxed">
-              {t(language, "planner.empty")}
+            <div className="flex h-64 flex-col items-center justify-center rounded-lg border-2 border-dashed border-border p-6 text-center text-sm text-muted-foreground leading-relaxed gap-3">
+              <p>
+                {dateFilter
+                  ? t(language, "planner.noPostsForDate")
+                  : t(language, "planner.empty")}
+              </p>
+              <Button variant="outline" size="sm" onClick={() => setAddDialogOpen(true)}>
+                <Plus className="h-4 w-4 mr-1.5" aria-hidden="true" />
+                {t(language, "planner.addPost")}
+              </Button>
             </div>
           ) : (
             <div className="space-y-4">
@@ -122,45 +260,90 @@ export function PlannerPage() {
                       </span>
                     </div>
                     <div className="space-y-2">
-                      {items.map((item) => (
-                        <Card
-                          key={item.id}
-                          className="border bg-background p-3 hover:bg-accent/50 transition-colors cursor-pointer"
-                          onClick={() => handleCopy(item.content)}
-                        >
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                            <div>
-                              <h4 className="font-semibold leading-relaxed">
-                                {item.title}
-                              </h4>
-                              <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
-                                {item.content}
-                              </p>
-                            </div>
-                            <div className="flex flex-col gap-1 text-right">
-                              <Badge variant="outline">
-                                {STATUS_LABEL[item.status]}
-                              </Badge>
-                              <span className="text-xs text-muted-foreground">
-                                {item.platform}
-                              </span>
-                            </div>
-                          </div>
-                          {item.tags.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              {item.tags.map((tag) => (
-                                <Badge
-                                  key={tag}
-                                  variant="secondary"
-                                  className="text-xs"
+                      {items.map((item) => {
+                        const isPosted = item.status === "posted"
+                        return (
+                          <Card
+                            key={item.id}
+                            className="border bg-background p-3 hover:bg-accent/30 transition-colors"
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="font-semibold leading-relaxed">
+                                    {item.title}
+                                  </h4>
+                                  <span className="text-xs text-muted-foreground capitalize">
+                                    {item.platform}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed mt-1">
+                                  {item.content}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleTogglePosted(item)}
+                                  className="focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
+                                  title={t(language, "planner.markPosted")}
                                 >
-                                  #{tag}
-                                </Badge>
-                              ))}
+                                  <Badge
+                                    variant={isPosted ? "default" : "outline"}
+                                    className={
+                                      isPosted
+                                        ? "cursor-pointer bg-emerald-600/15 text-emerald-700 dark:text-emerald-400 border border-emerald-600/30 hover:bg-emerald-600/25"
+                                        : "cursor-pointer hover:bg-accent"
+                                    }
+                                  >
+                                    {isPosted ? (
+                                      <CheckCircle2 className="h-3 w-3 mr-1" aria-hidden="true" />
+                                    ) : (
+                                      <Circle className="h-3 w-3 mr-1" aria-hidden="true" />
+                                    )}
+                                    {isPosted
+                                      ? t(language, "planner.posted")
+                                      : STATUS_LABEL[item.status] ?? t(language, "vault.statusScheduled")}
+                                  </Badge>
+                                </button>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={() => handleCopy(item.content)}
+                                >
+                                  <Copy className="h-3 w-3 mr-1" aria-hidden="true" />
+                                  {t(language, "vault.copy")}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                                  onClick={() => handleUnschedule(item)}
+                                  title={t(language, "planner.unschedule")}
+                                >
+                                  <X className="h-3 w-3" aria-hidden="true" />
+                                </Button>
+                              </div>
                             </div>
-                          )}
-                        </Card>
-                      ))}
+                            {item.tags.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {item.tags.map((tag) => (
+                                  <Badge
+                                    key={tag}
+                                    variant="secondary"
+                                    className="text-xs"
+                                  >
+                                    #{tag}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+                          </Card>
+                        )
+                      })}
                     </div>
                   </div>
                 )
@@ -184,8 +367,8 @@ export function PlannerPage() {
             <div className="space-y-3">
               {unscheduledItems.map((item) => (
                 <Card key={item.id} className="border rounded-xl p-4">
-                  <CardHeader>
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
+                  <CardHeader className="p-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
                         <h4 className="font-semibold leading-relaxed">
                           {item.title}
@@ -193,14 +376,14 @@ export function PlannerPage() {
                         <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">
                           {item.content}
                         </p>
-                        <Badge variant="outline">
+                        <Badge variant="outline" className="mt-2">
                           {STATUS_LABEL[item.status]}
                         </Badge>
                       </div>
                       <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                         <Input
                           type="date"
-                          value={scheduleDates[item.id] ?? ""}
+                          value={scheduleDates[item.id] ?? todayIso}
                           onChange={(e) =>
                             setScheduleDates((prev) => ({
                               ...prev,
@@ -221,6 +404,75 @@ export function PlannerPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <DialogContent>
+          <DialogTitle>{t(language, "planner.addPost")}</DialogTitle>
+          <DialogDescription>{t(language, "planner.addPostDesc")}</DialogDescription>
+          <Separator className="my-3" />
+          <form onSubmit={handleAddPost} className="grid gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <Label>{t(language, "vault.scheduledDate")}</Label>
+                <Input
+                  type="date"
+                  value={newPostDate}
+                  onChange={(e) => setNewPostDate(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label>{t(language, "vault.formPlatform")}</Label>
+                <Select
+                  value={newPostPlatform}
+                  onChange={(e) => setNewPostPlatform(e.target.value)}
+                >
+                  {PLATFORMS.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </Select>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>{t(language, "vault.formTitle")}</Label>
+              <Input
+                value={newPostTitle}
+                onChange={(e) => setNewPostTitle(e.target.value)}
+                placeholder={t(language, "vault.formTitlePlaceholder")}
+                required
+                minLength={2}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>{t(language, "vault.formContent")}</Label>
+              <Textarea
+                value={newPostContent}
+                onChange={(e) => setNewPostContent(e.target.value)}
+                rows={4}
+                placeholder={t(language, "vault.formContentPlaceholder")}
+                required
+                minLength={5}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>{t(language, "vault.formTags")}</Label>
+              <Input
+                value={newPostTags}
+                onChange={(e) => setNewPostTags(e.target.value)}
+                placeholder={t(language, "vault.formTagsPlaceholder")}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setAddDialogOpen(false)}>
+                {t(language, "vault.cancel")}
+              </Button>
+              <Button type="submit">{t(language, "planner.schedule")}</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
