@@ -862,41 +862,42 @@ async function extractKeyframesFromVideo(
 
   try {
     await new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        reject(new Error("Timed out loading video metadata."))
-      }, 15000)
+      let settled = false
+      const finish = (err?: Error) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timer)
+        cleanup()
+        if (err) reject(err)
+        else resolve()
+      }
 
-      const onLoaded = () => {
-        window.clearTimeout(timer)
-        cleanup()
-        resolve()
-      }
-      const onError = () => {
-        window.clearTimeout(timer)
-        cleanup()
-        reject(new Error("Could not decode video file in browser."))
-      }
+      // 5-second timeout fallback so mobile recordings with slow/missing metadata never hang
+      const timer = window.setTimeout(() => {
+        finish()
+      }, 5000)
+
+      const onLoaded = () => finish()
+      const onError = () => finish(new Error("Could not decode video file in browser."))
       const cleanup = () => {
         video.removeEventListener("loadedmetadata", onLoaded)
+        video.removeEventListener("loadeddata", onLoaded)
         video.removeEventListener("error", onError)
       }
 
       if (video.readyState >= 1) {
-        window.clearTimeout(timer)
-        cleanup()
-        resolve()
+        finish()
         return
       }
       video.addEventListener("loadedmetadata", onLoaded)
+      video.addEventListener("loadeddata", onLoaded)
       video.addEventListener("error", onError)
     })
 
-    const duration =
-      Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0
-    const timestamps =
-      duration > 0
-        ? Array.from({ length: frameCount }, (_, i) => ((i + 0.5) / frameCount) * duration)
-        : [0]
+    const hasValidDuration = Number.isFinite(video.duration) && video.duration > 0
+    const timestamps = hasValidDuration
+      ? Array.from({ length: frameCount }, (_, i) => ((i + 0.5) / frameCount) * video.duration)
+      : [0.5, 1.5, 2.5]
 
     const canvas = document.createElement("canvas")
     const ctx = canvas.getContext("2d")
@@ -919,7 +920,15 @@ async function extractKeyframesFromVideo(
         }
 
         video.addEventListener("seeked", onSeeked)
-        video.currentTime = Math.min(Math.max(0, time), duration || 0)
+        try {
+          video.currentTime = hasValidDuration
+            ? Math.min(Math.max(0, time), video.duration)
+            : Math.max(0, time)
+        } catch {
+          window.clearTimeout(seekTimer)
+          video.removeEventListener("seeked", onSeeked)
+          resolve()
+        }
       })
 
       const srcWidth = video.videoWidth || 720

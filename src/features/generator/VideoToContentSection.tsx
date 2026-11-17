@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
+  AlertCircle,
   Check,
   Copy,
   Film,
+  FolderOpen,
   Hash,
   LayoutList,
   Loader2,
@@ -21,7 +23,6 @@ import {
 import { toast } from "@/components/ui/sonner"
 import {
   generateVideoContent,
-  isSupportedVideoFile,
   type VideoContentResult,
   type VideoPlatformOption,
 } from "@/api/aiService"
@@ -76,12 +77,12 @@ export function VideoToContentSection() {
   const language = useUIStore((state) => state.language)
   const saveToVault = useContentStore((state) => state.saveToVault)
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const resultRef = useRef<HTMLDivElement | null>(null)
 
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const [productNote, setProductNote] = useState("")
   const [platform, setPlatform] = useState<VideoPlatformOption>("TikTok / Reels")
@@ -109,19 +110,23 @@ export function VideoToContentSection() {
   const handleSelectFile = useCallback(
     (file: File | null | undefined) => {
       if (!file) return
-      if (!isSupportedVideoFile(file)) {
-        toast.error(t(language, "generator.videoInvalidType"))
+      if (file.size <= 0) {
+        const msg = "Selected file is empty (0 bytes). Please choose a valid video file."
+        setErrorMessage(msg)
+        toast.error(msg)
         return
       }
+      const nextPreviewUrl = URL.createObjectURL(file)
+      setErrorMessage(null)
       setPreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev)
-        return URL.createObjectURL(file)
+        return nextPreviewUrl
       })
       setVideoFile(file)
       setResult(null)
       setIsInputCollapsed(false)
     },
-    [language]
+    []
   )
 
   const handleClearFile = useCallback(() => {
@@ -131,14 +136,13 @@ export function VideoToContentSection() {
     })
     setVideoFile(null)
     setResult(null)
+    setErrorMessage(null)
     setIsInputCollapsed(false)
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ""
-    }
   }, [])
 
   const handleGenerate = useCallback(async () => {
     if (!videoFile || progressStage) return
+    setErrorMessage(null)
     setProgressStage(
       videoFile.size <= DIRECT_MODE_LIMIT_BYTES ? "analyzing" : "extracting"
     )
@@ -173,6 +177,7 @@ export function VideoToContentSection() {
         err instanceof Error && err.message
           ? err.message
           : t(language, "generator.videoError")
+      setErrorMessage(message)
       toast.error(message)
     } finally {
       setProgressStage(null)
@@ -276,54 +281,87 @@ export function VideoToContentSection() {
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 p-4 sm:p-6">
-            <input
-              id="video-upload-input"
-              ref={fileInputRef}
-              type="file"
-              accept="video/*"
-              className="hidden"
-              onChange={(e) => handleSelectFile(e.target.files?.[0])}
-            />
+            {errorMessage && (
+              <div
+                role="alert"
+                className="flex items-start justify-between gap-2.5 rounded-xl border border-red-500/40 bg-red-500/10 px-3.5 py-2.5 text-xs text-red-700 dark:text-red-300"
+              >
+                <div className="flex items-start gap-2 min-w-0">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-red-600 dark:text-red-400" aria-hidden="true" />
+                  <p className="leading-relaxed break-words">{errorMessage}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setErrorMessage(null)}
+                  className="shrink-0 rounded p-0.5 text-red-600/80 hover:text-red-700 dark:text-red-400/80 dark:hover:text-red-300"
+                  aria-label="Dismiss error"
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </div>
+            )}
 
             {!videoFile ? (
-              <label
-                htmlFor="video-upload-input"
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
+              <div className="space-y-2.5">
+                <div
+                  onDragOver={(e) => {
                     e.preventDefault()
-                    fileInputRef.current?.click()
-                  }
-                }}
-                onDragOver={(e) => {
-                  e.preventDefault()
-                  setIsDragging(true)
-                }}
-                onDragLeave={() => setIsDragging(false)}
-                onDrop={(e) => {
-                  e.preventDefault()
-                  setIsDragging(false)
-                  handleSelectFile(e.dataTransfer.files?.[0])
-                }}
-                className={`w-full rounded-xl border-2 border-dashed p-6 sm:p-8 text-center transition-colors cursor-pointer flex flex-col items-center justify-center gap-3 ${
-                  isDragging
-                    ? "border-blue-500 bg-blue-500/10"
-                    : "border-border/70 bg-muted/20 hover:bg-muted/40 hover:border-blue-500/50"
-                }`}
-              >
-                <div className="h-12 w-12 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-                  <Upload className="h-5 w-5" aria-hidden="true" />
+                    setIsDragging(true)
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    setIsDragging(false)
+                    handleSelectFile(e.dataTransfer.files?.[0])
+                  }}
+                  className={`relative w-full rounded-xl border-2 border-dashed p-6 sm:p-8 text-center transition-colors cursor-pointer flex flex-col items-center justify-center gap-3 overflow-hidden ${
+                    isDragging
+                      ? "border-blue-500 bg-blue-500/10"
+                      : "border-border/70 bg-muted/20 hover:bg-muted/40 hover:border-blue-500/50"
+                  }`}
+                >
+                  <input
+                    id="video-upload-input"
+                    type="file"
+                    accept="video/*,.mp4,.mov,.m4v,.webm,.3gp,.mkv"
+                    className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                    onChange={(e) => {
+                      handleSelectFile(e.target.files?.[0])
+                      e.target.value = ""
+                    }}
+                  />
+                  <div className="h-12 w-12 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center pointer-events-none">
+                    <Upload className="h-5 w-5" aria-hidden="true" />
+                  </div>
+                  <div className="space-y-1 pointer-events-none">
+                    <p className="text-sm font-medium text-foreground">
+                      {t(language, "generator.videoUploadTitle")}
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {t(language, "generator.videoUploadHint")}
+                    </p>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-foreground">
-                    {t(language, "generator.videoUploadTitle")}
-                  </p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    {t(language, "generator.videoUploadHint")}
-                  </p>
+
+                <div className="flex justify-center">
+                  <div className="relative inline-flex items-center justify-center rounded-lg border border-border/60 bg-background px-3.5 h-9 text-xs font-medium text-foreground hover:bg-accent hover:text-accent-foreground transition-colors overflow-hidden cursor-pointer">
+                    <input
+                      id="video-upload-all-files"
+                      type="file"
+                      accept="*/*"
+                      className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                      onChange={(e) => {
+                        handleSelectFile(e.target.files?.[0])
+                        e.target.value = ""
+                      }}
+                    />
+                    <FolderOpen className="h-3.5 w-3.5 mr-1.5 pointer-events-none" aria-hidden="true" />
+                    <span className="pointer-events-none font-myanmar">
+                      Browse All Files / ဖိုင်အားလုံးမှ ရွေးမည်
+                    </span>
+                  </div>
                 </div>
-              </label>
+              </div>
             ) : (
               <div className="rounded-xl border border-border/60 bg-muted/20 p-3 sm:p-4 space-y-3">
                 {previewUrl && (
@@ -332,7 +370,7 @@ export function VideoToContentSection() {
                       src={previewUrl}
                       controls
                       playsInline
-                      preload="metadata"
+                      muted
                       className="w-full max-h-[170px] lg:max-h-64 object-contain"
                     />
                   </div>
@@ -357,17 +395,27 @@ export function VideoToContentSection() {
                   </div>
 
                   <div className="flex items-center gap-1.5">
-                    <label
-                      htmlFor={isGenerating ? undefined : "video-upload-input"}
-                      className={`inline-flex items-center justify-center rounded-md border border-border/60 bg-background px-2.5 h-8 text-xs font-medium transition-colors ${
+                    <div
+                      className={`relative inline-flex items-center justify-center rounded-md border border-border/60 bg-background px-2.5 h-8 text-xs font-medium transition-colors overflow-hidden ${
                         isGenerating
                           ? "opacity-50 pointer-events-none"
                           : "hover:bg-accent hover:text-accent-foreground cursor-pointer"
                       }`}
                     >
-                      <Film className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                      {t(language, "generator.videoChange")}
-                    </label>
+                      <input
+                        id="video-change-input"
+                        type="file"
+                        accept="video/*,.mp4,.mov,.m4v,.webm,.3gp,.mkv"
+                        disabled={isGenerating}
+                        className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                        onChange={(e) => {
+                          handleSelectFile(e.target.files?.[0])
+                          e.target.value = ""
+                        }}
+                      />
+                      <Film className="h-3.5 w-3.5 mr-1.5 pointer-events-none" aria-hidden="true" />
+                      <span className="pointer-events-none">{t(language, "generator.videoChange")}</span>
+                    </div>
                     <Button
                       type="button"
                       variant="ghost"

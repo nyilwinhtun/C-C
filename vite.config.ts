@@ -15,6 +15,8 @@ export default defineConfig({
     },
     includeAssets: ['favicon.svg', 'pwa-192x192.png', 'pwa-512x512.png'],
     workbox: {
+      skipWaiting: true,
+      clientsClaim: true,
       maximumFileSizeToCacheInBytes: 30 * 1024 * 1024,
     },
     manifest: {
