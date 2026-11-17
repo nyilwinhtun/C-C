@@ -58,7 +58,7 @@ export const useUIStore = create<UIState>()(
       aiApiKey: "",
       aiModel: DEFAULT_MODELS.gemini,
       setAIProvider: (provider) =>
-        set((state) => ({
+        set(() => ({
           aiProvider: provider,
           aiModel: DEFAULT_MODELS[provider],
         })),
@@ -68,12 +68,12 @@ export const useUIStore = create<UIState>()(
     {
       name: "content-creator-ui",
       partialize: (state) => ({
-        theme: state.theme,
-        sidebarCollapsed: state.sidebarCollapsed,
-        language: state.language,
-        aiProvider: state.aiProvider,
-        aiApiKey: state.aiApiKey,
-        aiModel: state.aiModel,
+        theme: state.theme ?? "dark",
+        sidebarCollapsed: state.sidebarCollapsed ?? false,
+        language: state.language ?? "en",
+        aiProvider: state.aiProvider ?? "gemini",
+        aiApiKey: state.aiApiKey ?? "",
+        aiModel: state.aiModel ?? "gemini-2.5-flash",
       }),
     }
   )

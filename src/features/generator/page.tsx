@@ -40,80 +40,82 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
+
 import { Badge } from "@/components/ui/badge"
 
-const PLATFORMS = [
-  { value: "facebook", label: "Facebook" },
-  { value: "tiktok", label: "TikTok" },
-  { value: "youtube", label: "YouTube" },
-  { value: "instagram", label: "Instagram" },
-] as const
 
-const CONTENT_TYPES = [
-  { value: "post_caption", label: "Post Caption" },
-  { value: "video_script", label: "Video Script" },
-  { value: "hook_ideas", label: "Hook Ideas" },
-  { value: "thread", label: "Thread" },
-] as const
-
-const TONES = [
-  { value: "engaging", label: "Engaging" },
-  { value: "educational", label: "Educational" },
-  { value: "funny", label: "Funny" },
-  { value: "storytelling", label: "Storytelling" },
-  { value: "sales", label: "Sales" },
-] as const
-
-const LANGUAGES = [
-  { value: "myanmar", label: "Myanmar" },
-  { value: "english", label: "English" },
-  { value: "bilingual", label: "Bilingual" },
-] as const
-
-const QUICK_STARTERS = [
-  {
-    title: "Yangon Street Food",
-    topic: "Yangon street food guide",
-    platform: "instagram",
-    contentType: "post_caption",
-    tone: "engaging",
-    language: "english",
-  },
-  {
-    title: "Travel Tips",
-    topic: "Best time to visit Bagan",
-    platform: "facebook",
-    contentType: "post_caption",
-    tone: "educational",
-    language: "english",
-  },
-  {
-    title: "Product Launch",
-    topic: "New organic skincare line launch",
-    platform: "tiktok",
-    contentType: "video_script",
-    tone: "sales",
-    language: "english",
-  },
-  {
-    title: "Weekend Thread",
-    topic: "Relaxing weekend in Inle Lake",
-    platform: "facebook",
-    contentType: "thread",
-    tone: "storytelling",
-    language: "english",
-  },
-] as const
 
 function extractHashtags(text: string): string[] {
   return [...text.matchAll(/#[^\s#]+/g)].map((match) => match[0].slice(1))
 }
 
 export function GeneratorPage() {
-  const { language, setLanguage } = useUIStore(
-    (state) => ({ language: state.language, setLanguage: state.setLanguage })
+  const { language } = useUIStore(
+    useShallow((state) => ({ language: state.language, setLanguage: state.setLanguage }))
   )
+
+  const PLATFORMS = [
+    { value: "facebook", label: t(language, "generator.platform_facebook") },
+    { value: "tiktok", label: t(language, "generator.platform_tiktok") },
+    { value: "youtube", label: t(language, "generator.platform_youtube") },
+    { value: "instagram", label: t(language, "generator.platform_instagram") },
+  ] as const
+
+  const CONTENT_TYPES = [
+    { value: "post_caption", label: t(language, "generator.content_type_post_caption") },
+    { value: "video_script", label: t(language, "generator.content_type_video_script") },
+    { value: "hook_ideas", label: t(language, "generator.content_type_hook_ideas") },
+    { value: "thread", label: t(language, "generator.content_type_thread") },
+  ] as const
+
+  const TONES = [
+    { value: "engaging", label: t(language, "generator.tone_engaging") },
+    { value: "educational", label: t(language, "generator.tone_educational") },
+    { value: "funny", label: t(language, "generator.tone_funny") },
+    { value: "storytelling", label: t(language, "generator.tone_storytelling") },
+    { value: "sales", label: t(language, "generator.tone_sales") },
+  ] as const
+
+  const LANGUAGES = [
+    { value: "myanmar", label: t(language, "generator.language_myanmar") },
+    { value: "english", label: t(language, "generator.language_english") },
+    { value: "bilingual", label: t(language, "generator.language_bilingual") },
+  ] as const
+
+  const QUICK_STARTERS = [
+    {
+      title: t(language, "generator.starter_street_food"),
+      topic: "Yangon street food guide",
+      platform: "instagram",
+      contentType: "post_caption",
+      tone: "engaging",
+      language: "english",
+    },
+    {
+      title: t(language, "generator.starter_travel_tips"),
+      topic: "Best time to visit Bagan",
+      platform: "facebook",
+      contentType: "post_caption",
+      tone: "educational",
+      language: "english",
+    },
+    {
+      title: t(language, "generator.starter_product_launch"),
+      topic: "New organic skincare line launch",
+      platform: "tiktok",
+      contentType: "video_script",
+      tone: "sales",
+      language: "english",
+    },
+    {
+      title: t(language, "generator.starter_weekend_thread"),
+      topic: "Relaxing weekend in Inle Lake",
+      platform: "facebook",
+      contentType: "thread",
+      tone: "storytelling",
+      language: "english",
+    },
+  ] as const
   const setDraftInput = useContentStore(
     useShallow((state) => state.setDraftInput)
   )
@@ -242,7 +244,7 @@ export function GeneratorPage() {
   }, [form])
 
   const isGeneratingFlag = isPending || isGenerating
-  const contentToShow = viewMode === "editor" ? (displayedText || result?.content ?? "") : (result?.content ?? "")
+  const contentToShow = viewMode === "editor" ? (displayedText || (result?.content ?? "")) : (result?.content ?? "")
   const charCount = contentToShow.length
   const wordCount = contentToShow ? contentToShow.split(/\s+/).filter(Boolean).length : 0
 
@@ -406,7 +408,7 @@ export function GeneratorPage() {
                 </div>
               </div>
               <CardDescription>
-                Preview and copy your content.
+                {t(language, "generator.previewDescription")}
               </CardDescription>
             </CardHeader>
             <CardContent className="min-h-[300px] flex flex-col gap-4">
@@ -456,7 +458,7 @@ export function GeneratorPage() {
                   {isCopying ? (
                     <>
                       <Loader2 className="h-3 w-3 animate-spin mr-1.5" aria-hidden="true" />
-                      Copying...
+                      {t(language, "generator.copying")}
                     </>
                   ) : (
                     <>
@@ -485,6 +487,7 @@ export function GeneratorPage() {
 }
 
 function SocialPostPreview({ content, platform }: { content: string; platform: string }) {
+  const language = useUIStore((state) => state.language)
   const [expanded, setExpanded] = useState(false)
   const [liked, setLiked] = useState(false)
 
@@ -495,9 +498,9 @@ function SocialPostPreview({ content, platform }: { content: string; platform: s
           CC
         </div>
         <div className="flex flex-col leading-none">
-          <div className="text-sm font-semibold">Content Creator</div>
+          <div className="text-sm font-semibold">{t(language, "preview.content_creator")}</div>
           <div className="text-xs text-muted-foreground">
-            {platform === "instagram" ? "Instagram" : platform.charAt(0).toUpperCase() + platform.slice(1)} &#8226; 2h ago
+            {platform === "instagram" ? t(language, "platform.instagram") : platform.charAt(0).toUpperCase() + platform.slice(1)} &#8226; {t(language, "preview.time_ago")}
           </div>
         </div>
       </div>
@@ -510,7 +513,7 @@ function SocialPostPreview({ content, platform }: { content: string; platform: s
             onClick={() => setExpanded(!expanded)}
             className="text-xs text-primary underline underline-offset-4 mt-1 flex items-center gap-1"
           >
-            {expanded ? "See less" : "See more"}
+            {expanded ? t(language, "preview.see_less") : t(language, "preview.see_more")}
           </button>
         )}
       </div>
@@ -521,15 +524,15 @@ function SocialPostPreview({ content, platform }: { content: string; platform: s
             className="flex items-center gap-1.5 text-xs transition-colors"
           >
             <ThumbsUp className={`h-3 w-3 ${liked ? "text-destructive" : "text-muted-foreground"}`} aria-hidden="true" />
-            <span className={liked ? "text-destructive font-medium" : "text-muted-foreground"}>Like</span>
+            <span className={liked ? "text-destructive font-medium" : "text-muted-foreground"}>{t(language, "preview.like")}</span>
           </button>
           <button className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
             <MessageCircle className="h-3 w-3" aria-hidden="true" />
-            <span>Comment</span>
+            <span>{t(language, "preview.comment")}</span>
           </button>
           <button className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
             <Share2 className="h-3 w-3" aria-hidden="true" />
-            <span>Share</span>
+            <span>{t(language, "preview.share")}</span>
           </button>
         </div>
         <div className="text-xs text-muted-foreground">
@@ -539,3 +542,4 @@ function SocialPostPreview({ content, platform }: { content: string; platform: s
     </div>
   )
 }
+

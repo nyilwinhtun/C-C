@@ -1,21 +1,21 @@
 "use client"
 
 import { useState } from "react"
-import { Eye, EyeOff, Link, Bot, Key, ShieldAlert } from "lucide-react"
-import { toast } from "@/components/ui/sonner"
+import { t } from "@/locales/translations"
 import { useUIStore } from "@/store/useUIStore"
 import { useShallow } from "zustand/react/shallow"
+import { Eye, EyeOff, Link, ShieldAlert } from "lucide-react"
+import { toast } from "@/components/ui/sonner"
 
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+
 import { Select } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 
@@ -52,11 +52,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [showKey, setShowKey] = useState(false)
   const [loading, setLoading] = useState(false)
 
-  const { aiProvider, aiApiKey, aiModel, setAIProvider, setAIApiKey, setAIModel } =
+  const { language, aiProvider, aiModel, setAIProvider, setAIApiKey, setAIModel } =
     useUIStore(
       useShallow((state) => ({
+        language: state.language,
         aiProvider: state.aiProvider,
-        aiApiKey: state.aiApiKey,
         aiModel: state.aiModel,
         setAIProvider: state.setAIProvider,
         setAIApiKey: state.setAIApiKey,
@@ -69,18 +69,16 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>
-            Configure your AI provider and API key.
-          </DialogDescription>
-        </DialogHeader>
+        <div className="flex items-center justify-between">
+          <DialogTitle>{t(language, "settings.title")}</DialogTitle>
+          <DialogDescription>{t(language, "settings.description")}</DialogDescription>
+        </div>
         <div className="space-y-5 pt-2">
           <div className="space-y-2">
-            <Label>AI Provider</Label>
+            <label className="text-sm font-medium">{t(language, "settings.aiProvider")}</label>
             <Select
               value={aiProvider}
-              onValueChange={(value: AIProvider) => setAIProvider(value)}
+              onChange={(e) => setAIProvider((e.target as HTMLSelectElement).value as AIProvider)}
             >
               <option value="gemini">Google Gemini</option>
               <option value="groq">Groq</option>
@@ -88,8 +86,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Model</Label>
-            <Select value={aiModel} onValueChange={(value: string) => setAIModel(value)}>
+            <label className="text-sm font-medium">{t(language, "settings.model")}</label>
+            <Select value={aiModel} onChange={(e) => setAIModel((e.target as HTMLSelectElement).value)}>
               {aiProvider === "gemini" ? (
                 <>
                   <option value="gemini-2.5-flash">gemini-2.5-flash</option>
@@ -119,7 +117,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           </div>
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <Label>API Key</Label>
+              <label className="text-sm font-medium">{t(language, "settings.apiKey")}</label>
               <Button
                 variant="ghost"
                 size="icon"
@@ -137,7 +135,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               type={showKey ? "text" : "password"}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Enter your API key"
+              placeholder={t(language, "settings.apiKeyPlaceholder")}
               disabled={loading}
             />
           </div>
@@ -145,13 +143,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <div className="flex items-start gap-2 text-xs text-muted-foreground">
               <ShieldAlert className="h-3 w-3 shrink-0 mt-0.5" aria-hidden="true" />
               <span>
-                Your API key is stored only in your browser's localStorage.
+                {t(language, "settings.apiKeyStored")}
               </span>
             </div>
             <div className="flex items-center gap-2">
               <Link className="h-3 w-3 shrink-0 opacity-50" aria-hidden="true" />
               <span className="text-xs">
-                {providerInfo.linkLabel}:{" "}
+                {t(language, "settings.providerLink", { provider: providerInfo.label })}:{" "}
                 <a
                   href={providerInfo.link}
                   target="_blank"
@@ -166,7 +164,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <Separator />
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t(language, "settings.cancel")}
             </Button>
             <Button
               onClick={() => {
@@ -174,13 +172,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 setLoading(true)
                 setTimeout(() => {
                   setLoading(false)
-                  toast.success("Settings saved")
+                  toast.success(t(language, "settings.saveSuccess"))
                   onOpenChange(false)
                 }, 600)
               }}
               disabled={loading || !apiKey}
             >
-              {loading ? "Saving..." : "Save"}
+              {loading ? t(language, "settings.saveSaving") : t(language, "settings.save")}
             </Button>
           </div>
         </div>

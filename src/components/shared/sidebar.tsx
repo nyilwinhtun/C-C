@@ -19,16 +19,10 @@ import { useUIStore, type UIState } from "@/store/useUIStore"
 import { useShallow } from "zustand/react/shallow"
 import type { NavItem } from "@/types"
 
-const navigation: NavItem[] = [
-  { key: "generator", title: "AI Generator", url: "#", icon: LayoutList },
-  { key: "vault", title: "Idea Vault", url: "#", icon: FolderKanban },
-  { key: "planner", title: "Content Planner", url: "#", icon: Calendar },
-]
-
 interface NavLinkProps {
   item: NavItem
   active: boolean
-  onSelect: (key: NavItem["key"], isMobile: boolean) => void
+  onSelect: (key: string, isMobile: boolean) => void
   collapsed: boolean
 }
 
@@ -57,6 +51,27 @@ function NavLink({ item, active, onSelect, collapsed }: NavLinkProps) {
     </button>
   )
 }
+
+const navigation: NavItem[] = [
+  {
+    key: "generator",
+    title: "Generator",
+    url: "/",
+    icon: LayoutList,
+  },
+  {
+    key: "vault",
+    title: "Vault",
+    url: "/vault",
+    icon: FolderKanban,
+  },
+  {
+    key: "planner",
+    title: "Planner",
+    url: "/planner",
+    icon: Calendar,
+  },
+]
 
 interface SidebarProps {
   mobileOpen: boolean
@@ -97,7 +112,7 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
             </div>
             {!collapsed && (
               <span className="font-semibold text-sm tracking-tight leading-relaxed truncate">
-                Content Creator
+                {t(language, "sidebar.title")}
               </span>
             )}
           </div>
@@ -105,7 +120,7 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
             variant="ghost"
             size="icon"
             onClick={() => setSidebarCollapsed(!collapsed)}
-            aria-label="Collapse sidebar"
+            aria-label={t(language, "sidebar.collapse_label")}
           >
             <ChevronRight
               className={cn("h-4 w-5 transition-transform duration-200", {
@@ -120,7 +135,7 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
             {navigation.map((item) => (
               <NavLink
                 key={item.key}
-                item={item}
+                item={{ ...item, title: t(language, `nav.${item.key}`) }}
                 active={activePageKey === item.key}
                 onSelect={(key, isMobile) => {
                   setActivePageKey(key)
@@ -145,18 +160,18 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
         <Sheet open={mobileOpen} onOpenChange={onMobileToggle} className="border-l">
           <SheetContent className="w-[260px]">
             <SheetHeader className="pb-4 px-4">
-              <SheetTitle>Navigation</SheetTitle>
-              <SheetDescription>Content Creator</SheetDescription>
+              <SheetTitle>{t(language, "sidebar.mobile_nav_title")}</SheetTitle>
+              <SheetDescription>{t(language, "sidebar.mobile_nav_description")}</SheetDescription>
               <SheetClose
                 onClick={() => onMobileToggle(false)}
-                aria-label="Close menu"
+                aria-label={t(language, "sidebar.close_menu_label")}
               />
             </SheetHeader>
             <nav className="flex flex-col gap-1 px-4 py-4 border-b">
               {navigation.map((item) => (
                 <NavLink
                   key={item.key}
-                  item={item}
+                  item={{ ...item, title: t(language, `nav.${item.key}`) }}
                   active={activePageKey === item.key}
                   onSelect={(key) => {
                     setActivePageKey(key)
@@ -172,3 +187,4 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
     </>
   )
 }
+

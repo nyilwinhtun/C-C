@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { t } from "@/locales/translations"
 import { Calendar, FolderKanban, FileText } from "lucide-react"
 import { GeneratorPage } from "@/features/generator/page"
 import { PlannerPage } from "@/features/planner/page"
@@ -18,15 +19,15 @@ const pages: Record<string, React.FC> = {
   planner: PlannerPage,
 }
 
-const pageTitles: Record<string, string> = {
-  generator: "AI Generator",
-  vault: "Idea Vault",
-  planner: "Content Planner",
-}
-
 export function Layout() {
+  const language = useUIStore(useShallow((state) => state.language))
+  const pageTitles: Record<string, string> = {
+    generator: t(language, "page.generator"),
+    vault: t(language, "page.vault"),
+    planner: t(language, "page.planner"),
+  }
   const [mobileOpen, setMobileOpen] = useState(false)
-  const activePageKey = useUIStore((state) => state.activePageKey)
+  const activePageKey = useUIStore(useShallow((state) => state.activePageKey))
   const sidebarCollapsed = useUIStore((state) => state.sidebarCollapsed)
   const { savedVault, generatedHistory } = useContentStore(
     useShallow((state) => ({
@@ -55,7 +56,7 @@ export function Layout() {
     <div className="flex h-screen bg-background">
       <Sidebar mobileOpen={mobileOpen} onMobileToggle={setMobileOpen} />
       <div className="flex-1 flex flex-col min-w-0">
-        <Header title={pageTitles[activePageKey] ?? "AI Generator"} onMenuToggle={() => setMobileOpen(true)} />
+        <Header title={pageTitles[activePageKey] ?? t(language, "page.generator")} onMenuToggle={() => setMobileOpen(true)} />
         <main
           className={cn(
             "flex-1 overflow-y-auto bg-background p-6",
@@ -63,9 +64,9 @@ export function Layout() {
           )}
         >
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <StatCard title="Saved Ideas" value={savedCount} icon={FolderKanban} />
-            <StatCard title="Scheduled Posts" value={scheduledCount} icon={Calendar} />
-            <StatCard title="Generated Count" value={generatedCount} icon={FileText} />
+            <StatCard title={t(language, "stats.savedIdeas")} value={savedCount} icon={FolderKanban} />
+            <StatCard title={t(language, "stats.scheduledPosts")} value={scheduledCount} icon={Calendar} />
+            <StatCard title={t(language, "stats.generatedCount")} value={generatedCount} icon={FileText} />
           </div>
           <Page />
         </main>

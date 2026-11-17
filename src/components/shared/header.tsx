@@ -1,7 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { Menu, Settings, Globe, LogIn, User } from "lucide-react"
+import { t } from "@/locales/translations"
+import { useShallow } from "zustand/react/shallow"
+import { Menu, Settings, Globe } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/shared/theme-toggle"
 import { useUIStore } from "@/store/useUIStore"
@@ -14,13 +16,12 @@ interface HeaderProps {
 }
 
 export function Header({ title, onMenuToggle }: HeaderProps) {
-  const { theme, language, setLanguage, user } = useUIStore(
-    (state) => ({
-      theme: state.theme,
+  const { language, setLanguage, user } = useUIStore(
+    useShallow((state) => ({
       language: state.language,
       setLanguage: state.setLanguage,
       user: state.user,
-    })
+    }))
   )
   const [authOpen, setAuthOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -32,7 +33,7 @@ export function Header({ title, onMenuToggle }: HeaderProps) {
           variant="outline"
           size="sm"
           onClick={onMenuToggle}
-          aria-label="Toggle navigation"
+          aria-label={t(language, "nav.collapse")}
         >
           <Menu className="h-5 w-5" aria-hidden="true" />
         </Button>
@@ -42,9 +43,9 @@ export function Header({ title, onMenuToggle }: HeaderProps) {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setLanguage((prev) => (prev === "en" ? "my" : "en"))}
+          onClick={() => setLanguage(language === "en" ? "my" : "en")}
           aria-label="Toggle language"
-          title={language === "en" ? "English" : "မြန်မာဘာသာ"}
+          title={t(language, "header.language")}
         >
           <Globe className="h-5 w-5" aria-hidden="true" />
           <span className="ml-1 text-xs font-medium hidden sm:inline">
@@ -56,27 +57,25 @@ export function Header({ title, onMenuToggle }: HeaderProps) {
             variant="outline"
             size="sm"
             onClick={() => setAuthOpen(true)}
-            aria-label="Account"
+            aria-label={t(language, "header.signIn")}
           >
-            <User className="h-4 w-4 mr-1.5" aria-hidden="true" />
-            Account
+            {t(language, "header.signIn")}
           </Button>
         ) : (
           <Button
             variant="outline"
             size="sm"
             onClick={() => setAuthOpen(true)}
-            aria-label="Sign in"
+            aria-label={t(language, "header.signIn")}
           >
-            <LogIn className="h-4 w-4 mr-1.5" aria-hidden="true" />
-            Sign In
+            {t(language, "header.signIn")}
           </Button>
         )}
         <Button
           variant="ghost"
           size="icon"
           onClick={() => setSettingsOpen(true)}
-          aria-label="Settings"
+          aria-label={t(language, "header.settings")}
         >
           <Settings className="h-5 w-5" aria-hidden="true" />
         </Button>

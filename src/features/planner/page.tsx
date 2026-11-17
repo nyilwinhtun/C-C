@@ -7,7 +7,7 @@ import { useShallow } from "zustand/react/shallow"
 import type { SavedVaultItem } from "@/store/useContentStore"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
-import { t } from "@/locales/translations"
+import { t, type Locale } from "@/locales/translations"
 
 import {
   Card,
@@ -20,13 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 
-const STATUS_LABEL: Record<string, string> = {
-  idea: "Idea",
-  draft: "Draft",
-  scheduled: "Scheduled",
-}
-
-function formatDateLabel(isoDate: string): string {
+function formatDateLabel(isoDate: string, language: Locale): string {
   const date = new Date(isoDate)
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -35,8 +29,8 @@ function formatDateLabel(isoDate: string): string {
   const tomorrow = new Date(today)
   tomorrow.setDate(today.getDate() + 1)
 
-  if (target.getTime() === today.getTime()) return "Today"
-  if (target.getTime() === tomorrow.getTime()) return "Tomorrow"
+  if (target.getTime() === today.getTime()) return t(language, "planner.today")
+  if (target.getTime() === tomorrow.getTime()) return t(language, "planner.tomorrow")
   return date.toLocaleDateString(undefined, {
     weekday: "short",
     month: "short",
@@ -46,6 +40,11 @@ function formatDateLabel(isoDate: string): string {
 
 export function PlannerPage() {
   const { language } = useUIStore(useShallow((state) => ({ language: state.language })))
+  const STATUS_LABEL: Record<string, string> = {
+    idea: t(language, "vault.statusIdea"),
+    draft: t(language, "vault.statusDraft"),
+    scheduled: t(language, "vault.statusScheduled"),
+  }
   const { savedVault, updateVaultItem } = useContentStore(
     useShallow((state) => ({
       savedVault: state.savedVault,
@@ -73,7 +72,7 @@ export function PlannerPage() {
     (id: string) => {
       const date = scheduleDates[id]
       if (!date) {
-        toast.error("Please pick a date")
+        toast.error(t(language, "planner.pickDate"))
         return
       }
       updateVaultItem(id, { scheduledDate: date, status: "scheduled" })
@@ -89,8 +88,8 @@ export function PlannerPage() {
 
   const handleCopy = useCallback(async (text: string) => {
     await navigator.clipboard.writeText(text)
-    toast.success("Copied to clipboard")
-  }, [])
+    toast.success(t(language, "generator.copySuccess"))
+  }, [language])
 
   return (
     <div className="flex flex-col gap-6">
@@ -98,14 +97,14 @@ export function PlannerPage() {
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-xl">{t(language, "planner.title")}</CardTitle>
-            <CardDescription>Posts grouped by scheduled date.</CardDescription>
+            <CardDescription>{t(language, "planner.desc")}</CardDescription>
           </div>
           <Badge variant="outline">{scheduledItems.length} {t(language, "planner.scheduled")}</Badge>
         </CardHeader>
         <CardContent>
           {sortedDates.length === 0 ? (
             <div className="flex h-64 flex-col items-center justify-center rounded-lg border-2 border-dashed border-border p-6 text-center text-sm text-muted-foreground leading-relaxed">
-              No scheduled posts yet. Schedule drafts from the vault below.
+              {t(language, "planner.empty")}
             </div>
           ) : (
             <div className="space-y-4">
@@ -116,10 +115,10 @@ export function PlannerPage() {
                     <div className="flex items-center gap-2 mb-3">
                       <Calendar className="h-4 w-4" aria-hidden="true" />
                       <h3 className="font-semibold leading-relaxed">
-                        {formatDateLabel(date)}
+                        {formatDateLabel(date, language)}
                       </h3>
                       <span className="ml-auto text-xs text-muted-foreground">
-                        {items.length} post{items.length === 1 ? "" : "s"}
+                        {t(language, "planner.postsCount", { count: String(items.length) })}
                       </span>
                     </div>
                     <div className="space-y-2">
@@ -179,7 +178,7 @@ export function PlannerPage() {
         <CardContent>
           {unscheduledItems.length === 0 ? (
             <p className="text-sm text-muted-foreground leading-relaxed">
-              All ideas are scheduled. Create a new idea in the Vault.
+              {t(language, "planner.allScheduled")}
             </p>
           ) : (
             <div className="space-y-3">
@@ -211,7 +210,7 @@ export function PlannerPage() {
                           className="w-full sm:w-[170px]"
                         />
                         <Button onClick={() => handleSchedule(item.id)}>
-                          Schedule
+                          {t(language, "planner.schedule")}
                         </Button>
                       </div>
                     </div>

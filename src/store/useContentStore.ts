@@ -49,7 +49,7 @@ const defaultDraft: GeneratorFormValues = {
 
 export const useContentStore = create<ContentState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       draftInput: defaultDraft,
       generatedHistory: [],
       savedVault: [],
@@ -102,23 +102,23 @@ export const useContentStore = create<ContentState>()(
         if (!user) return
         set({ isSyncing: true })
         try {
-          const { data, error } = await supabase
+          const { data, error } = (await supabase
             .from("vault_items")
             .select("*")
             .eq("user_id", user.id)
-            .order("created_at", { ascending: false })
+            .order("created_at", { ascending: false })) as any
 
           if (error) throw error
 
           const vault: SavedVaultItem[] =
-            (data ?? []).map((row) => ({
+            (data ?? []).map((row: any) => ({
               id: row.id,
               title: row.title,
               content: row.content,
               platform: row.platform,
               tags: row.tags ?? [],
               status: row.status as SavedVaultItem["status"],
-              scheduledDate: row.scheduled_date ?? undefined,
+              scheduledDate: row.scheduled_date,
             })) ?? []
           set({ savedVault: vault, isSyncing: false })
         } catch (err) {
@@ -135,9 +135,9 @@ export const useContentStore = create<ContentState>()(
     {
       name: "content-creator-content",
       partialize: (state) => ({
-        draftInput: state.draftInput,
-        generatedHistory: state.generatedHistory,
-        savedVault: state.savedVault,
+        draftInput: state.draftInput ?? defaultDraft,
+        generatedHistory: state.generatedHistory ?? [],
+        savedVault: state.savedVault ?? [],
       }),
     }
   )
@@ -147,7 +147,7 @@ async function syncVaultItemToSupabase(item: SavedVaultItem): Promise<void> {
   const { user } = useUIStore.getState()
   if (!user) return
   try {
-    const { error } = await supabase.from("vault_items").insert({
+    const { error } = (await supabase.from("vault_items").insert({
       id: item.id,
       user_id: user.id,
       title: item.title,
@@ -156,7 +156,7 @@ async function syncVaultItemToSupabase(item: SavedVaultItem): Promise<void> {
       tags: item.tags,
       status: item.status,
       scheduled_date: item.scheduledDate ?? null,
-    })
+    } as any)) as any
     if (error) throw error
   } catch (err) {
     console.error("Failed to sync vault item to Supabase", err)

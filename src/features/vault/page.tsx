@@ -36,16 +36,15 @@ const PLATFORMS: { value: "facebook" | "tiktok" | "youtube" | "instagram"; label
   { value: "instagram", label: "Instagram" },
 ]
 
-const STATUS_LABEL: Record<string, string> = {
-  idea: "Idea",
-  draft: "Draft",
-  scheduled: "Scheduled",
-}
-
 type PlatformFilter = "all" | "facebook" | "tiktok" | "youtube" | "instagram"
 
 export function VaultPage() {
   const { language } = useUIStore(useShallow((state) => ({ language: state.language })))
+  const STATUS_LABEL: Record<string, string> = {
+    idea: t(language, "vault.statusIdea"),
+    draft: t(language, "vault.statusDraft"),
+    scheduled: t(language, "vault.statusScheduled"),
+  }
   const { savedVault, saveToVault, updateVaultItem, deleteVaultItem } =
     useContentStore(
       useShallow((state) => ({
@@ -116,9 +115,9 @@ export function VaultPage() {
   const handleDelete = useCallback(
     (id: string) => {
       deleteVaultItem(id)
-      toast.success(t(language, "common.delete") + " successfully")
+      toast.success(t(language, "vault.deleteSuccess"))
     },
-    [deleteVaultItem]
+    [deleteVaultItem, language]
   )
 
 
@@ -131,14 +130,14 @@ export function VaultPage() {
         <form onSubmit={form.handleSubmit(handleSubmit)} className="grid gap-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
-              <Label>Title</Label>
-              <Input {...form.register("title")} placeholder="e.g. Product launch campaign" />
+              <Label>{t(language, "vault.formTitle")}</Label>
+              <Input {...form.register("title")} placeholder={t(language, "vault.formTitlePlaceholder")} />
               {form.formState.errors.title && (
                 <p className="text-xs text-destructive">{form.formState.errors.title.message}</p>
               )}
             </div>
             <div className="flex flex-col gap-1">
-              <Label>Platform</Label>
+              <Label>{t(language, "vault.formPlatform")}</Label>
               <Select {...form.register("platform")}>
                 {PLATFORMS.map((p) => (
                   <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
@@ -147,25 +146,25 @@ export function VaultPage() {
             </div>
           </div>
           <div className="flex flex-col gap-1">
-            <Label>Content</Label>
-            <Textarea {...form.register("content")} rows={4} placeholder="Draft your idea here..." />
+            <Label>{t(language, "vault.formContent")}</Label>
+            <Textarea {...form.register("content")} rows={4} placeholder={t(language, "vault.formContentPlaceholder")} />
             {form.formState.errors.content && (
               <p className="text-xs text-destructive">{form.formState.errors.content.message}</p>
             )}
           </div>
           <div className="flex flex-col gap-1">
-            <Label>Tags</Label>
-            <Input {...form.register("tags")} placeholder="product, launch, facebook" />
-            <p className="text-xs text-muted-foreground">Comma-separated tags</p>
+            <Label>{t(language, "vault.formTags")}</Label>
+            <Input {...form.register("tags")} placeholder={t(language, "vault.formTagsPlaceholder")} />
+            <p className="text-xs text-muted-foreground">{t(language, "vault.tagsLabel")}</p>
             {form.formState.errors.tags && (
               <p className="text-xs text-destructive">{form.formState.errors.tags.message}</p>
             )}
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
-              Cancel
+              {t(language, "vault.cancel")}
             </Button>
-            <Button type="submit">Save</Button>
+            <Button type="submit">{t(language, "vault.save")}</Button>
           </div>
         </form>
       </DialogContent>
@@ -177,7 +176,7 @@ export function VaultPage() {
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <CardTitle className="text-xl">{t(language, "vault.title")}</CardTitle>
-          <CardDescription>Your saved ideas and drafts appear here.</CardDescription>
+          <CardDescription>{t(language, "vault.emptySubtitle")}</CardDescription>
         </div>
         <Button onClick={() => setDialogOpen(true)}>
           <Plus className="h-4 w-4 mr-2" aria-hidden="true" />
@@ -187,11 +186,11 @@ export function VaultPage() {
       <Card className="max-w-2xl">
         <CardHeader>
           <CardTitle>{t(language, "vault.title")}</CardTitle>
-          <CardDescription>Your saved ideas and drafts appear here.</CardDescription>
+          <CardDescription>{t(language, "vault.emptySubtitle")}</CardDescription>
         </CardHeader>
         <CardContent className="h-96 flex flex-col items-center justify-center text-center">
           <p className="text-muted-foreground leading-relaxed">
-            No saved ideas yet. Generate content and save your favorites to the vault.
+            {t(language, "vault.emptyDesc")}
           </p>
         </CardContent>
       </Card>
@@ -209,7 +208,7 @@ export function VaultPage() {
         <div>
           <CardTitle className="text-xl">{t(language, "vault.title")}</CardTitle>
           <CardDescription>
-            {savedVault.length} saved idea{savedVault.length === 1 ? "" : "s"}
+            {t(language, "vault.savedCount", { count: String(savedVault.length) })}
           </CardDescription>
         </div>
         <div className="flex items-center gap-2 w-full lg:w-auto">
@@ -270,9 +269,9 @@ export function VaultPage() {
                         )
                       }
                     >
-                      <SelectItem value="idea">Idea</SelectItem>
-                      <SelectItem value="draft">Draft</SelectItem>
-                      <SelectItem value="scheduled">Scheduled</SelectItem>
+                      <SelectItem value="idea">{t(language, "vault.statusIdea")}</SelectItem>
+                      <SelectItem value="draft">{t(language, "vault.statusDraft")}</SelectItem>
+                      <SelectItem value="scheduled">{t(language, "vault.statusScheduled")}</SelectItem>
                     </Select>
                     <div className="flex items-center gap-2">
                       <Input
@@ -302,11 +301,11 @@ export function VaultPage() {
               <CardFooter className="gap-2">
                 <Button variant="outline" size="sm" onClick={() => handleCopy(item.content)}>
                   <Copy className="h-3 w-3 mr-1.5" aria-hidden="true" />
-                  Copy
+                  {t(language, "vault.copy")}
                 </Button>
                 <Button variant="destructive" size="sm" onClick={() => handleDelete(item.id)}>
                   <Trash2 className="h-3 w-3 mr-1.5" aria-hidden="true" />
-                  Delete
+                  {t(language, "vault.delete")}
                 </Button>
               </CardFooter>
             </Card>
