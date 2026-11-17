@@ -36,19 +36,19 @@ function NavLink({ item, active, onSelect, collapsed }: NavLinkProps) {
         onSelect(item.key, isMobile)
       }}
       className={cn(
-        "flex w-full items-center gap-3 rounded-lg border-transparent px-3 py-2 text-sm transition-colors leading-relaxed",
+        "flex w-full items-center gap-3 rounded-lg border border-transparent px-3 py-2 text-sm font-medium transition-all duration-150 leading-relaxed",
         active
-          ? "bg-accent text-accent-foreground"
-          : "text-foreground hover:bg-accent"
+          ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm shadow-blue-500/20"
+          : "text-muted-foreground hover:text-foreground hover:bg-accent/70"
       )}
       aria-pressed={active}
     >
       <Icon
-        size={20}
-        className={cn("h-5 w-5 shrink-0", collapsed ? "mx-auto" : "")}
+        size={18}
+        className={cn("h-[18px] w-[18px] shrink-0", collapsed ? "mx-auto" : "")}
         aria-hidden="true"
       />
-      {!collapsed && <span className="flex-1">{item.title}</span>}
+      {!collapsed && <span className="flex-1 text-left truncate">{item.title}</span>}
     </button>
   )
 }
@@ -107,13 +107,13 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
   return (
     <>
       <aside
-        className="hidden md:flex fixed inset-y-0 left-0 z-30 flex-col border-r bg-card"
+        className="hidden md:flex fixed inset-y-0 left-0 z-30 flex-col border-r border-border/60 bg-card/95 backdrop-blur-sm transition-[width] duration-200"
         style={{ width: collapsed ? 64 : 240 }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
-        <div className="flex h-12 items-center justify-between gap-2 border-b border-border px-3">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className="flex h-14 items-center justify-between gap-2 border-b border-border/60 px-3">
+          <div className="flex items-center gap-2.5 min-w-0">
             <CCLogo size={28} className="h-7 w-7 shrink-0 rounded-lg shadow-sm" />
             {!collapsed && (
               <span className="font-semibold text-sm tracking-tight leading-relaxed truncate">
@@ -121,22 +121,25 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
               </span>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setSidebarCollapsed(!collapsed)}
-            aria-label={t(language, "sidebar.collapse_label")}
-          >
-            <ChevronRight
-              className={cn("h-4 w-5 transition-transform duration-200", {
-                "rotate-90": collapsed,
-              })}
-              aria-hidden="true"
-            />
-          </Button>
+          {!collapsed && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-foreground shrink-0"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              aria-label={t(language, "sidebar.collapse_label")}
+            >
+              <ChevronRight
+                className={cn("h-4 w-4 transition-transform duration-200", {
+                  "rotate-180": !sidebarCollapsed,
+                })}
+                aria-hidden="true"
+              />
+            </Button>
+          )}
         </div>
         <ScrollArea className="flex-1">
-          <nav className="flex flex-col gap-1 px-2 pt-2">
+          <nav className="flex flex-col gap-1 px-2.5 pt-3">
             {navigation.map((item) => (
               <NavLink
                 key={item.key}
@@ -153,19 +156,30 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
             ))}
           </nav>
         </ScrollArea>
-        <Separator className="mx-2" />
-        <div className="px-2 pt-2 pb-4">
-          <Button variant="outline" className="w-full text-sm" onClick={() => setSidebarCollapsed(!collapsed)}>
-            {t(language, "nav.collapse")} <ChevronRight className="h-4 w-5 ml-1 transition-transform duration-200" aria-hidden="true" />
+        <Separator className="mx-2 bg-border/60" />
+        <div className="px-2.5 pt-2.5 pb-4">
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full text-xs border-border/60 bg-background/60 hover:bg-accent/70"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          >
+            {!collapsed && <span className="mr-1.5">{t(language, "nav.collapse")}</span>}
+            <ChevronRight
+              className={cn("h-4 w-4 transition-transform duration-200", {
+                "rotate-180": !sidebarCollapsed,
+              })}
+              aria-hidden="true"
+            />
           </Button>
         </div>
       </aside>
 
       {mobileOpen && (
-        <Sheet open={mobileOpen} onOpenChange={onMobileToggle} className="border-l">
+        <Sheet open={mobileOpen} onOpenChange={onMobileToggle} className="border-l border-border/60">
           <SheetContent className="w-[260px]">
-            <SheetHeader className="pb-4 px-4">
-              <div className="flex items-center gap-2 mb-1">
+            <SheetHeader className="pb-4 px-4 border-b border-border/60">
+              <div className="flex items-center gap-2.5 mb-1">
                 <CCLogo size={26} className="h-6.5 w-6.5 shrink-0 rounded-lg shadow-sm" />
                 <SheetTitle>{t(language, "sidebar.mobile_nav_title")}</SheetTitle>
               </div>
@@ -175,7 +189,7 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
                 aria-label={t(language, "sidebar.close_menu_label")}
               />
             </SheetHeader>
-            <nav className="flex flex-col gap-1 px-4 py-4 border-b">
+            <nav className="flex flex-col gap-1 px-3 py-4 border-b border-border/60">
               {navigation.map((item) => (
                 <NavLink
                   key={item.key}

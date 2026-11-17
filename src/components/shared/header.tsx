@@ -52,28 +52,32 @@ export function Header({ title, onMenuToggle, onOpenSettings }: HeaderProps) {
   }
 
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-border bg-background/80 backdrop-blur-md sticky top-0 z-20">
-      <div className="flex items-center gap-2">
+    <header className="flex items-center justify-between gap-4 px-4 sm:px-6 h-14 border-b border-border/60 bg-background/80 backdrop-blur-md sticky top-0 z-20">
+      <div className="flex items-center gap-3 min-w-0">
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={onMenuToggle}
+          className="md:hidden h-9 w-9 border-border/60 shrink-0"
+          aria-label={t(language, "nav.collapse")}
+        >
+          <Menu className="h-4 w-4" aria-hidden="true" />
+        </Button>
+        <h2 className="text-sm sm:text-base font-semibold tracking-tight leading-relaxed truncate">
+          {title}
+        </h2>
+      </div>
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
         <Button
           variant="outline"
           size="sm"
-          onClick={onMenuToggle}
-          aria-label={t(language, "nav.collapse")}
-        >
-          <Menu className="h-5 w-5" aria-hidden="true" />
-        </Button>
-        <h2 className="text-sm font-semibold leading-relaxed">{title}</h2>
-      </div>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
           onClick={() => setLanguage(language === "en" ? "my" : "en")}
           aria-label="Toggle language"
           title={t(language, "header.language")}
+          className="h-8 px-2.5 text-xs font-medium border-border/60 bg-background/60 hover:bg-accent/70 gap-1.5"
         >
-          <Globe className="h-5 w-5" aria-hidden="true" />
-          <span className="ml-1 text-xs font-medium hidden sm:inline">
+          <Globe className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          <span className="font-semibold">
             {language === "en" ? "EN" : "MY"}
           </span>
         </Button>
@@ -84,10 +88,10 @@ export function Header({ title, onMenuToggle, onOpenSettings }: HeaderProps) {
             onClick={handleSignOut}
             disabled={loggingOut}
             aria-label={t(language, "header.signOut")}
-            className="flex items-center gap-1.5"
+            className="h-8 px-2.5 text-xs font-medium border-border/60 bg-background/60 hover:bg-accent/70 flex items-center gap-1.5"
           >
-            <LogOut className="h-4 w-4" aria-hidden="true" />
-            <span>{t(language, "header.signOut")}</span>
+            <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
+            <span className="hidden sm:inline">{t(language, "header.signOut")}</span>
           </Button>
         )}
         <Button
@@ -95,14 +99,15 @@ export function Header({ title, onMenuToggle, onOpenSettings }: HeaderProps) {
           size="icon"
           onClick={handleOpenSettings}
           aria-label={t(language, "header.settings")}
+          className="h-8 w-8 text-muted-foreground hover:text-foreground"
         >
-          <Settings className="h-5 w-5" aria-hidden="true" />
+          <Settings className="h-4 w-4" aria-hidden="true" />
         </Button>
         <ThemeToggle />
       </div>
       {!onOpenSettings && (
         <SettingsDialog open={internalSettingsOpen} onOpenChange={setInternalSettingsOpen} />
       )}
-    </div>
+    </header>
   )
 }

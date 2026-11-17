@@ -78,33 +78,35 @@ export function Layout() {
   ] as const
 
   return (
-    <div className="flex h-screen bg-background">
+    <div className="flex h-screen bg-slate-50/70 dark:bg-slate-950">
       <Sidebar mobileOpen={mobileOpen} onMobileToggle={setMobileOpen} />
-      <div className="flex-1 flex flex-col min-w-0">
+      <div
+        className={cn(
+          "flex-1 flex flex-col min-w-0 transition-[padding] duration-200",
+          sidebarCollapsed ? "md:pl-16" : "md:pl-60"
+        )}
+      >
         <Header
           title={pageTitles[activePageKey] ?? t(language, "page.generator")}
           onMenuToggle={() => setMobileOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
         />
-        <main
-          className={cn(
-            "flex-1 overflow-y-auto bg-background p-4 sm:p-6 pb-20 md:pb-6",
-            sidebarCollapsed ? "md:pl-16" : "md:pl-64"
-          )}
-        >
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <StatCard title={t(language, "stats.savedIdeas")} value={savedCount} icon={FolderKanban} />
-            <StatCard title={t(language, "stats.scheduledPosts")} value={scheduledCount} icon={Calendar} />
-            <StatCard title={t(language, "stats.generatedCount")} value={generatedCount} icon={FileText} />
+        <main className="flex-1 overflow-y-auto bg-slate-50/70 dark:bg-slate-950 p-4 sm:p-6 pb-20 md:pb-8">
+          <div className="mx-auto max-w-6xl">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6">
+              <StatCard title={t(language, "stats.savedIdeas")} value={savedCount} icon={FolderKanban} />
+              <StatCard title={t(language, "stats.scheduledPosts")} value={scheduledCount} icon={Calendar} />
+              <StatCard title={t(language, "stats.generatedCount")} value={generatedCount} icon={FileText} />
+            </div>
+            <Page />
           </div>
-          <Page />
         </main>
       </div>
 
       {/* Mobile Fixed Bottom Navigation Bar */}
       <nav
         aria-label={t(language, "sidebar.mobile_nav_title")}
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border bg-card/95 backdrop-blur-md"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border/60 bg-background/85 backdrop-blur-md"
       >
         <div className="grid grid-cols-5 items-stretch">
           {mobileNavItems.map((item) => {
@@ -119,7 +121,7 @@ export function Layout() {
                 className={cn(
                   "flex flex-col items-center justify-center gap-1 min-h-[58px] px-1 py-1.5 text-[10px] font-medium transition-colors",
                   isActive
-                    ? "text-primary bg-accent/60"
+                    ? "text-blue-600 dark:text-blue-400 bg-blue-50/80 dark:bg-blue-950/40"
                     : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
                 )}
               >
@@ -151,12 +153,16 @@ export function Layout() {
 function StatCard({ title, value, icon }: { title: string; value: number; icon: React.ComponentType<any> }) {
   const Icon = icon
   return (
-    <div className="rounded-xl border bg-card p-4 flex flex-col">
-      <div className="flex items-center justify-between mb-2">
-        <Icon className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
-        <span className="text-xs text-muted-foreground">{title}</span>
+    <div className="rounded-xl border border-border/60 bg-card p-4 shadow-xs transition-all hover:shadow-sm flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <span className="text-xs font-medium text-muted-foreground leading-relaxed block truncate">
+          {title}
+        </span>
+        <div className="text-2xl font-bold tracking-tight mt-0.5">{value}</div>
       </div>
-      <div className="text-2xl font-bold">{value}</div>
+      <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-600/10 to-indigo-600/10 border border-blue-500/15 flex items-center justify-center shrink-0">
+        <Icon className="h-5 w-5 text-blue-600 dark:text-blue-400" aria-hidden="true" />
+      </div>
     </div>
   )
 }

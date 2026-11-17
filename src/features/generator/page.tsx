@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import {
+  Camera,
   Copy,
   FileText,
+  Globe,
   Loader2,
   RefreshCw,
   Save,
@@ -54,6 +56,23 @@ import { Badge } from "@/components/ui/badge"
 
 function extractHashtags(text: string): string[] {
   return [...text.matchAll(/#[^\s#]+/g)].map((match) => match[0].slice(1))
+}
+
+function getPlatformMeta(platform?: string) {
+  const normalized = (platform || "instagram").toLowerCase()
+  switch (normalized) {
+    case "facebook":
+      return { icon: Globe, label: "Facebook", badgeClass: "text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/20" }
+    case "tiktok":
+      return { icon: Video, label: "TikTok", badgeClass: "text-slate-900 dark:text-slate-100 bg-slate-500/10 border-slate-500/20" }
+    case "youtube":
+      return { icon: Video, label: "YouTube", badgeClass: "text-rose-600 dark:text-rose-400 bg-rose-500/10 border-rose-500/20" }
+    case "telegram":
+      return { icon: Send, label: "Telegram", badgeClass: "text-sky-600 dark:text-sky-400 bg-sky-500/10 border-sky-500/20" }
+    case "instagram":
+    default:
+      return { icon: Camera, label: "Instagram", badgeClass: "text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 border-indigo-500/20" }
+  }
 }
 
 type ActiveAction = {
@@ -400,11 +419,15 @@ export function GeneratorPage() {
   const contentToShow = viewMode === "editor" ? (displayedText || (result?.content ?? "")) : (result?.content ?? "")
   const charCount = contentToShow.length
   const wordCount = contentToShow ? contentToShow.split(/\s+/).filter(Boolean).length : 0
+  const activePlatform = result?.platform || formValues.platform || "instagram"
+  const platformMeta = getPlatformMeta(activePlatform)
+  const PlatformIcon = platformMeta.icon
+  const selectedTone = formValues.tone
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap gap-2">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider leading-relaxed">
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider leading-relaxed mr-1">
           {t(language, "generator.templates")}
         </span>
         {QUICK_STARTERS.map((tpl) => (
@@ -413,43 +436,53 @@ export function GeneratorPage() {
             variant="outline"
             size="sm"
             onClick={() => handleLoadTemplate(tpl)}
-            className="flex items-center gap-2 text-xs leading-relaxed"
+            className="flex items-center gap-1.5 h-8 text-xs leading-relaxed border-border/60 bg-card/80 hover:bg-accent/70"
           >
-            <Clock className="h-3 w-3" aria-hidden="true" />
+            <Clock className="h-3 w-3 text-blue-600 dark:text-blue-400" aria-hidden="true" />
             {tpl.title}
           </Button>
         ))}
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-6">
-        <div className="flex-1 min-w-0">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t(language, "generator.title")}</CardTitle>
-              <CardDescription>{t(language, "generator.desc")}</CardDescription>
+      <div className="flex flex-col lg:flex-row gap-6 items-start">
+        <div className="w-full flex-1 min-w-0">
+          <Card className="border-border/60 shadow-sm">
+            <CardHeader className="pb-4 border-b border-border/60">
+              <CardTitle className="leading-relaxed">{t(language, "generator.title")}</CardTitle>
+              <CardDescription className="leading-relaxed">{t(language, "generator.desc")}</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
               <form
                 onSubmit={form.handleSubmit(onSubmit)}
-                className="grid gap-4 p-6"
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault()
+                    if (!isGeneratingFlag) {
+                      void form.handleSubmit(onSubmit)()
+                    }
+                  }
+                }}
+                className="grid gap-4 p-5 sm:p-6"
               >
-                <div className="grid gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="topic">{t(language, "generator.topic")}</Label>
-                    <Input
-                      id="topic"
-                      placeholder={t(language, "generator.topicPlaceholder")}
-                      {...form.register("topic")}
-                    />
-                    {form.formState.errors.topic && (
-                      <span className="text-sm text-destructive leading-relaxed">
-                        {form.formState.errors.topic.message}
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="platform">{t(language, "generator.platform")}</Label>
-                    <Select id="platform" {...form.register("platform")}>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="topic" className="leading-relaxed">{t(language, "generator.topic")}</Label>
+                  <Input
+                    id="topic"
+                    placeholder={t(language, "generator.topicPlaceholder")}
+                    className="border-border/60 font-myanmar"
+                    {...form.register("topic")}
+                  />
+                  {form.formState.errors.topic && (
+                    <span className="text-xs text-destructive leading-relaxed">
+                      {form.formState.errors.topic.message}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="platform" className="leading-relaxed">{t(language, "generator.platform")}</Label>
+                    <Select id="platform" className="border-border/60" {...form.register("platform")}>
                       <option value="">{t(language, "generator.platform")}</option>
                       {PLATFORMS.map((p) => (
                         <option key={p.value} value={p.value}>
@@ -458,11 +491,9 @@ export function GeneratorPage() {
                       ))}
                     </Select>
                   </div>
-                </div>
-                <div className="grid gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="contentType">{t(language, "generator.contentType")}</Label>
-                    <Select id="contentType" {...form.register("contentType")}>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="contentType" className="leading-relaxed">{t(language, "generator.contentType")}</Label>
+                    <Select id="contentType" className="border-border/60" {...form.register("contentType")}>
                       <option value="">{t(language, "generator.contentType")}</option>
                       {CONTENT_TYPES.map((ct) => (
                         <option key={ct.value} value={ct.value}>
@@ -471,22 +502,47 @@ export function GeneratorPage() {
                       ))}
                     </Select>
                   </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="tone">{t(language, "generator.tone")}</Label>
-                    <Select id="tone" {...form.register("tone")}>
-                      <option value="">{t(language, "generator.tone")}</option>
-                      {TONES.map((t2) => (
-                        <option key={t2.value} value={t2.value}>
-                          {t2.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
                 </div>
-                <div className="grid gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="language">{t(language, "generator.language")}</Label>
-                    <Select id="language" {...form.register("language")}>
+
+                <div className="grid gap-2">
+                  <Label className="leading-relaxed">{t(language, "generator.tone")}</Label>
+                  <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t(language, "generator.tone")}>
+                    {TONES.map((toneOption) => {
+                      const isSelected = selectedTone === toneOption.value
+                      return (
+                        <button
+                          key={toneOption.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={isSelected}
+                          onClick={() =>
+                            form.setValue("tone", toneOption.value, {
+                              shouldDirty: true,
+                              shouldValidate: true,
+                            })
+                          }
+                          className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-all leading-relaxed cursor-pointer ${
+                            isSelected
+                              ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-transparent shadow-sm shadow-blue-500/20"
+                              : "border-border/60 bg-background/80 text-muted-foreground hover:text-foreground hover:bg-accent/70"
+                          }`}
+                        >
+                          {toneOption.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {form.formState.errors.tone && (
+                    <span className="text-xs text-destructive leading-relaxed">
+                      {form.formState.errors.tone.message}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="language" className="leading-relaxed">{t(language, "generator.language")}</Label>
+                    <Select id="language" className="border-border/60" {...form.register("language")}>
                       {LANGUAGES.map((l) => (
                         <option key={l.value} value={l.value}>
                           {l.label}
@@ -494,23 +550,24 @@ export function GeneratorPage() {
                       ))}
                     </Select>
                   </div>
-                  <div className="grid gap-2 items-end">
-                    <Label htmlFor="includeHashtags" className="flex items-center gap-2 cursor-pointer">
+                  <div className="flex items-center h-10 px-3 rounded-md border border-border/60 bg-background/50">
+                    <Label htmlFor="includeHashtags" className="flex items-center gap-2 cursor-pointer text-xs sm:text-sm leading-relaxed w-full">
                       <input
                         id="includeHashtags"
                         type="checkbox"
                         {...form.register("includeHashtags")}
-                        className="rounded border-input bg-background text-primary"
+                        className="rounded border-input bg-background text-blue-600 focus:ring-blue-500"
                       />
-                      {t(language, "generator.includeHashtags")}
+                      <span>{t(language, "generator.includeHashtags")}</span>
                     </Label>
                   </div>
                 </div>
-                <div className="flex gap-2">
+
+                <div className="flex gap-2 pt-1">
                   <Button
                     type="submit"
                     variant="default"
-                    className="w-full"
+                    className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 border-0"
                     disabled={isGeneratingFlag}
                   >
                     {isGeneratingFlag ? (
@@ -519,7 +576,13 @@ export function GeneratorPage() {
                         {t(language, "generator.generating")}
                       </>
                     ) : (
-                      t(language, "generator.generate")
+                      <span className="flex items-center justify-center gap-2">
+                        <Sparkles className="h-4 w-4" aria-hidden="true" />
+                        <span>{t(language, "generator.generate")}</span>
+                        <kbd className="hidden sm:inline-flex items-center rounded bg-white/15 px-1.5 py-0.5 text-[10px] font-mono font-medium text-white/90">
+                          ⌘↵
+                        </kbd>
+                      </span>
                     )}
                   </Button>
                   <Button
@@ -527,8 +590,9 @@ export function GeneratorPage() {
                     variant="outline"
                     disabled={!result || isGeneratingFlag}
                     onClick={handleRegenerate}
+                    className="border-border/60"
                   >
-                    <RefreshCw className="h-3 w-3 mr-1.5" aria-hidden="true" />
+                    <RefreshCw className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
                     {t(language, "generator.regenerate")}
                   </Button>
                 </div>
@@ -537,50 +601,96 @@ export function GeneratorPage() {
           </Card>
         </div>
 
-        <div ref={previewRef} className="w-full lg:w-[400px] shrink-0 flex flex-col gap-4">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>{t(language, "generator.viewMode")}</CardTitle>
-                <div className="flex gap-1">
+        <div ref={previewRef} className="w-full lg:w-[420px] shrink-0 flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">
+          <Card className="border-border/60 shadow-sm overflow-hidden">
+            <CardHeader className="pb-3 border-b border-border/60 bg-muted/20">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${platformMeta.badgeClass}`}>
+                    <PlatformIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span>{platformMeta.label}</span>
+                  </span>
+                  {(result || displayedText) && (
+                    <Badge variant="outline" className="text-[11px] font-normal border-border/60 bg-background/70">
+                      {charCount} {t(language, "generator.characters")} · {wordCount} {t(language, "generator.words")}
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex gap-1 shrink-0">
                   <Button
                     variant={viewMode === "editor" ? "default" : "outline"}
                     size="sm"
                     onClick={() => setViewMode("editor")}
-                    className="h-8 px-2"
+                    aria-label="Editor view"
+                    className={`h-8 px-2.5 ${
+                      viewMode === "editor"
+                        ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-0 shadow-xs"
+                        : "border-border/60"
+                    }`}
                   >
-                    <User className="h-3 w-3" aria-hidden="true" />
+                    <User className="h-3.5 w-3.5" aria-hidden="true" />
                   </Button>
                   <Button
                     variant={viewMode === "preview" ? "default" : "outline"}
                     size="sm"
                     onClick={() => setViewMode("preview")}
-                    className="h-8 px-2"
+                    aria-label="Social post preview"
+                    className={`h-8 px-2.5 ${
+                      viewMode === "preview"
+                        ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-0 shadow-xs"
+                        : "border-border/60"
+                    }`}
                   >
-                    <Share2 className="h-3 w-3" aria-hidden="true" />
+                    <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
                   </Button>
                 </div>
               </div>
-              <CardDescription>
+              <CardTitle className="text-sm font-semibold pt-2 leading-relaxed">
+                {t(language, "generator.viewMode")}
+              </CardTitle>
+              <CardDescription className="text-xs leading-relaxed">
                 {t(language, "generator.previewDescription")}
               </CardDescription>
             </CardHeader>
-            <CardContent className="min-h-[300px] flex flex-col gap-4">
+            <CardContent className="min-h-[300px] flex flex-col gap-4 pt-5">
               {isGeneratingFlag ? (
-                <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 text-muted-foreground">
-                  <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
-                  <p className="text-sm leading-relaxed">
-                    {loadingLabel}
-                  </p>
+                <div className="flex flex-col gap-4 py-2" aria-busy="true" aria-label={loadingLabel}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="h-9 w-9 rounded-full animate-shimmer shrink-0" />
+                      <div className="space-y-1.5">
+                        <div className="h-3.5 w-28 rounded-md animate-shimmer" />
+                        <div className="h-2.5 w-20 rounded-md animate-shimmer" />
+                      </div>
+                    </div>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1 text-[11px] font-medium text-blue-600 dark:text-blue-400">
+                      <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                      {loadingLabel}
+                    </span>
+                  </div>
+                  <div className="space-y-2.5 pt-2">
+                    <div className="h-3.5 w-full rounded-md animate-shimmer" />
+                    <div className="h-3.5 w-[92%] rounded-md animate-shimmer" />
+                    <div className="h-3.5 w-[85%] rounded-md animate-shimmer" />
+                    <div className="h-3.5 w-[95%] rounded-md animate-shimmer" />
+                    <div className="h-3.5 w-[60%] rounded-md animate-shimmer" />
+                  </div>
+                  <div className="flex items-center gap-3 pt-3 border-t border-border/60">
+                    <div className="h-3 w-14 rounded-md animate-shimmer" />
+                    <div className="h-3 w-16 rounded-md animate-shimmer" />
+                    <div className="h-3 w-14 rounded-md animate-shimmer" />
+                  </div>
                 </div>
               ) : !result && !displayedText ? (
-                <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground leading-relaxed">
-                  <FileText className="h-10 w-10 opacity-50" aria-hidden="true" />
+                <div className="flex flex-1 min-h-[240px] flex-col items-center justify-center gap-2.5 text-muted-foreground leading-relaxed text-center px-4">
+                  <div className="h-12 w-12 rounded-2xl border border-border/60 bg-muted/40 flex items-center justify-center">
+                    <FileText className="h-6 w-6 opacity-60" aria-hidden="true" />
+                  </div>
                   <p className="text-sm">{t(language, "generator.noContent")}</p>
                 </div>
               ) : viewMode === "editor" ? (
                 <>
-                  <div className="overflow-y-auto font-myanmar leading-relaxed">
+                  <div className="overflow-y-auto max-h-[420px] font-myanmar leading-relaxed text-sm sm:text-[15px]">
                     <p className="whitespace-pre-wrap break-words">
                       {contentToShow}
                     </p>
@@ -590,24 +700,24 @@ export function GeneratorPage() {
                       <span className="animate-pulse">&#9647;</span>
                     </div>
                   )}
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <Badge variant="outline">{charCount} {t(language, "generator.characters")}</Badge>
-                    <Badge variant="outline">{wordCount} {t(language, "generator.words")}</Badge>
-                    <Badge variant="outline">{result?.platform ?? ""}</Badge>
-                  </div>
                 </>
               ) : (
-                <SocialPostPreview content={result?.content ?? ""} platform={result?.platform ?? "instagram"} />
+                <SocialPostPreview
+                  content={result?.content ?? ""}
+                  platform={result?.platform ?? "instagram"}
+                  charCount={charCount}
+                  wordCount={wordCount}
+                />
               )}
             </CardContent>
-            <CardFooter>
-              <div className="flex gap-2">
+            <CardFooter className="border-t border-border/60 bg-muted/10 pt-4">
+              <div className="flex gap-2 w-full">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleCopy}
                   disabled={isCopying || (!result && !displayedText)}
-                  className="flex-1"
+                  className="flex-1 border-border/60"
                 >
                   {isCopying ? (
                     <>
@@ -626,7 +736,7 @@ export function GeneratorPage() {
                   size="sm"
                   onClick={handleSaveToVault}
                   disabled={!result}
-                  className="flex-1"
+                  className="flex-1 border-border/60"
                 >
                   <Save className="h-3 w-3 mr-1.5" aria-hidden="true" />
                   {t(language, "generator.saveToVault")}
@@ -636,7 +746,7 @@ export function GeneratorPage() {
           </Card>
 
           {result && (
-            <div className="rounded-xl border bg-card p-4 space-y-3">
+            <div className="rounded-xl border border-border/60 bg-card p-4 space-y-3 shadow-xs">
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
@@ -726,23 +836,40 @@ export function GeneratorPage() {
   )
 }
 
-function SocialPostPreview({ content, platform }: { content: string; platform: string }) {
+function SocialPostPreview({
+  content,
+  platform,
+  charCount,
+  wordCount,
+}: {
+  content: string
+  platform: string
+  charCount: number
+  wordCount: number
+}) {
   const language = useUIStore((state) => state.language)
   const [expanded, setExpanded] = useState(false)
   const [liked, setLiked] = useState(false)
+  const platformMeta = getPlatformMeta(platform)
+  const PlatformIcon = platformMeta.icon
 
   return (
-    <div className="rounded-xl border bg-card p-4 font-myanmar leading-relaxed">
-      <div className="flex items-center gap-3 mb-3">
-        <div className="h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold">
-          CC
-        </div>
-        <div className="flex flex-col leading-none">
-          <div className="text-sm font-semibold">{t(language, "preview.content_creator")}</div>
-          <div className="text-xs text-muted-foreground">
-            {platform === "instagram" ? t(language, "platform.instagram") : platform.charAt(0).toUpperCase() + platform.slice(1)} &#8226; {t(language, "preview.time_ago")}
+    <div className="rounded-xl border border-border/60 bg-card p-4 font-myanmar leading-relaxed shadow-xs">
+      <div className="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-border/60">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center text-xs font-bold shadow-xs shrink-0">
+            <PlatformIcon className="h-4 w-4" aria-hidden="true" />
+          </div>
+          <div className="flex flex-col leading-tight min-w-0">
+            <div className="text-sm font-semibold truncate">{t(language, "preview.content_creator")}</div>
+            <div className="text-[11px] text-muted-foreground">
+              {platform === "instagram" ? t(language, "platform.instagram") : platformMeta.label} &#8226; {t(language, "preview.time_ago")}
+            </div>
           </div>
         </div>
+        <Badge variant="outline" className="text-[10px] font-normal border-border/60 shrink-0">
+          {charCount} · {wordCount}w
+        </Badge>
       </div>
       <div className="text-sm mb-3">
         <p className="whitespace-pre-wrap break-words">
@@ -751,13 +878,13 @@ function SocialPostPreview({ content, platform }: { content: string; platform: s
         {content.length > 200 && (
           <button
             onClick={() => setExpanded(!expanded)}
-            className="text-xs text-primary underline underline-offset-4 mt-1 flex items-center gap-1"
+            className="text-xs text-blue-600 dark:text-blue-400 underline underline-offset-4 mt-1 flex items-center gap-1"
           >
             {expanded ? t(language, "preview.see_less") : t(language, "preview.see_more")}
           </button>
         )}
       </div>
-      <div className="flex items-center justify-between pt-3 border-t">
+      <div className="flex items-center justify-between pt-3 border-t border-border/60">
         <div className="flex items-center gap-4">
           <button
             onClick={() => setLiked(!liked)}
@@ -766,11 +893,11 @@ function SocialPostPreview({ content, platform }: { content: string; platform: s
             <ThumbsUp className={`h-3 w-3 ${liked ? "text-destructive" : "text-muted-foreground"}`} aria-hidden="true" />
             <span className={liked ? "text-destructive font-medium" : "text-muted-foreground"}>{t(language, "preview.like")}</span>
           </button>
-          <button className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
+          <button className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400">
             <MessageCircle className="h-3 w-3" aria-hidden="true" />
             <span>{t(language, "preview.comment")}</span>
           </button>
-          <button className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
+          <button className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400">
             <Share2 className="h-3 w-3" aria-hidden="true" />
             <span>{t(language, "preview.share")}</span>
           </button>
