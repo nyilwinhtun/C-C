@@ -1,12 +1,48 @@
-import { useEffect, useState } from "react"
+import { Component, type ErrorInfo, type ReactNode, useEffect, useState } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Toaster } from "@/components/ui/sonner"
 import { Layout } from "@/components/shared/layout"
 import { LoginPage } from "@/components/shared/login-page"
 import { useUIStore } from "@/store/useUIStore"
 import { useContentStore } from "@/store/useContentStore"
-import { supabase } from "@/lib/supabase"
+import { isSupabaseConfigured, supabase } from "@/lib/supabase"
 import { useShallow } from "zustand/react/shallow"
+
+class AppErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean; message: string }
+> {
+  state = { hasError: false, message: "" }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, message: error?.message || "Unexpected error" }
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("Uncaught application error:", error, info)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-background text-foreground flex flex-col items-center justify-center p-6 text-center gap-4">
+          <h1 className="text-xl font-semibold">Something went wrong</h1>
+          <p className="text-sm text-muted-foreground max-w-md">
+            {this.state.message}
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium"
+          >
+            Reload App
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,6 +63,12 @@ function AppContent() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setAuth(null, null)
+      setLoading(false)
+      return
+    }
+
     // 1. Check initial active session
     supabase.auth
       .getSession()
@@ -85,9 +127,11 @@ function AppContent() {
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <Toaster position="bottom-right" richColors />
-      <AppContent />
-    </QueryClientProvider>
+    <AppErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <Toaster position="bottom-right" richColors />
+        <AppContent />
+      </QueryClientProvider>
+    </AppErrorBoundary>
   )
 }

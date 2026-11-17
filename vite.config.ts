@@ -21,6 +21,8 @@ export default defineConfig({
       name: 'Content Creator',
       short_name: 'CC',
       description: 'Content Creator Web App',
+      start_url: './',
+      scope: './',
       theme_color: '#0f172a',
       background_color: '#0f172a',
       display: 'standalone',
