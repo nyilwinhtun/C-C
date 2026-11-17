@@ -196,6 +196,7 @@ export function GeneratorPage() {
 
   const [activeAction, setActiveAction] = useState<ActiveAction | null>(null)
   const pendingActionRef = useRef<ActiveAction | null>(null)
+  const previewRef = useRef<HTMLDivElement | null>(null)
 
   const mutation = useGenerateContent({
     onSuccess: (data) => {
@@ -226,6 +227,12 @@ export function GeneratorPage() {
             ? "generator.repurposeSuccess"
             : "generator.genSuccess"
       toast.success(t(language, successKey))
+
+      if (typeof window !== "undefined" && window.innerWidth < 768) {
+        setTimeout(() => {
+          previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+        }, 100)
+      }
     },
     onError: (err) => {
       pendingActionRef.current = null
@@ -530,7 +537,7 @@ export function GeneratorPage() {
           </Card>
         </div>
 
-        <div className="w-full lg:w-[400px] shrink-0 flex flex-col gap-4">
+        <div ref={previewRef} className="w-full lg:w-[400px] shrink-0 flex flex-col gap-4">
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">

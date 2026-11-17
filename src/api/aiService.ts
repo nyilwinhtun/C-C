@@ -368,3 +368,224 @@ export async function generateContent(
   }
 }
 
+export interface PhotoSuggestionRequest {
+  imageBase64: string
+  mimeType: string
+  language: "en" | "my"
+}
+
+export interface PhotoSuggestionResult {
+  headline: string
+  caption: string
+}
+
+function stripMarkdownAsterisks(text: string): string {
+  return text.replace(/\*{1,3}([^*]+)\*{1,3}/g, "$1").replace(/\*/g, "").trim()
+}
+
+function parsePhotoSuggestionResponse(raw: string): PhotoSuggestionResult {
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim()
+
+  try {
+    const parsed = JSON.parse(cleaned) as { headline?: string; caption?: string }
+    if (typeof parsed.headline === "string" || typeof parsed.caption === "string") {
+      return {
+        headline: stripMarkdownAsterisks(parsed.headline ?? ""),
+        caption: stripMarkdownAsterisks(parsed.caption ?? ""),
+      }
+    }
+  } catch {
+    // Fallback if model returned plain text instead of JSON
+  }
+
+  const lines = cleaned.split("\n").map((l) => l.trim()).filter(Boolean)
+  const headline = stripMarkdownAsterisks(lines[0] ?? "")
+  const caption = stripMarkdownAsterisks(lines.slice(1).join("\n") || cleaned)
+  return { headline, caption }
+}
+
+function buildPhotoPrompt(language: "en" | "my"): string {
+  if (language === "my") {
+    return `You are a Myanmar social media marketing expert. Look at this product photo carefully and generate:
+1. "headline": A short, punchy poster headline (3 to 7 words max) in natural Myanmar (Burmese) Unicode script. Do NOT use Markdown asterisks (*) or quotes.
+2. "caption": A ready-to-post Facebook/Instagram social media caption in natural Myanmar (Burmese) Unicode script with relevant emojis and 3-5 hashtags at the end. Do NOT use Markdown asterisks (*).
+
+Return ONLY a valid JSON object with keys "headline" and "caption".`
+  }
+
+  return `You are a social media marketing expert. Look at this product photo carefully and generate:
+1. "headline": A short, punchy poster headline (3 to 7 words max) in English. Do NOT use Markdown asterisks (*) or quotes.
+2. "caption": A ready-to-post Facebook/Instagram social media caption in English with relevant emojis and 3-5 hashtags at the end. Do NOT use Markdown asterisks (*).
+
+Return ONLY a valid JSON object with keys "headline" and "caption".`
+}
+
+async function suggestPhotoWithGemini(
+  request: PhotoSuggestionRequest,
+  apiKey: string,
+  model: string
+): Promise<PhotoSuggestionResult> {
+  const base64Data = request.imageBase64.replace(/^data:[^;]+;base64,/, "")
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+  const body = {
+    contents: [
+      {
+        parts: [
+          {
+            inlineData: {
+              mimeType: request.mimeType || "image/jpeg",
+              data: base64Data,
+            },
+          },
+          { text: buildPhotoPrompt(request.language) },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.7,
+      topP: 0.95,
+      maxOutputTokens: 1024,
+      responseMimeType: "application/json",
+    },
+  }
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw parseApiError("Gemini", res.status, text)
+  }
+
+  const data = await res.json()
+  const parts: Array<{ text?: string; thought?: boolean }> =
+    data.candidates?.[0]?.content?.parts ?? []
+  const content = parts
+    .filter((part) => !part.thought && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("")
+    .trim()
+
+  if (!content) {
+    throw new Error("No content returned from Gemini Vision API.")
+  }
+
+  return parsePhotoSuggestionResponse(content)
+}
+
+async function suggestPhotoWithOpenAICompatible(
+  request: PhotoSuggestionRequest,
+  provider: AIProvider,
+  apiKey: string,
+  model: string
+): Promise<PhotoSuggestionResult> {
+  const base64Data = request.imageBase64.replace(/^data:[^;]+;base64,/, "")
+  const dataUrl = `data:${request.mimeType || "image/jpeg"};base64,${base64Data}`
+  const baseUrl =
+    provider === "groq"
+      ? "https://api.groq.com/openai/v1/chat/completions"
+      : "https://openrouter.ai/api/v1/chat/completions"
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+  }
+
+  if (provider === "openrouter") {
+    headers["HTTP-Referer"] = window.location.origin
+    headers["X-Title"] = "Content Creator SaaS"
+  }
+
+  const res = await fetch(baseUrl, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: buildPhotoPrompt(request.language) },
+            { type: "image_url", image_url: { url: dataUrl } },
+          ],
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 1024,
+    }),
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    const providerName = provider === "groq" ? "Groq" : "OpenRouter"
+    throw parseApiError(providerName, res.status, text)
+  }
+
+  const data = await res.json()
+  const content = data.choices?.[0]?.message?.content?.trim() ?? ""
+  if (!content) {
+    throw new Error(`No content returned from ${provider} Vision API.`)
+  }
+
+  return parsePhotoSuggestionResponse(content)
+}
+
+export async function suggestFromPhoto(
+  request: PhotoSuggestionRequest
+): Promise<PhotoSuggestionResult> {
+  const { provider, apiKey, model } = getAiConfig()
+  const trimmedKey = apiKey.trim()
+
+  if (!trimmedKey) {
+    await delay(900)
+    if (request.language === "my") {
+      return {
+        headline: "အရည်အသွေးမြင့် ပစ္စည်းသစ် ရောက်ရှိပါပြီ",
+        caption:
+          "✨ သင့်အတွက် အကောင်းဆုံး ရွေးချယ်မှု!\n\nအရည်အသွေးကောင်းမွန်ပြီး စိတ်ချရတဲ့ ပစ္စည်းလေးကို အခုပဲ မှာယူလိုက်ပါ။ 🛍️\n\n📩 မှာယူလိုပါက Inbox မှတစ်ဆင့် ဆက်သွယ်နိုင်ပါတယ်ခင်ဗျာ။\n\n#NewArrival #OnlineShopMyanmar #QualityFirst",
+      }
+    }
+    return {
+      headline: "Premium Quality Just Arrived",
+      caption:
+        "✨ Upgrade your everyday style with our latest arrival!\n\nCrafted with care and ready to order today. Limited stock available—send us a message to grab yours! 🛍️\n\n#NewArrival #ShopNow #FeaturedProduct",
+    }
+  }
+
+  if (provider === "gemini") {
+    const primaryModel = model || GEMINI_MODEL
+    try {
+      return await suggestPhotoWithGemini(request, trimmedKey, primaryModel)
+    } catch (err) {
+      const isQuota =
+        (err instanceof ApiError && err.isQuotaExceeded) ||
+        (err instanceof Error &&
+          (err.message === QUOTA_EXCEEDED_MESSAGE ||
+            err.message.includes("429") ||
+            err.message.includes("RESOURCE_EXHAUSTED") ||
+            err.message.toLowerCase().includes("quota")))
+
+      if (isQuota && primaryModel !== GEMINI_FALLBACK_MODEL) {
+        return await suggestPhotoWithGemini(request, trimmedKey, GEMINI_FALLBACK_MODEL)
+      }
+      throw err
+    }
+  }
+
+  const fallbackModel =
+    provider === "groq" ? "llama-3.3-70b-versatile" : "openrouter/auto"
+  return await suggestPhotoWithOpenAICompatible(
+    request,
+    provider,
+    trimmedKey,
+    model || fallbackModel
+  )
+}
+

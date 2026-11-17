@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Calendar, ChevronRight, FolderKanban, LayoutList } from "lucide-react"
+import { Calendar, Camera, ChevronRight, FolderKanban, LayoutList } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -59,6 +59,12 @@ const navigation: NavItem[] = [
     title: "Generator",
     url: "/",
     icon: LayoutList,
+  },
+  {
+    key: "photo-studio",
+    title: "Photo Studio",
+    url: "/photo-studio",
+    icon: Camera,
   },
   {
     key: "vault",

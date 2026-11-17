@@ -14,9 +14,10 @@ import { toast } from "@/components/ui/sonner"
 interface HeaderProps {
   title: string
   onMenuToggle: () => void
+  onOpenSettings?: () => void
 }
 
-export function Header({ title, onMenuToggle }: HeaderProps) {
+export function Header({ title, onMenuToggle, onOpenSettings }: HeaderProps) {
   const { language, setLanguage, user, signOut } = useUIStore(
     useShallow((state) => ({
       language: state.language,
@@ -25,8 +26,16 @@ export function Header({ title, onMenuToggle }: HeaderProps) {
       signOut: state.signOut,
     }))
   )
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [internalSettingsOpen, setInternalSettingsOpen] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
+
+  const handleOpenSettings = () => {
+    if (onOpenSettings) {
+      onOpenSettings()
+    } else {
+      setInternalSettingsOpen(true)
+    }
+  }
 
   const handleSignOut = async () => {
     setLoggingOut(true)
@@ -84,14 +93,16 @@ export function Header({ title, onMenuToggle }: HeaderProps) {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setSettingsOpen(true)}
+          onClick={handleOpenSettings}
           aria-label={t(language, "header.settings")}
         >
           <Settings className="h-5 w-5" aria-hidden="true" />
         </Button>
         <ThemeToggle />
       </div>
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      {!onOpenSettings && (
+        <SettingsDialog open={internalSettingsOpen} onOpenChange={setInternalSettingsOpen} />
+      )}
     </div>
   )
 }
