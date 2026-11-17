@@ -28,6 +28,7 @@ import { t } from "@/locales/translations"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ReadAloudButton } from "@/components/shared/read-aloud-button"
 import {
   Card,
   CardContent,
@@ -540,25 +541,32 @@ export function VideoToContentSection() {
 
             {result.voiceoverScript && (
               <Card className="border-border/60 shadow-sm">
-                <CardHeader className="py-3 px-4 border-b border-border/60 flex flex-row items-center justify-between space-y-0">
+                <CardHeader className="py-3 px-4 border-b border-border/60 flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
                   <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                     <Mic className="h-3.5 w-3.5 text-indigo-500" aria-hidden="true" />
                     {t(language, "generator.videoVoiceoverTitle")}
                   </CardTitle>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => copyText("voiceover", result.voiceoverScript)}
-                    className="h-7 px-2 text-xs"
-                  >
-                    {copiedKey === "voiceover" ? (
-                      <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
-                    ) : (
-                      <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                    )}
-                    <span className="ml-1">{t(language, "generator.copy")}</span>
-                  </Button>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <ReadAloudButton
+                      text={result.voiceoverScript}
+                      language={outputLanguage}
+                      size="xs"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => copyText("voiceover", result.voiceoverScript)}
+                      className="h-7 px-2 text-xs"
+                    >
+                      {copiedKey === "voiceover" ? (
+                        <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                      )}
+                      <span className="ml-1">{t(language, "generator.copy")}</span>
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent className="p-4">
                   <p className="text-sm font-myanmar whitespace-pre-wrap leading-[1.85]">
@@ -603,3 +611,4 @@ export function VideoToContentSection() {
     </div>
   )
 }
+

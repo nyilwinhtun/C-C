@@ -39,6 +39,7 @@ import {
 } from "@/features/generator/schema"
 import { useGenerateContent } from "@/features/generator/useGenerateContent"
 import { VideoToContentSection } from "@/features/generator/VideoToContentSection"
+import { ReadAloudButton } from "@/components/shared/read-aloud-button"
 import {
   useContentStore,
   type GeneratedItem,
@@ -1118,13 +1119,19 @@ export function GeneratorPage() {
               )}
             </CardContent>
             <CardFooter className="border-t border-border/60 bg-muted/10 pt-4 flex-col gap-2.5">
-              <div className="flex gap-2 w-full">
+              <div className="flex flex-wrap items-center gap-2 w-full">
+                <ReadAloudButton
+                  text={contentToShow}
+                  language={form.watch("language")}
+                  disabled={isTypewriting || !contentToShow}
+                  size="sm"
+                />
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleCopy}
                   disabled={isCopying || !contentToShow}
-                  className="flex-1 border-border/60"
+                  className="flex-1 min-w-[90px] border-border/60"
                 >
                   {isCopying ? (
                     <>

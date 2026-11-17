@@ -141,6 +141,9 @@ export const translations: Record<Locale, Record<string, string>> = {
     "generator.videoCopyAll": "Copy All",
     "generator.videoSaveVault": "Save to Idea Vault",
     "generator.videoSavedVault": "Saved video content to Idea Vault",
+    "generator.readAloud": "Read Aloud",
+    "generator.readAloudStop": "Stop",
+    "generator.readAloudSpeed": "Speed",
     // Social Post Preview
     "preview.content_creator": "Content Creator",
     "preview.time_ago": "Just now",
@@ -510,6 +513,9 @@ export const translations: Record<Locale, Record<string, string>> = {
     "generator.videoCopyAll": "အားလုံးကူးယူမည်",
     "generator.videoSaveVault": "Idea Vault ထဲသိမ်းမည်",
     "generator.videoSavedVault": "ဗီဒီယိုကွန်တင့်ကို Idea Vault ထဲသိမ်းပြီးပါပြီ",
+    "generator.readAloud": "အသံထွက်နားထောင်မည်",
+    "generator.readAloudStop": "ရပ်မည်",
+    "generator.readAloudSpeed": "အမြန်နှုန်း",
     // Social Post Preview
     "preview.content_creator": "ကွန်တင့် ဖန်တီးသူ",
     "preview.time_ago": "ယခုလေးတင်",
