@@ -29,6 +29,7 @@ import {
   Check,
   AlertTriangle,
   ImagePlus,
+  Pencil,
 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
@@ -382,7 +383,8 @@ export function GeneratorPage() {
             : "generator.genSuccess"
       toast.success(t(language, successKey))
 
-      if (typeof window !== "undefined" && window.innerWidth < 768) {
+      if (typeof window !== "undefined" && window.innerWidth < 1024) {
+        setIsInputCollapsed(true)
         setTimeout(() => {
           previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
         }, 100)
@@ -407,6 +409,7 @@ export function GeneratorPage() {
   const [typewriterIndex, setTypewriterIndex] = useState(0)
   const [isTypewriting, setIsTypewriting] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [isInputCollapsed, setIsInputCollapsed] = useState(false)
 
   const form = useForm<GeneratorFormInput>({
     resolver: zodResolver(generatorSchema),
@@ -727,7 +730,7 @@ export function GeneratorPage() {
         <VideoToContentSection />
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className={isInputCollapsed && result ? "hidden lg:flex flex-wrap items-center gap-2" : "flex flex-wrap items-center gap-2"}>
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider leading-relaxed mr-1">
           {t(language, "generator.templates")}
         </span>
@@ -745,9 +748,30 @@ export function GeneratorPage() {
         ))}
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-6 items-start">
+      <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 items-start">
         <div className="w-full flex-1 min-w-0">
-          <Card className="border-border/60 shadow-sm">
+          {isInputCollapsed && result && (
+            <div className="lg:hidden flex items-center justify-between gap-2 rounded-xl border border-border/60 bg-card px-3.5 py-2.5 shadow-sm">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
+                <span className="text-xs font-medium truncate font-myanmar">
+                  {result.topic || form.getValues("topic") || t(language, "generator.modeText")}
+                </span>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsInputCollapsed(false)}
+                className="h-7 px-2.5 text-xs shrink-0 border-border/60 font-myanmar"
+              >
+                <Pencil className="h-3 w-3 mr-1" aria-hidden="true" />
+                {t(language, "generator.edit")}
+              </Button>
+            </div>
+          )}
+
+          <Card className={isInputCollapsed && result ? "hidden lg:block border-border/60 shadow-sm" : "border-border/60 shadow-sm"}>
             <CardHeader className="pb-4 border-b border-border/60">
               <CardDescription className="leading-[1.85]">{t(language, "generator.desc")}</CardDescription>
             </CardHeader>
@@ -863,7 +887,7 @@ export function GeneratorPage() {
                   </div>
                 </div>
 
-                <div className="flex gap-2 pt-1">
+                <div className="sticky bottom-2 z-20 lg:static flex gap-2 pt-1.5 pb-0.5 bg-background/90 backdrop-blur-sm rounded-xl lg:bg-transparent lg:backdrop-blur-none lg:pt-1 lg:pb-0">
                   <Button
                     type="submit"
                     variant="default"
@@ -901,7 +925,7 @@ export function GeneratorPage() {
           </Card>
         </div>
 
-        <div ref={previewRef} className="w-full lg:w-[420px] shrink-0 flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">
+        <div ref={previewRef} className="w-full lg:w-[420px] shrink-0 flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start scroll-mt-4">
           <Card className="border-border/60 shadow-sm overflow-hidden">
             <CardHeader className="pb-3 border-b border-border/60 bg-muted/20">
               <div className="flex items-center justify-between gap-2">
@@ -1118,7 +1142,7 @@ export function GeneratorPage() {
                 </div>
               )}
             </CardContent>
-            <CardFooter className="border-t border-border/60 bg-muted/10 pt-4 flex-col gap-2.5">
+            <CardFooter className="sticky bottom-2 z-20 lg:static border-t border-border/60 bg-card/95 lg:bg-muted/10 backdrop-blur-md lg:backdrop-blur-none pt-3 pb-3 lg:pt-4 flex-col gap-2.5 shadow-lg lg:shadow-none">
               <div className="flex flex-wrap items-center gap-2 w-full">
                 <ReadAloudButton
                   text={contentToShow}

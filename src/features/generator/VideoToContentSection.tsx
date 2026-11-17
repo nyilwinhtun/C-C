@@ -6,8 +6,10 @@ import {
   Copy,
   Film,
   Hash,
+  LayoutList,
   Loader2,
   Mic,
+  Pencil,
   Save,
   Sparkles,
   Type,
@@ -19,6 +21,7 @@ import {
 import { toast } from "@/components/ui/sonner"
 import {
   generateVideoContent,
+  isSupportedVideoFile,
   type VideoContentResult,
   type VideoPlatformOption,
 } from "@/api/aiService"
@@ -33,6 +36,7 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
@@ -55,14 +59,7 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function isSupportedVideoFile(file: File): boolean {
-  const mime = file.type.toLowerCase()
-  if (mime === "video/mp4" || mime === "video/quicktime" || mime === "video/webm") {
-    return true
-  }
-  const name = file.name.toLowerCase()
-  return name.endsWith(".mp4") || name.endsWith(".mov") || name.endsWith(".webm")
-}
+type VideoOutputTab = "hooks" | "voiceover" | "caption" | "cover"
 
 function extractHashtags(text: string): string[] {
   return [...text.matchAll(/#[^\s#]+/g)].map((match) => match[0].slice(1))
@@ -93,6 +90,9 @@ export function VideoToContentSection() {
   const [progressStage, setProgressStage] = useState<"extracting" | "analyzing" | null>(null)
   const [result, setResult] = useState<VideoContentResult | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const [isInputCollapsed, setIsInputCollapsed] = useState(false)
+  const [activeTab, setActiveTab] = useState<VideoOutputTab>("hooks")
+  const [showAllTabs, setShowAllTabs] = useState(false)
 
   useEffect(() => {
     setOutputLanguage(language)
@@ -119,6 +119,7 @@ export function VideoToContentSection() {
       })
       setVideoFile(file)
       setResult(null)
+      setIsInputCollapsed(false)
     },
     [language]
   )
@@ -130,6 +131,7 @@ export function VideoToContentSection() {
     })
     setVideoFile(null)
     setResult(null)
+    setIsInputCollapsed(false)
     if (fileInputRef.current) {
       fileInputRef.current.value = ""
     }
@@ -149,8 +151,19 @@ export function VideoToContentSection() {
         onProgress: (stage) => setProgressStage(stage),
       })
       setResult(generated)
+      const defaultTab: VideoOutputTab =
+        generated.hooks.length > 0
+          ? "hooks"
+          : generated.voiceoverScript
+            ? "voiceover"
+            : generated.caption
+              ? "caption"
+              : "cover"
+      setActiveTab(defaultTab)
+      setShowAllTabs(false)
       toast.success(t(language, "generator.videoSuccess"))
-      if (window.innerWidth < 1024) {
+      if (typeof window !== "undefined" && window.innerWidth < 1024) {
+        setIsInputCollapsed(true)
         setTimeout(() => {
           resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
         }, 100)
@@ -215,28 +228,74 @@ export function VideoToContentSection() {
   const isGenerating = progressStage !== null
   const isDirectMode = videoFile ? videoFile.size <= DIRECT_MODE_LIMIT_BYTES : true
 
+  const outputTabs: Array<{
+    id: VideoOutputTab
+    label: string
+    icon: typeof Zap
+  }> = [
+    { id: "hooks", label: t(language, "generator.videoTabHooks"), icon: Zap },
+    { id: "voiceover", label: t(language, "generator.videoTabVoiceover"), icon: Mic },
+    { id: "caption", label: t(language, "generator.videoTabCaption"), icon: Hash },
+    { id: "cover", label: t(language, "generator.videoTabCover"), icon: Type },
+  ]
+
   return (
-    <div className="flex flex-col lg:flex-row gap-6 items-start">
+    <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 items-start">
       <div className="w-full flex-1 min-w-0">
-        <Card className="border-border/60 shadow-sm">
+        {isInputCollapsed && result && (
+          <div className="lg:hidden flex items-center justify-between gap-2 rounded-xl border border-border/60 bg-card px-3.5 py-2.5 shadow-sm">
+            <div className="flex items-center gap-2 min-w-0">
+              <Video className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
+              <span className="text-xs font-medium truncate">
+                {videoFile?.name || productNote || t(language, "generator.modeVideo")}
+              </span>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsInputCollapsed(false)}
+              className="h-7 px-2.5 text-xs shrink-0 border-border/60 font-myanmar"
+            >
+              <Pencil className="h-3 w-3 mr-1" aria-hidden="true" />
+              {t(language, "generator.edit")}
+            </Button>
+          </div>
+        )}
+
+        <Card
+          className={
+            isInputCollapsed && result
+              ? "hidden lg:block border-border/60 shadow-sm"
+              : "border-border/60 shadow-sm"
+          }
+        >
           <CardHeader className="pb-4 border-b border-border/60">
             <CardDescription className="leading-[1.85]">
               {t(language, "generator.videoDesc")}
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4 p-5 sm:p-6">
+          <CardContent className="grid gap-4 p-4 sm:p-6">
             <input
+              id="video-upload-input"
               ref={fileInputRef}
               type="file"
-              accept="video/mp4,video/quicktime,video/webm"
+              accept="video/*"
               className="hidden"
               onChange={(e) => handleSelectFile(e.target.files?.[0])}
             />
 
             {!videoFile ? (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
+              <label
+                htmlFor="video-upload-input"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    fileInputRef.current?.click()
+                  }
+                }}
                 onDragOver={(e) => {
                   e.preventDefault()
                   setIsDragging(true)
@@ -264,7 +323,7 @@ export function VideoToContentSection() {
                     {t(language, "generator.videoUploadHint")}
                   </p>
                 </div>
-              </button>
+              </label>
             ) : (
               <div className="rounded-xl border border-border/60 bg-muted/20 p-3 sm:p-4 space-y-3">
                 {previewUrl && (
@@ -274,7 +333,7 @@ export function VideoToContentSection() {
                       controls
                       playsInline
                       preload="metadata"
-                      className="w-full max-h-64 object-contain"
+                      className="w-full max-h-[170px] lg:max-h-64 object-contain"
                     />
                   </div>
                 )}
@@ -298,17 +357,17 @@ export function VideoToContentSection() {
                   </div>
 
                   <div className="flex items-center gap-1.5">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={isGenerating}
-                      onClick={() => fileInputRef.current?.click()}
-                      className="h-8 text-xs border-border/60"
+                    <label
+                      htmlFor={isGenerating ? undefined : "video-upload-input"}
+                      className={`inline-flex items-center justify-center rounded-md border border-border/60 bg-background px-2.5 h-8 text-xs font-medium transition-colors ${
+                        isGenerating
+                          ? "opacity-50 pointer-events-none"
+                          : "hover:bg-accent hover:text-accent-foreground cursor-pointer"
+                      }`}
                     >
                       <Film className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
                       {t(language, "generator.videoChange")}
-                    </Button>
+                    </label>
                     <Button
                       type="button"
                       variant="ghost"
@@ -376,35 +435,37 @@ export function VideoToContentSection() {
               </div>
             </div>
 
-            <Button
-              type="button"
-              onClick={handleGenerate}
-              disabled={!videoFile || isGenerating}
-              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 border-0 h-10"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden="true" />
-                  <span>
-                    {progressStage === "extracting"
-                      ? t(language, "generator.videoProgressExtracting")
-                      : t(language, "generator.videoProgressAnalyzing")}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4 mr-2" aria-hidden="true" />
-                  <span>{t(language, "generator.videoGenerate")}</span>
-                </>
-              )}
-            </Button>
+            <div className="sticky bottom-2 z-20 lg:static bg-background/90 backdrop-blur-sm pt-1.5 pb-0.5 rounded-xl lg:bg-transparent lg:backdrop-blur-none lg:p-0">
+              <Button
+                type="button"
+                onClick={handleGenerate}
+                disabled={!videoFile || isGenerating}
+                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 border-0 h-10"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden="true" />
+                    <span>
+                      {progressStage === "extracting"
+                        ? t(language, "generator.videoProgressExtracting")
+                        : t(language, "generator.videoProgressAnalyzing")}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-2" aria-hidden="true" />
+                    <span>{t(language, "generator.videoGenerate")}</span>
+                  </>
+                )}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
 
       <div
         ref={resultRef}
-        className="w-full lg:w-[440px] shrink-0 flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start"
+        className="w-full lg:w-[440px] shrink-0 flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start scroll-mt-4"
       >
         {!result ? (
           <Card className="border-border/60 border-dashed bg-card/60">
@@ -424,90 +485,62 @@ export function VideoToContentSection() {
           </Card>
         ) : (
           <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <div
+                role="tablist"
+                aria-label="Video output sections"
+                className="grid grid-cols-4 flex-1 rounded-xl bg-muted/60 p-1 border border-border/60 gap-1"
+              >
+                {outputTabs.map((tab) => {
+                  const isSelected = !showAllTabs && activeTab === tab.id
+                  const TabIcon = tab.icon
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={isSelected}
+                      onClick={() => {
+                        setShowAllTabs(false)
+                        setActiveTab(tab.id)
+                      }}
+                      className={`inline-flex items-center justify-center gap-1 rounded-lg px-1.5 sm:px-2 py-1.5 text-[11px] sm:text-xs font-medium transition-all cursor-pointer font-myanmar ${
+                        isSelected
+                          ? "bg-background text-foreground shadow-xs border border-border/60"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <TabIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      <span className="truncate">{tab.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
               <Button
                 type="button"
-                variant="outline"
+                variant={showAllTabs ? "default" : "outline"}
                 size="sm"
-                onClick={() => copyText("all", formatAllContent(result))}
-                className="flex-1 sm:flex-none border-border/60"
+                onClick={() => setShowAllTabs((prev) => !prev)}
+                className={`h-8 px-2.5 text-[11px] sm:text-xs shrink-0 font-myanmar ${
+                  showAllTabs
+                    ? "bg-blue-600 hover:bg-blue-700 text-white border-0"
+                    : "border-border/60"
+                }`}
               >
-                {copiedKey === "all" ? (
-                  <Check className="h-3.5 w-3.5 mr-1.5 text-emerald-500" aria-hidden="true" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                )}
-                {t(language, "generator.videoCopyAll")}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleSaveToVault}
-                className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white border-0"
-              >
-                <Save className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                {t(language, "generator.videoSaveVault")}
+                <LayoutList className="h-3.5 w-3.5 mr-1 shrink-0" aria-hidden="true" />
+                <span>{t(language, "generator.viewAll")}</span>
               </Button>
             </div>
 
-            {result.coverTitle && (
-              <Card className="border-border/60 shadow-sm">
-                <CardHeader className="py-3 px-4 border-b border-border/60 flex flex-row items-center justify-between space-y-0">
-                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                    <Type className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" aria-hidden="true" />
-                    {t(language, "generator.videoCoverTitle")}
-                  </CardTitle>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => copyText("cover", result.coverTitle)}
-                    className="h-7 px-2 text-xs"
-                  >
-                    {copiedKey === "cover" ? (
-                      <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
-                    ) : (
-                      <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                    )}
-                    <span className="ml-1">{t(language, "generator.copy")}</span>
-                  </Button>
-                </CardHeader>
-                <CardContent className="p-4">
-                  <p className="text-sm font-semibold font-myanmar leading-relaxed">
-                    {result.coverTitle}
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-
-            {result.hooks.length > 0 && (
-              <Card className="border-border/60 shadow-sm">
-                <CardHeader className="py-3 px-4 border-b border-border/60 flex flex-row items-center justify-between space-y-0">
+            {(showAllTabs || activeTab === "hooks") && result.hooks.length > 0 && (
+              <Card className="border-border/60 shadow-sm overflow-hidden">
+                <CardHeader className="py-2.5 px-4 border-b border-border/60 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                     <Zap className="h-3.5 w-3.5 text-amber-500" aria-hidden="true" />
                     {t(language, "generator.videoHooksTitle")}
                   </CardTitle>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() =>
-                      copyText(
-                        "hooks",
-                        result.hooks.map((h, i) => `${i + 1}. ${h}`).join("\n")
-                      )
-                    }
-                    className="h-7 px-2 text-xs"
-                  >
-                    {copiedKey === "hooks" ? (
-                      <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
-                    ) : (
-                      <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                    )}
-                    <span className="ml-1">{t(language, "generator.copy")}</span>
-                  </Button>
                 </CardHeader>
-                <CardContent className="p-4 space-y-2">
+                <CardContent className="p-3.5 sm:p-4 space-y-2">
                   {result.hooks.map((hook, index) => (
                     <div
                       key={`${index}-${hook.slice(0, 12)}`}
@@ -536,75 +569,171 @@ export function VideoToContentSection() {
                     </div>
                   ))}
                 </CardContent>
+                <CardFooter className="border-t border-border/60 bg-muted/10 px-4 py-2.5 flex items-center justify-between gap-2">
+                  <ReadAloudButton
+                    text={result.hooks.join("\n")}
+                    language={outputLanguage}
+                    size="xs"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      copyText(
+                        "hooks",
+                        result.hooks.map((h, i) => `${i + 1}. ${h}`).join("\n")
+                      )
+                    }
+                    className="h-8 px-3 text-xs border-border/60"
+                  >
+                    {copiedKey === "hooks" ? (
+                      <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                    <span className="ml-1.5">{t(language, "generator.copy")}</span>
+                  </Button>
+                </CardFooter>
               </Card>
             )}
 
-            {result.voiceoverScript && (
-              <Card className="border-border/60 shadow-sm">
-                <CardHeader className="py-3 px-4 border-b border-border/60 flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+            {(showAllTabs || activeTab === "voiceover") && result.voiceoverScript && (
+              <Card className="border-border/60 shadow-sm overflow-hidden">
+                <CardHeader className="py-2.5 px-4 border-b border-border/60 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                     <Mic className="h-3.5 w-3.5 text-indigo-500" aria-hidden="true" />
                     {t(language, "generator.videoVoiceoverTitle")}
                   </CardTitle>
-                  <div className="flex items-center gap-1 flex-wrap">
-                    <ReadAloudButton
-                      text={result.voiceoverScript}
-                      language={outputLanguage}
-                      size="xs"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => copyText("voiceover", result.voiceoverScript)}
-                      className="h-7 px-2 text-xs"
-                    >
-                      {copiedKey === "voiceover" ? (
-                        <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                      )}
-                      <span className="ml-1">{t(language, "generator.copy")}</span>
-                    </Button>
-                  </div>
                 </CardHeader>
-                <CardContent className="p-4">
+                <CardContent className="p-3.5 sm:p-4 max-h-[52vh] lg:max-h-none overflow-y-auto">
                   <p className="text-sm font-myanmar whitespace-pre-wrap leading-[1.85]">
                     {result.voiceoverScript}
                   </p>
                 </CardContent>
+                <CardFooter className="border-t border-border/60 bg-muted/10 px-4 py-2.5 flex items-center justify-between gap-2">
+                  <ReadAloudButton
+                    text={result.voiceoverScript}
+                    language={outputLanguage}
+                    size="xs"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => copyText("voiceover", result.voiceoverScript)}
+                    className="h-8 px-3 text-xs border-border/60"
+                  >
+                    {copiedKey === "voiceover" ? (
+                      <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                    <span className="ml-1.5">{t(language, "generator.copy")}</span>
+                  </Button>
+                </CardFooter>
               </Card>
             )}
 
-            {result.caption && (
-              <Card className="border-border/60 shadow-sm">
-                <CardHeader className="py-3 px-4 border-b border-border/60 flex flex-row items-center justify-between space-y-0">
+            {(showAllTabs || activeTab === "caption") && result.caption && (
+              <Card className="border-border/60 shadow-sm overflow-hidden">
+                <CardHeader className="py-2.5 px-4 border-b border-border/60 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                     <Hash className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
                     {t(language, "generator.videoCaptionTitle")}
                   </CardTitle>
+                </CardHeader>
+                <CardContent className="p-3.5 sm:p-4 max-h-[52vh] lg:max-h-none overflow-y-auto">
+                  <p className="text-sm font-myanmar whitespace-pre-wrap leading-[1.85]">
+                    {result.caption}
+                  </p>
+                </CardContent>
+                <CardFooter className="border-t border-border/60 bg-muted/10 px-4 py-2.5 flex items-center justify-between gap-2">
+                  <ReadAloudButton
+                    text={result.caption}
+                    language={outputLanguage}
+                    size="xs"
+                  />
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
                     onClick={() => copyText("caption", result.caption)}
-                    className="h-7 px-2 text-xs"
+                    className="h-8 px-3 text-xs border-border/60"
                   >
                     {copiedKey === "caption" ? (
                       <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
                     ) : (
                       <Copy className="h-3.5 w-3.5" aria-hidden="true" />
                     )}
-                    <span className="ml-1">{t(language, "generator.copy")}</span>
+                    <span className="ml-1.5">{t(language, "generator.copy")}</span>
                   </Button>
-                </CardHeader>
-                <CardContent className="p-4">
-                  <p className="text-sm font-myanmar whitespace-pre-wrap leading-[1.85]">
-                    {result.caption}
-                  </p>
-                </CardContent>
+                </CardFooter>
               </Card>
             )}
+
+            {(showAllTabs || activeTab === "cover") && result.coverTitle && (
+              <Card className="border-border/60 shadow-sm overflow-hidden">
+                <CardHeader className="py-2.5 px-4 border-b border-border/60 flex flex-row items-center justify-between space-y-0">
+                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Type className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" aria-hidden="true" />
+                    {t(language, "generator.videoCoverTitle")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-4">
+                  <p className="text-sm font-semibold font-myanmar leading-relaxed">
+                    {result.coverTitle}
+                  </p>
+                </CardContent>
+                <CardFooter className="border-t border-border/60 bg-muted/10 px-4 py-2.5 flex items-center justify-between gap-2">
+                  <ReadAloudButton
+                    text={result.coverTitle}
+                    language={outputLanguage}
+                    size="xs"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => copyText("cover", result.coverTitle)}
+                    className="h-8 px-3 text-xs border-border/60"
+                  >
+                    {copiedKey === "cover" ? (
+                      <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                    <span className="ml-1.5">{t(language, "generator.copy")}</span>
+                  </Button>
+                </CardFooter>
+              </Card>
+            )}
+
+            <div className="sticky bottom-2 z-20 lg:static flex items-center gap-2 rounded-xl border border-border/60 bg-card/95 backdrop-blur-md p-2 shadow-lg lg:border-0 lg:bg-transparent lg:backdrop-blur-none lg:p-0 lg:shadow-none">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => copyText("all", formatAllContent(result))}
+                className="flex-1 border-border/60 bg-background/80 h-9"
+              >
+                {copiedKey === "all" ? (
+                  <Check className="h-3.5 w-3.5 mr-1.5 text-emerald-500" aria-hidden="true" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                )}
+                {t(language, "generator.videoCopyAll")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleSaveToVault}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white border-0 h-9"
+              >
+                <Save className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                {t(language, "generator.videoSaveVault")}
+              </Button>
+            </div>
           </div>
         )}
       </div>

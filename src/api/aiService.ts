@@ -800,6 +800,36 @@ export interface VideoContentResult {
 
 const VIDEO_DIRECT_MAX_BYTES = 15 * 1024 * 1024
 
+const VIDEO_EXTENSIONS = [".mp4", ".mov", ".m4v", ".webm", ".3gp", ".mkv"]
+
+const EXTENSION_MIME_MAP: Record<string, string> = {
+  ".mp4": "video/mp4",
+  ".m4v": "video/mp4",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
+  ".3gp": "video/3gpp",
+  ".mkv": "video/x-matroska",
+}
+
+export function isSupportedVideoFile(file: File): boolean {
+  const mime = (file.type || "").toLowerCase()
+  if (mime.startsWith("video/")) {
+    return true
+  }
+  const name = (file.name || "").toLowerCase()
+  return VIDEO_EXTENSIONS.some((ext) => name.endsWith(ext))
+}
+
+function inferVideoMimeType(file: File): string {
+  const mime = (file.type || "").toLowerCase()
+  if (mime.startsWith("video/")) {
+    return file.type
+  }
+  const name = (file.name || "").toLowerCase()
+  const matchedExt = VIDEO_EXTENSIONS.find((ext) => name.endsWith(ext))
+  return (matchedExt && EXTENSION_MIME_MAP[matchedExt]) || "video/mp4"
+}
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -1148,7 +1178,7 @@ export async function generateVideoContent(
     mediaParts = [
       {
         inlineData: {
-          mimeType: params.file.type || "video/mp4",
+          mimeType: inferVideoMimeType(params.file),
           data: base64,
         },
       },
