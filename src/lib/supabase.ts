@@ -55,9 +55,11 @@ export interface Database {
 }
 
 const supabaseUrl =
-  (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() ?? ""
+  (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() ||
+  "https://knrmdweylsaiuxpjhdtn.supabase.co"
 const supabaseAnonKey =
-  (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() ?? ""
+  (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() ||
+  "sb_publishable_TqdbQwSuksfWq300XzBzXQ_yk3XxuOv"
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 

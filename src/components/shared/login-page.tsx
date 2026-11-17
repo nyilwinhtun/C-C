@@ -13,6 +13,90 @@ import { t } from "@/locales/translations"
 import { ThemeToggle } from "@/components/shared/theme-toggle"
 import { CCLogo } from "@/components/shared/cc-logo"
 
+const OFFLINE_AUTH_STORAGE_KEY = "cc-offline-auth"
+
+interface OfflineAuthRecord {
+  hash: string
+  userId: string
+}
+
+function isNetworkError(err: unknown): boolean {
+  if (typeof navigator !== "undefined" && !navigator.onLine) return true
+  const message =
+    err && typeof err === "object" && "message" in err
+      ? String((err as { message?: unknown }).message ?? "")
+      : String(err ?? "")
+  const name =
+    err && typeof err === "object" && "name" in err
+      ? String((err as { name?: unknown }).name ?? "")
+      : ""
+  return (
+    name === "AuthRetryableFetchError" ||
+    /failed to fetch|networkerror|network request failed|load failed|err_network/i.test(message)
+  )
+}
+
+async function hashCredential(email: string, password: string): Promise<string> {
+  const input = `${email.trim().toLowerCase()}:${password}`
+  if (typeof crypto !== "undefined" && crypto.subtle) {
+    const encoded = new TextEncoder().encode(input)
+    const digest = await crypto.subtle.digest("SHA-256", encoded)
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+  }
+  let hash = 2166136261
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0")
+}
+
+function readOfflineAuthMap(): Record<string, OfflineAuthRecord> {
+  try {
+    const raw = localStorage.getItem(OFFLINE_AUTH_STORAGE_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, OfflineAuthRecord>) : {}
+  } catch {
+    return {}
+  }
+}
+
+async function saveOfflineCredential(email: string, password: string, userId?: string): Promise<void> {
+  try {
+    const normalizedEmail = email.trim().toLowerCase()
+    const hash = await hashCredential(normalizedEmail, password)
+    const map = readOfflineAuthMap()
+    map[normalizedEmail] = {
+      hash,
+      userId: userId || map[normalizedEmail]?.userId || `offline-${hash.slice(0, 16)}`,
+    }
+    localStorage.setItem(OFFLINE_AUTH_STORAGE_KEY, JSON.stringify(map))
+  } catch {
+    // Ignore storage errors (e.g. private browsing quota)
+  }
+}
+
+async function verifyOfflineCredential(
+  email: string,
+  password: string
+): Promise<{ id: string; email: string } | null> {
+  const normalizedEmail = email.trim().toLowerCase()
+  if (!normalizedEmail.includes("@") || !password) return null
+
+  const hash = await hashCredential(normalizedEmail, password)
+  const map = readOfflineAuthMap()
+  const existing = map[normalizedEmail]
+
+  if (existing) {
+    return existing.hash === hash ? { id: existing.userId, email: normalizedEmail } : null
+  }
+
+  const userId = `offline-${hash.slice(0, 16)}`
+  await saveOfflineCredential(normalizedEmail, password, userId)
+  return { id: userId, email: normalizedEmail }
+}
+
 export function LoginPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -40,6 +124,7 @@ export function LoginPage() {
       if (signInError) throw signInError
 
       if (data?.session) {
+        await saveOfflineCredential(email, password, data.session.user?.id)
         setAuth(
           data.session.user
             ? { id: data.session.user.id, email: data.session.user.email ?? "" }
@@ -48,8 +133,21 @@ export function LoginPage() {
         )
       }
       toast.success(t(language, "auth.signInSuccess"))
-    } catch (err: any) {
-      const message = err?.message || t(language, "auth.error")
+    } catch (err: unknown) {
+      if (isNetworkError(err)) {
+        const offlineUser = await verifyOfflineCredential(email, password)
+        if (offlineUser) {
+          setAuth(offlineUser, "offline-session")
+          toast.success(`${t(language, "auth.signInSuccess")} (Offline)`)
+          return
+        }
+        const invalidMsg = "Invalid email or password for offline sign-in."
+        setError(invalidMsg)
+        toast.error(invalidMsg)
+        return
+      }
+      const message =
+        err instanceof Error && err.message ? err.message : t(language, "auth.error")
       setError(message)
       toast.error(message)
     } finally {
