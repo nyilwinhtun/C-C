@@ -124,18 +124,40 @@ const SYSTEM_PROMPT = `You are an expert social media copywriter and content str
 You create engaging, platform-native content in English, Myanmar (Burmese), or bilingual (Myanmar + English).
 
 Rules:
-- Write naturally for the selected platform (Facebook, TikTok, YouTube, Instagram).
+- Write naturally for the selected platform (Facebook, TikTok, YouTube, Instagram, Telegram).
 - Match the requested tone exactly.
-- If the language is "myanmar", write entirely in natural Myanmar (Burmese) Unicode script.
-- If the language is "bilingual", blend Myanmar and English naturally.
+- If the language is "myanmar" or "my":
+  - Write 100% in natural Myanmar (Burmese) Unicode script, even if the Topic is written in English.
+  - Write ALL video script labels and stage directions in Burmese (use "မြင်ကွင်း:", "အသံ:", "ဖန်သားပြင်စာသား:", "ပြောစကား:" instead of English "(Visual - ...)", "(Sound - ...)", "(Audio - ...)", or "[Visual Cue]").
+  - Keep international tech, product, and platform brand names (e.g., Redmi, iPhone, Samsung, TikTok, Facebook, Instagram, YouTube, Telegram) in their original English spelling rather than phonetic Burmese transliteration.
+- If the language is "bilingual", blend Myanmar and English naturally while keeping international brand names in English.
 - When includeHashtags is true, append relevant hashtags at the end.
-- Keep formatting clean with short paragraphs and emoji where appropriate.
+- NEVER use raw Markdown formatting symbols such as *, **, ***, # headings, or backticks. Output clean plain text ready to copy-paste directly onto Facebook or TikTok.
+- Keep formatting clean with short paragraphs, line breaks, and emoji where appropriate.
 - Output only the final content, no preamble or meta commentary.`
+
+function sanitizePlainText(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, (block) => block.replace(/```[a-zA-Z]*\n?/g, "").replace(/```/g, ""))
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s*#{1,6}\s+/gm, "")
+    .replace(/^\s*\*\s+/gm, "• ")
+    .replace(/\*\*\*([^*]+)\*\*\*/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*\n]+)\*/g, "$1")
+    .replace(/\*/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+}
 
 function buildUserPrompt(request: GenerateContentRequest): string {
   const hashtagInstruction = request.includeHashtags
     ? "Include relevant hashtags at the end."
     : "Do not include hashtags."
+  const isMyanmarOnly = request.language === "myanmar" || request.language === "my"
+  const myanmarRules = isMyanmarOnly
+    ? "\nStrict Myanmar Rules: Write 100% in natural Burmese script (even if the topic is in English). Use Burmese script labels like မြင်ကွင်း:, အသံ:, ဖန်သားပြင်စာသား:, ပြောစကား: instead of English stage directions. Keep international brand names (e.g., Redmi, iPhone, Samsung, TikTok, Facebook) in English spelling. Do NOT use Markdown symbols (*, **, # headings)."
+    : "\nFormatting Rule: Output clean plain text with no Markdown symbols (*, **, # headings)."
 
   if (request.instruction && request.currentContent) {
     return `Task: ${request.instruction}
@@ -143,7 +165,7 @@ Target Platform: ${request.platform}
 Target Content Type: ${request.contentType}
 Tone: ${request.tone}
 Output Language: ${request.language}
-${hashtagInstruction}
+${hashtagInstruction}${myanmarRules}
 
 Current content to transform:
 """
@@ -158,7 +180,7 @@ Content type: ${request.contentType}
 Tone: ${request.tone}
 Language: ${request.language}
 Topic: ${request.topic}
-${hashtagInstruction}
+${hashtagInstruction}${myanmarRules}
 Write the content now.`
 }
 
@@ -232,11 +254,12 @@ async function generateWithGemini(
   const data = await res.json()
   const parts: Array<{ text?: string; thought?: boolean }> =
     data.candidates?.[0]?.content?.parts ?? []
-  const content = parts
-    .filter((part) => !part.thought && typeof part.text === "string")
-    .map((part) => part.text)
-    .join("")
-    .trim()
+  const content = sanitizePlainText(
+    parts
+      .filter((part) => !part.thought && typeof part.text === "string")
+      .map((part) => part.text)
+      .join("")
+  )
 
   if (!content) {
     const finishReason = data.candidates?.[0]?.finishReason
@@ -303,7 +326,9 @@ async function generateWithOpenAICompatible(
   }
 
   const data = await res.json()
-  const content = data.choices?.[0]?.message?.content?.trim() ?? ""
+  const content = sanitizePlainText(
+    data.choices?.[0]?.message?.content ?? ""
+  )
 
   if (!content) {
     throw new Error(`No content returned from ${provider} API.`)
@@ -540,11 +565,12 @@ async function suggestPhotoWithGemini(
   const data = await res.json()
   const parts: Array<{ text?: string; thought?: boolean }> =
     data.candidates?.[0]?.content?.parts ?? []
-  const content = parts
-    .filter((part) => !part.thought && typeof part.text === "string")
-    .map((part) => part.text)
-    .join("")
-    .trim()
+  const content = sanitizePlainText(
+    parts
+      .filter((part) => !part.thought && typeof part.text === "string")
+      .map((part) => part.text)
+      .join("")
+  )
 
   if (!content) {
     throw new Error("No content returned from Gemini Vision API.")
@@ -602,7 +628,9 @@ async function suggestPhotoWithOpenAICompatible(
   }
 
   const data = await res.json()
-  const content = data.choices?.[0]?.message?.content?.trim() ?? ""
+  const content = sanitizePlainText(
+    data.choices?.[0]?.message?.content ?? ""
+  )
   if (!content) {
     throw new Error(`No content returned from ${provider} Vision API.`)
   }

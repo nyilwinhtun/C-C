@@ -27,6 +27,7 @@ import {
   Hash,
   Store,
   Check,
+  AlertTriangle,
 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
@@ -67,6 +68,28 @@ import {
 
 function extractHashtags(text: string): string[] {
   return [...text.matchAll(/#[^\s#]+/g)].map((match) => match[0].slice(1))
+}
+
+const FB_FOLD_LIMIT = 140
+
+const PLATFORM_CHAR_LIMITS: Record<string, number> = {
+  tiktok: 2200,
+  instagram: 2200,
+  telegram: 4096,
+  youtube: 5000,
+  facebook: 63206,
+}
+
+function getOpeningHookLength(text: string): number {
+  const trimmed = text.trim()
+  if (!trimmed) return 0
+  const firstParagraph = trimmed.split(/\n\s*\n/)[0] ?? ""
+  const hookText = firstParagraph.split("\n").slice(0, 2).join("\n").trim()
+  return hookText.length
+}
+
+function getPlatformCharLimit(platform?: string): number {
+  return PLATFORM_CHAR_LIMITS[(platform || "instagram").toLowerCase()] ?? 2200
 }
 
 function getPlatformMeta(platform?: string) {
@@ -114,6 +137,13 @@ const REFINE_OPTIONS = [
     instruction:
       "Rewrite the following post with stronger sales urgency and a clear, compelling call-to-action (CTA).",
   },
+  {
+    id: "swap_hook",
+    labelKey: "generator.refineSwapHook",
+    icon: RefreshCw,
+    instruction:
+      "Rewrite ONLY the first 2 opening hook lines of the following post to be more attention-grabbing and scroll-stopping, while keeping the rest of the body, details, hashtags, and call-to-action (CTA) completely unchanged.",
+  },
 ] as const
 
 const REPURPOSE_OPTIONS = [
@@ -133,7 +163,7 @@ const REPURPOSE_OPTIONS = [
     platform: "telegram",
     contentType: "post_caption",
     instruction:
-      "Transform the following post into a Telegram channel post formatted with clear bullet points and **bold** highlights.",
+      "Transform the following post into a Telegram channel post formatted with clear bullet points and clean plain-text highlights (no Markdown asterisks).",
   },
   {
     id: "ig_caption",
@@ -526,6 +556,12 @@ export function GeneratorPage() {
   const PlatformIcon = platformMeta.icon
   const selectedTone = formValues.tone
 
+  const hookLength = getOpeningHookLength(contentToShow)
+  const fitsFbFold = hookLength <= FB_FOLD_LIMIT
+  const platformLimit = getPlatformCharLimit(activePlatform)
+  const isOverPlatformLimit = charCount > platformLimit
+  const isNearPlatformLimit = !isOverPlatformLimit && charCount >= platformLimit * 0.85
+
   const trimmedSignature = brandSignature.trim()
   const isFooterApplied = Boolean(
     trimmedSignature && contentToShow.trimEnd().endsWith(trimmedSignature)
@@ -909,6 +945,58 @@ export function GeneratorPage() {
                   charCount={charCount}
                   wordCount={wordCount}
                 />
+              )}
+              {(result || displayedText) && !isGeneratingFlag && contentToShow && (
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/60">
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium font-myanmar ${
+                      fitsFbFold
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                        : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                    }`}
+                  >
+                    {fitsFbFold ? (
+                      <Check className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    ) : (
+                      <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    )}
+                    <span>
+                      {t(
+                        language,
+                        fitsFbFold ? "generator.fbFoldFits" : "generator.fbFoldExceeds",
+                        { count: String(hookLength) }
+                      )}
+                    </span>
+                  </span>
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium font-myanmar ${
+                      isOverPlatformLimit
+                        ? "border-destructive/30 bg-destructive/10 text-destructive"
+                        : isNearPlatformLimit
+                          ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                          : "border-border/60 bg-muted/40 text-muted-foreground"
+                    }`}
+                  >
+                    {(isOverPlatformLimit || isNearPlatformLimit) && (
+                      <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    )}
+                    <span>
+                      {t(
+                        language,
+                        isOverPlatformLimit
+                          ? "generator.charLimitOver"
+                          : isNearPlatformLimit
+                            ? "generator.charLimitNear"
+                            : "generator.charLimitOk",
+                        {
+                          platform: platformMeta.label,
+                          count: charCount.toLocaleString(),
+                          limit: platformLimit.toLocaleString(),
+                        }
+                      )}
+                    </span>
+                  </span>
+                </div>
               )}
             </CardContent>
             <CardFooter className="border-t border-border/60 bg-muted/10 pt-4">
