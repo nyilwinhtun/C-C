@@ -91,7 +91,7 @@ export function Layout() {
           onMenuToggle={() => setMobileOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
         />
-        <main className="flex-1 overflow-y-auto bg-background text-foreground p-4 sm:p-6 pb-20 md:pb-8">
+        <main className="flex-1 overflow-y-auto bg-background text-foreground p-4 sm:p-6 pb-24 md:pb-8">
           <div className="mx-auto max-w-6xl">
             {activePageKey !== "generator" && activePageKey !== "photo-studio" && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6">
@@ -108,7 +108,7 @@ export function Layout() {
       {/* Mobile Fixed Bottom Navigation Bar */}
       <nav
         aria-label={t(language, "sidebar.mobile_nav_title")}
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border/60 bg-background/85 backdrop-blur-md"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border/60 bg-background/85 backdrop-blur-md pb-[env(safe-area-inset-bottom)]"
       >
         <div className="grid grid-cols-5 items-stretch">
           {mobileNavItems.map((item) => {

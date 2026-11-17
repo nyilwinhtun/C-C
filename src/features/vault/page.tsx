@@ -193,7 +193,7 @@ export function VaultPage() {
         <DialogDescription>{t(language, "vault.desc")}</DialogDescription>
         <Separator className="my-4" />
         <form onSubmit={form.handleSubmit(handleSubmit)} className="grid gap-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
               <Label>{t(language, "vault.formTitle")}</Label>
               <Input {...form.register("title")} placeholder={t(language, "vault.formTitlePlaceholder")} />
@@ -276,7 +276,7 @@ export function VaultPage() {
             {t(language, "vault.savedCount", { count: String(savedVault.length) })}
           </CardDescription>
         </div>
-        <div className="flex items-center gap-2 w-full lg:w-auto">
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full lg:w-auto">
           <Input
             placeholder={t(language, "vault.search")}
             value={search}
@@ -294,7 +294,7 @@ export function VaultPage() {
         value={platformFilter}
         onValueChange={(value) => setPlatformFilter(value as PlatformFilter)}
       >
-        <TabsList>
+        <TabsList className="flex-wrap h-auto max-w-full justify-start">
           <TabsTrigger value="all">{t(language, "vault.filterPlatform")}</TabsTrigger>
           {PLATFORMS.map((p) => (
             <TabsTrigger key={p.value} value={p.value}>{p.label}</TabsTrigger>
@@ -310,13 +310,13 @@ export function VaultPage() {
           </CardHeader>
         </Card>
       ) : (
-        <div className="grid gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filteredItems.map((item) => (
-            <Card key={item.id} className="border rounded-xl p-4">
+            <Card key={item.id} className="border rounded-xl p-4 flex flex-col justify-between min-w-0">
               <CardHeader>
-                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-2">
-                  <div>
-                    <h3 className="font-semibold leading-relaxed">{item.title}</h3>
+                <div className="flex flex-col gap-3 mb-2">
+                  <div className="min-w-0">
+                    <h3 className="font-semibold leading-relaxed break-words">{item.title}</h3>
                     <div className="flex items-center gap-2 mt-1">
                       <Badge variant="outline">{STATUS_LABEL[item.status]}</Badge>
                       <span className="text-xs text-muted-foreground leading-relaxed capitalize">
@@ -324,7 +324,7 @@ export function VaultPage() {
                       </span>
                     </div>
                   </div>
-                  <div className="flex flex-col gap-2 w-full sm:flex-row sm:w-auto sm:items-center">
+                  <div className="flex flex-col gap-2 w-full">
                     <Select
                       value={item.status}
                       onChange={(e) =>
@@ -349,7 +349,7 @@ export function VaultPage() {
                             [item.id]: e.target.value,
                           }))
                         }
-                        className="h-8 w-[145px] px-2 text-xs"
+                        className="h-8 flex-1 min-w-0 px-2 text-xs"
                       />
                       <Button
                         type="button"

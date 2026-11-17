@@ -23,14 +23,17 @@ import {
   Trash2,
   Eye,
   EyeOff,
+  Scissors,
+  Layers,
+  AlertCircle,
 } from "lucide-react"
+import { removeBackground } from "@imgly/background-removal"
 import { useShallow } from "zustand/react/shallow"
 import { toast } from "@/components/ui/sonner"
 import { useUIStore } from "@/store/useUIStore"
 import { useContentStore } from "@/store/useContentStore"
 import { t } from "@/locales/translations"
 import {
-  generateProductScene,
   suggestFromPhoto,
   type PhotoCategoryKey,
 } from "@/api/aiService"
@@ -187,6 +190,424 @@ const SCENE_PRESETS = [
   },
 ] as const
 
+type StudioBackdropKey =
+  | "white"
+  | "slate"
+  | "indigo"
+  | "sunset"
+  | "emerald"
+  | "black"
+  | "desk"
+  | "marble"
+  | "cafe"
+  | "pastel"
+
+type ScenePresetId = "white" | "desk" | "marble" | "cafe"
+
+function resolveSceneFromPrompt(prompt: string): StudioBackdropKey {
+  const lower = prompt.toLowerCase()
+  if (/(desk|tech|cyber|gaming|monitor|keyboard|neon|navy|dark)/.test(lower)) {
+    return "desk"
+  }
+  if (/(marble|luxury|carrara|stone|travertine|granite)/.test(lower)) {
+    return "marble"
+  }
+  if (/(cafe|coffee|wood|oak|walnut|rustic|table|bakery)/.test(lower)) {
+    return "cafe"
+  }
+  if (/(pastel|pink|rose|peach|morning|podium|blush|cream|lavender)/.test(lower)) {
+    return "pastel"
+  }
+  if (/(emerald|forest|mint|nature|leaf|green)/.test(lower)) {
+    return "emerald"
+  }
+  if (/(sunset|gold|golden|amber|orange)/.test(lower)) {
+    return "sunset"
+  }
+  if (/(indigo|royal|purple|violet|galaxy)/.test(lower)) {
+    return "indigo"
+  }
+  if (/(black|obsidian|midnight|pitch)/.test(lower)) {
+    return "black"
+  }
+  if (/(slate|gray|grey|concrete|cement)/.test(lower)) {
+    return "slate"
+  }
+  return "white"
+}
+
+function isDarkStudioBackdrop(backdrop: StudioBackdropKey): boolean {
+  return (
+    backdrop === "indigo" ||
+    backdrop === "emerald" ||
+    backdrop === "black" ||
+    backdrop === "desk" ||
+    backdrop === "cafe"
+  )
+}
+
+interface StudioBackdropOption {
+  id: StudioBackdropKey
+  labelKey: string
+  swatchStyle: string
+  isDark: boolean
+}
+
+const STUDIO_BACKDROPS: StudioBackdropOption[] = [
+  {
+    id: "white",
+    labelKey: "photoStudio.backdropWhite",
+    swatchStyle: "linear-gradient(145deg, #ffffff 0%, #f1f5f9 100%)",
+    isDark: false,
+  },
+  {
+    id: "slate",
+    labelKey: "photoStudio.backdropSlate",
+    swatchStyle: "linear-gradient(145deg, #f8fafc 0%, #cbd5e1 100%)",
+    isDark: false,
+  },
+  {
+    id: "indigo",
+    labelKey: "photoStudio.backdropIndigo",
+    swatchStyle: "linear-gradient(145deg, #1e1b4b 0%, #4338ca 55%, #6366f1 100%)",
+    isDark: true,
+  },
+  {
+    id: "sunset",
+    labelKey: "photoStudio.backdropSunset",
+    swatchStyle: "linear-gradient(145deg, #fef3c7 0%, #f59e0b 55%, #ea580c 100%)",
+    isDark: false,
+  },
+  {
+    id: "emerald",
+    labelKey: "photoStudio.backdropEmerald",
+    swatchStyle: "radial-gradient(circle at 50% 42%, #10b981 0%, #065f46 48%, #022c22 100%)",
+    isDark: true,
+  },
+  {
+    id: "black",
+    labelKey: "photoStudio.backdropBlack",
+    swatchStyle: "radial-gradient(circle at 50% 42%, #1e293b 0%, #090d16 55%, #030712 100%)",
+    isDark: true,
+  },
+]
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error("Failed to read cutout image"))
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result)
+      } else {
+        reject(new Error("Invalid cutout image data"))
+      }
+    }
+    reader.readAsDataURL(blob)
+  })
+}
+
+function drawStudioBackdrop(
+  ctx: CanvasRenderingContext2D,
+  backdrop: StudioBackdropKey,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+) {
+  const cx = x + w / 2
+  const cy = y + h * 0.42
+  const radius = Math.max(w, h) * 0.72
+  const floorY = y + h * 0.7
+
+  if (backdrop === "white") {
+    // Clean Studio White: Soft radial studio spotlight + subtle studio floor horizon
+    const wallGrad = ctx.createRadialGradient(cx, y + h * 0.34, w * 0.06, cx, cy, radius)
+    wallGrad.addColorStop(0, "#FFFFFF")
+    wallGrad.addColorStop(0.65, "#F8FAFC")
+    wallGrad.addColorStop(1, "#E6ECF4")
+    ctx.fillStyle = wallGrad
+    ctx.fillRect(x, y, w, h)
+
+    const floorGrad = ctx.createLinearGradient(0, floorY, 0, y + h)
+    floorGrad.addColorStop(0, "rgba(241, 245, 249, 0.9)")
+    floorGrad.addColorStop(0.4, "rgba(226, 232, 240, 0.85)")
+    floorGrad.addColorStop(1, "rgba(203, 213, 225, 0.95)")
+    ctx.fillStyle = floorGrad
+    ctx.fillRect(x, floorY, w, y + h - floorY)
+
+    const horizonGrad = ctx.createLinearGradient(0, floorY - 8, 0, floorY + 12)
+    horizonGrad.addColorStop(0, "rgba(203, 213, 225, 0)")
+    horizonGrad.addColorStop(0.5, "rgba(148, 163, 184, 0.22)")
+    horizonGrad.addColorStop(1, "rgba(203, 213, 225, 0)")
+    ctx.fillStyle = horizonGrad
+    ctx.fillRect(x, floorY - 8, w, 20)
+    return
+  }
+
+  if (backdrop === "desk") {
+    // Modern Tech Desk: Dark slate/navy surface + cyan/indigo rim lighting glow
+    const wallGrad = ctx.createLinearGradient(x, y, x, floorY)
+    wallGrad.addColorStop(0, "#050814")
+    wallGrad.addColorStop(0.6, "#0B1222")
+    wallGrad.addColorStop(1, "#131C31")
+    ctx.fillStyle = wallGrad
+    ctx.fillRect(x, y, w, floorY - y)
+
+    const indigoGlow = ctx.createRadialGradient(
+      x + w * 0.32,
+      y + h * 0.36,
+      w * 0.04,
+      x + w * 0.32,
+      y + h * 0.36,
+      w * 0.52
+    )
+    indigoGlow.addColorStop(0, "rgba(99, 102, 241, 0.32)")
+    indigoGlow.addColorStop(0.55, "rgba(79, 70, 229, 0.1)")
+    indigoGlow.addColorStop(1, "rgba(15, 23, 42, 0)")
+    ctx.fillStyle = indigoGlow
+    ctx.fillRect(x, y, w, h)
+
+    const cyanGlow = ctx.createRadialGradient(
+      x + w * 0.72,
+      y + h * 0.44,
+      w * 0.04,
+      x + w * 0.72,
+      y + h * 0.44,
+      w * 0.5
+    )
+    cyanGlow.addColorStop(0, "rgba(6, 182, 212, 0.26)")
+    cyanGlow.addColorStop(0.55, "rgba(14, 165, 233, 0.08)")
+    cyanGlow.addColorStop(1, "rgba(15, 23, 42, 0)")
+    ctx.fillStyle = cyanGlow
+    ctx.fillRect(x, y, w, h)
+
+    const deskGrad = ctx.createLinearGradient(0, floorY, 0, y + h)
+    deskGrad.addColorStop(0, "#111A2E")
+    deskGrad.addColorStop(0.25, "#0B1120")
+    deskGrad.addColorStop(1, "#030712")
+    ctx.fillStyle = deskGrad
+    ctx.fillRect(x, floorY, w, y + h - floorY)
+
+    const rimGrad = ctx.createLinearGradient(x, floorY, x + w, floorY)
+    rimGrad.addColorStop(0, "rgba(99, 102, 241, 0.05)")
+    rimGrad.addColorStop(0.3, "rgba(99, 102, 241, 0.45)")
+    rimGrad.addColorStop(0.7, "rgba(34, 211, 238, 0.45)")
+    rimGrad.addColorStop(1, "rgba(34, 211, 238, 0.05)")
+    ctx.fillStyle = rimGrad
+    ctx.fillRect(x, floorY - 1, w, 3)
+    return
+  }
+
+  if (backdrop === "marble") {
+    // Luxury Marble Table: Warm studio wall + procedural white/gray veined marble surface
+    const wallGrad = ctx.createRadialGradient(
+      x + w * 0.28,
+      y + h * 0.22,
+      w * 0.05,
+      cx,
+      cy,
+      radius
+    )
+    wallGrad.addColorStop(0, "#FFFDF9")
+    wallGrad.addColorStop(0.55, "#F5F1EB")
+    wallGrad.addColorStop(1, "#E5DFD5")
+    ctx.fillStyle = wallGrad
+    ctx.fillRect(x, y, w, floorY - y)
+
+    const tableGrad = ctx.createLinearGradient(0, floorY, 0, y + h)
+    tableGrad.addColorStop(0, "#FAF8F5")
+    tableGrad.addColorStop(0.5, "#EFECE6")
+    tableGrad.addColorStop(1, "#DDD7CE")
+    ctx.fillStyle = tableGrad
+    ctx.fillRect(x, floorY, w, y + h - floorY)
+
+    // Procedural Carrara marble veins clipped to tabletop
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(x, floorY, w, y + h - floorY)
+    ctx.clip()
+
+    const tableH = y + h - floorY
+    const veins: Array<{
+      pts: [number, number, number, number, number, number, number, number]
+      color: string
+      width: number
+    }> = [
+      {
+        pts: [0.02, 0.18, 0.25, 0.35, 0.48, 0.12, 0.78, 0.42],
+        color: "rgba(148, 163, 184, 0.24)",
+        width: 2.6,
+      },
+      {
+        pts: [0.18, 0.75, 0.38, 0.48, 0.62, 0.68, 0.96, 0.22],
+        color: "rgba(100, 116, 139, 0.18)",
+        width: 1.8,
+      },
+      {
+        pts: [-0.04, 0.55, 0.22, 0.62, 0.52, 0.38, 0.85, 0.82],
+        color: "rgba(148, 163, 184, 0.2)",
+        width: 2.2,
+      },
+      {
+        pts: [0.35, 0.08, 0.55, 0.28, 0.72, 0.18, 1.02, 0.58],
+        color: "rgba(180, 145, 90, 0.16)",
+        width: 1.4,
+      },
+      {
+        pts: [0.08, 0.88, 0.34, 0.72, 0.66, 0.9, 0.94, 0.65],
+        color: "rgba(100, 116, 139, 0.14)",
+        width: 1.5,
+      },
+    ]
+
+    for (const vein of veins) {
+      const [x0, y0, x1, y1, x2, y2, x3, y3] = vein.pts
+      ctx.beginPath()
+      ctx.moveTo(x + w * x0, floorY + tableH * y0)
+      ctx.bezierCurveTo(
+        x + w * x1,
+        floorY + tableH * y1,
+        x + w * x2,
+        floorY + tableH * y2,
+        x + w * x3,
+        floorY + tableH * y3
+      )
+      ctx.strokeStyle = vein.color
+      ctx.lineWidth = vein.width
+      ctx.stroke()
+    }
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.45)"
+    ctx.fillRect(x, floorY, w, 2)
+    ctx.restore()
+    return
+  }
+
+  if (backdrop === "cafe") {
+    // Warm Cafe Wood: Golden ambient studio light + oak/walnut woodgrain tabletop
+    const wallGrad = ctx.createRadialGradient(
+      x + w * 0.5,
+      y + h * 0.28,
+      w * 0.05,
+      cx,
+      cy,
+      radius
+    )
+    wallGrad.addColorStop(0, "#5C3A21")
+    wallGrad.addColorStop(0.55, "#3B2314")
+    wallGrad.addColorStop(1, "#1D1008")
+    ctx.fillStyle = wallGrad
+    ctx.fillRect(x, y, w, floorY - y)
+
+    const warmBokeh = ctx.createRadialGradient(
+      x + w * 0.24,
+      y + h * 0.24,
+      w * 0.02,
+      x + w * 0.24,
+      y + h * 0.24,
+      w * 0.36
+    )
+    warmBokeh.addColorStop(0, "rgba(251, 191, 36, 0.2)")
+    warmBokeh.addColorStop(1, "rgba(251, 191, 36, 0)")
+    ctx.fillStyle = warmBokeh
+    ctx.fillRect(x, y, w, floorY - y)
+
+    const woodGrad = ctx.createLinearGradient(0, floorY, 0, y + h)
+    woodGrad.addColorStop(0, "#8B5A2B")
+    woodGrad.addColorStop(0.45, "#6E441E")
+    woodGrad.addColorStop(1, "#45270D")
+    ctx.fillStyle = woodGrad
+    ctx.fillRect(x, floorY, w, y + h - floorY)
+
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(x, floorY, w, y + h - floorY)
+    ctx.clip()
+    const tableH = y + h - floorY
+    const grainRows = 16
+    for (let i = 0; i < grainRows; i++) {
+      const gy = floorY + (tableH * (i + 0.5)) / grainRows
+      const wave = ((i % 3) - 1) * 6
+      ctx.beginPath()
+      ctx.moveTo(x, gy)
+      ctx.bezierCurveTo(
+        x + w * 0.33,
+        gy + wave,
+        x + w * 0.66,
+        gy - wave,
+        x + w,
+        gy + (i % 2 === 0 ? 2 : -2)
+      )
+      ctx.strokeStyle =
+        i % 4 === 0 ? "rgba(224, 163, 84, 0.16)" : "rgba(32, 16, 5, 0.24)"
+      ctx.lineWidth = i % 5 === 0 ? 2.5 : 1.4
+      ctx.stroke()
+    }
+    ctx.fillStyle = "rgba(251, 191, 36, 0.22)"
+    ctx.fillRect(x, floorY, w, 2)
+    ctx.restore()
+    return
+  }
+
+  if (backdrop === "pastel") {
+    const wallGrad = ctx.createRadialGradient(
+      x + w * 0.72,
+      y + h * 0.25,
+      w * 0.05,
+      cx,
+      cy,
+      radius
+    )
+    wallGrad.addColorStop(0, "#FFF9F2")
+    wallGrad.addColorStop(0.55, "#FDECE4")
+    wallGrad.addColorStop(1, "#F5D7CE")
+    ctx.fillStyle = wallGrad
+    ctx.fillRect(x, y, w, h)
+
+    const floorGrad = ctx.createLinearGradient(0, floorY, 0, y + h)
+    floorGrad.addColorStop(0, "rgba(253, 232, 224, 0.9)")
+    floorGrad.addColorStop(1, "rgba(241, 205, 194, 0.95)")
+    ctx.fillStyle = floorGrad
+    ctx.fillRect(x, floorY, w, y + h - floorY)
+    return
+  }
+
+  if (backdrop === "slate") {
+    const grad = ctx.createLinearGradient(x, y, x + w, y + h)
+    grad.addColorStop(0, "#F1F5F9")
+    grad.addColorStop(0.55, "#CBD5E1")
+    grad.addColorStop(1, "#94A3B8")
+    ctx.fillStyle = grad
+  } else if (backdrop === "indigo") {
+    const grad = ctx.createLinearGradient(x, y, x + w, y + h)
+    grad.addColorStop(0, "#1E1B4B")
+    grad.addColorStop(0.52, "#3730A3")
+    grad.addColorStop(1, "#6366F1")
+    ctx.fillStyle = grad
+  } else if (backdrop === "sunset") {
+    const grad = ctx.createLinearGradient(x, y, x + w, y + h)
+    grad.addColorStop(0, "#FEF3C7")
+    grad.addColorStop(0.5, "#F59E0B")
+    grad.addColorStop(1, "#EA580C")
+    ctx.fillStyle = grad
+  } else if (backdrop === "emerald") {
+    const grad = ctx.createRadialGradient(cx, cy, w * 0.05, cx, cy, radius)
+    grad.addColorStop(0, "#10B981")
+    grad.addColorStop(0.45, "#065F46")
+    grad.addColorStop(1, "#022C22")
+    ctx.fillStyle = grad
+  } else {
+    const grad = ctx.createRadialGradient(cx, cy, w * 0.05, cx, cy, radius)
+    grad.addColorStop(0, "#1E293B")
+    grad.addColorStop(0.5, "#090D16")
+    grad.addColorStop(1, "#030712")
+    ctx.fillStyle = grad
+  }
+
+  ctx.fillRect(x, y, w, h)
+}
+
 function resizeLogoToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -307,12 +728,88 @@ function drawCoverImage(
   h: number,
   brightness: number,
   contrast: number,
-  extraBlurPx = 0
+  extraBlurPx = 0,
+  studioBackdrop?: StudioBackdropKey | null
 ) {
   ctx.save()
   ctx.beginPath()
   ctx.rect(x, y, w, h)
   ctx.clip()
+
+  if (studioBackdrop) {
+    if (extraBlurPx > 0) {
+      ctx.filter = `blur(${extraBlurPx}px)`
+    }
+    drawStudioBackdrop(ctx, studioBackdrop, x, y, w, h)
+    ctx.filter = "none"
+
+    const filterParts = [`brightness(${brightness}%)`, `contrast(${contrast}%)`]
+    if (extraBlurPx > 0) {
+      filterParts.push(`blur(${extraBlurPx}px)`)
+    }
+    ctx.filter = filterParts.join(" ")
+
+    const natW = img.naturalWidth || w
+    const natH = img.naturalHeight || h
+    const padScale = 0.8
+    const scale = Math.min((w * padScale) / natW, (h * padScale) / natH)
+    const drawW = Math.max(1, Math.round(natW * scale))
+    const drawH = Math.max(1, Math.round(natH * scale))
+    const offsetX = x + (w - drawW) / 2
+    const offsetY = y + (h - drawH) * 0.46
+
+    const isDark = isDarkStudioBackdrop(studioBackdrop)
+
+    // Sleek surface reflection for Modern Tech Desk
+    if (studioBackdrop === "desk" && extraBlurPx === 0) {
+      ctx.save()
+      const reflTop = offsetY + drawH - 2
+      ctx.beginPath()
+      ctx.rect(x, reflTop, w, Math.max(0, y + h - reflTop))
+      ctx.clip()
+      ctx.globalAlpha = 0.14
+      ctx.translate(0, reflTop * 2)
+      ctx.scale(1, -1)
+      ctx.drawImage(img, offsetX, offsetY, drawW, drawH)
+      ctx.restore()
+    }
+
+    // Grounded elliptical contact shadow beneath the product
+    ctx.save()
+    const shadowCenterX = offsetX + drawW / 2
+    const shadowCenterY = offsetY + drawH - Math.min(8, drawH * 0.02)
+    const shadowRx = Math.max(24, drawW * 0.42)
+    const shadowRy = Math.max(10, drawH * 0.05)
+    ctx.translate(shadowCenterX, shadowCenterY)
+    ctx.scale(1, shadowRy / shadowRx)
+    const contactGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, shadowRx)
+    contactGrad.addColorStop(
+      0,
+      isDark ? "rgba(0, 0, 0, 0.72)" : "rgba(15, 23, 42, 0.28)"
+    )
+    contactGrad.addColorStop(
+      0.55,
+      isDark ? "rgba(0, 0, 0, 0.32)" : "rgba(15, 23, 42, 0.12)"
+    )
+    contactGrad.addColorStop(1, "rgba(0, 0, 0, 0)")
+    ctx.fillStyle = contactGrad
+    ctx.beginPath()
+    ctx.arc(0, 0, shadowRx, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+
+    ctx.shadowColor = isDark
+      ? "rgba(0, 0, 0, 0.65)"
+      : "rgba(15, 23, 42, 0.26)"
+    ctx.shadowBlur = 32
+    ctx.shadowOffsetX = 0
+    ctx.shadowOffsetY = 16
+
+    ctx.drawImage(img, offsetX, offsetY, drawW, drawH)
+    ctx.filter = "none"
+    ctx.restore()
+    return
+  }
 
   const filterParts = [`brightness(${brightness}%)`, `contrast(${contrast}%)`]
   if (extraBlurPx > 0) {
@@ -675,9 +1172,16 @@ export function PhotoStudioPage() {
   const [loadedLogo, setLoadedLogo] = useState<HTMLImageElement | null>(null)
 
   const [scenePrompt, setScenePrompt] = useState("")
-  const [selectedScenePreset, setSelectedScenePreset] = useState<string | null>(null)
   const [isGeneratingScene, setIsGeneratingScene] = useState(false)
   const [hasAiScene, setHasAiScene] = useState(false)
+
+  const [cutoutImageDataUrl, setCutoutImageDataUrl] = useState<string | null>(null)
+  const [isCutoutActive, setIsCutoutActive] = useState(false)
+  const [isRemovingBg, setIsRemovingBg] = useState(false)
+  const [bgRemovalProgress, setBgRemovalProgress] = useState<number | null>(null)
+  const [bgRemovalStage, setBgRemovalStage] = useState<string>("")
+  const [bgRemovalError, setBgRemovalError] = useState<string | null>(null)
+  const [studioBackdrop, setStudioBackdrop] = useState<StudioBackdropKey>("white")
 
   const [caption, setCaption] = useState("")
   const [isAnalyzing, setIsAnalyzing] = useState(false)
@@ -718,6 +1222,10 @@ export function PhotoStudioPage() {
           setImageDataUrl(reader.result)
           setOriginalImageDataUrl(reader.result)
           setHasAiScene(false)
+          setCutoutImageDataUrl(null)
+          setIsCutoutActive(false)
+          setBgRemovalError(null)
+          setBgRemovalProgress(null)
         }
       }
       reader.readAsDataURL(file)
@@ -818,9 +1326,22 @@ export function PhotoStudioPage() {
     const specs = [spec1, spec2, spec3]
     const chosenHex = TEXT_COLORS[textColor].hex
 
+    const activeStudioBackdrop = isCutoutActive ? studioBackdrop : null
+
     if (layoutTemplate === "gradient") {
       // 1. Full-bleed photo with brightness/contrast filter
-      drawCoverImage(ctx, loadedImage, 0, 0, width, height, brightness, contrast)
+      drawCoverImage(
+        ctx,
+        loadedImage,
+        0,
+        0,
+        width,
+        height,
+        brightness,
+        contrast,
+        0,
+        activeStudioBackdrop
+      )
 
       // 2. Category-aware smooth gradient overlay
       const hasContent =
@@ -947,7 +1468,18 @@ export function PhotoStudioPage() {
       const cardY = photoH
       const cardH = height - photoH
 
-      drawCoverImage(ctx, loadedImage, 0, 0, width, photoH, brightness, contrast)
+      drawCoverImage(
+        ctx,
+        loadedImage,
+        0,
+        0,
+        width,
+        photoH,
+        brightness,
+        contrast,
+        0,
+        activeStudioBackdrop
+      )
 
       drawMarketingBadge(ctx, badge, language, padding, padding)
       drawPriceComparisonBadge(
@@ -1030,7 +1562,18 @@ export function PhotoStudioPage() {
       }
     } else if (layoutTemplate === "glass") {
       // Glass Card: Full-bleed photo + centered frosted-glass floating card at bottom
-      drawCoverImage(ctx, loadedImage, 0, 0, width, height, brightness, contrast)
+      drawCoverImage(
+        ctx,
+        loadedImage,
+        0,
+        0,
+        width,
+        height,
+        brightness,
+        contrast,
+        0,
+        activeStudioBackdrop
+      )
 
       drawMarketingBadge(ctx, badge, language, padding, padding)
       drawPriceComparisonBadge(
@@ -1072,7 +1615,18 @@ export function PhotoStudioPage() {
       ctx.save()
       drawRoundedRect(ctx, cardX, cardY, cardW, cardH, 32)
       ctx.clip()
-      drawCoverImage(ctx, loadedImage, 0, 0, width, height, brightness, contrast, 20)
+      drawCoverImage(
+        ctx,
+        loadedImage,
+        0,
+        0,
+        width,
+        height,
+        brightness,
+        contrast,
+        20,
+        activeStudioBackdrop
+      )
       ctx.fillStyle = isLightGlass
         ? "rgba(255, 255, 255, 0.72)"
         : "rgba(15, 23, 42, 0.62)"
@@ -1164,7 +1718,18 @@ export function PhotoStudioPage() {
       ctx.save()
       drawRoundedRect(ctx, photoX, photoY, photoW, photoH, 28)
       ctx.clip()
-      drawCoverImage(ctx, loadedImage, photoX, photoY, photoW, photoH, brightness, contrast)
+      drawCoverImage(
+        ctx,
+        loadedImage,
+        photoX,
+        photoY,
+        photoW,
+        photoH,
+        brightness,
+        contrast,
+        0,
+        activeStudioBackdrop
+      )
       ctx.restore()
 
       // Crisp border around inset photo
@@ -1323,6 +1888,8 @@ export function PhotoStudioPage() {
     showBrandLogo,
     loadedLogo,
     logoPosition,
+    isCutoutActive,
+    studioBackdrop,
   ])
 
   const handleAISuggest = async () => {
@@ -1354,25 +1921,66 @@ export function PhotoStudioPage() {
     }
   }
 
-  const handleGenerateScene = async (overridePrompt?: string) => {
-    const sourceImage = originalImageDataUrl || imageDataUrl
-    const sourceMime = originalImageDataUrl ? originalImageMimeType : imageMimeType
-    const activePrompt = (overridePrompt ?? scenePrompt).trim()
-    if (!sourceImage || !activePrompt) return
+  const runLocalCutout = async (sourceImage: string): Promise<string> => {
+    setIsRemovingBg(true)
+    setBgRemovalError(null)
+    setBgRemovalProgress(0)
+    setBgRemovalStage("")
 
-    setIsGeneratingScene(true)
     try {
-      const result = await generateProductScene({
-        imageBase64: sourceImage,
-        mimeType: sourceMime,
-        scenePrompt: activePrompt,
+      const resultBlob = await removeBackground(sourceImage, {
+        output: { format: "image/png" },
+        progress: (key, current, total) => {
+          setBgRemovalStage(key)
+          if (total > 0) {
+            const pct = Math.min(100, Math.max(0, Math.round((current / total) * 100)))
+            setBgRemovalProgress(pct)
+          }
+        },
       })
-      setImageDataUrl(result.imageDataUrl)
-      setImageMimeType(result.mimeType)
+
+      const cutoutDataUrl = await blobToDataUrl(resultBlob)
+      setCutoutImageDataUrl(cutoutDataUrl)
+      return cutoutDataUrl
+    } finally {
+      setIsRemovingBg(false)
+      setBgRemovalProgress(null)
+      setBgRemovalStage("")
+    }
+  }
+
+  const handleApplyScene = async (
+    presetId: ScenePresetId | null,
+    overridePrompt?: string
+  ) => {
+    const sourceImage = originalImageDataUrl || imageDataUrl
+    const activePrompt = (overridePrompt ?? scenePrompt).trim()
+    if (!sourceImage || (!presetId && !activePrompt) || isGeneratingScene || isRemovingBg) {
+      return
+    }
+
+    const targetScene: StudioBackdropKey =
+      presetId ?? resolveSceneFromPrompt(activePrompt)
+
+    if (overridePrompt !== undefined) {
+      setScenePrompt(overridePrompt)
+    }
+    setIsGeneratingScene(true)
+
+    try {
+      const cutoutUrl = cutoutImageDataUrl ?? (await runLocalCutout(sourceImage))
+      setIsCutoutActive(true)
+      setImageDataUrl(cutoutUrl)
+      setImageMimeType("image/png")
+      setStudioBackdrop(targetScene)
       setHasAiScene(true)
       toast.success(t(language, "photoStudio.sceneGenerateSuccess"))
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err ?? "")
+      const friendly = msg
+        ? `${t(language, "photoStudio.cutoutError")} (${msg})`
+        : t(language, "photoStudio.cutoutError")
+      setBgRemovalError(friendly)
       toast.error(
         msg
           ? `${t(language, "photoStudio.sceneGenerateError")}: ${msg}`
@@ -1388,6 +1996,42 @@ export function PhotoStudioPage() {
     setImageDataUrl(originalImageDataUrl)
     setImageMimeType(originalImageMimeType)
     setHasAiScene(false)
+    setIsCutoutActive(false)
+  }
+
+  const handleRemoveBackground = async () => {
+    const sourceImage = originalImageDataUrl || imageDataUrl
+    if (!sourceImage || isRemovingBg || isGeneratingScene) return
+
+    try {
+      const cutoutDataUrl = await runLocalCutout(sourceImage)
+      setIsCutoutActive(true)
+      setImageDataUrl(cutoutDataUrl)
+      setImageMimeType("image/png")
+      setHasAiScene(false)
+      toast.success(t(language, "photoStudio.cutoutSuccess"))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err ?? "")
+      const friendly = msg
+        ? `${t(language, "photoStudio.cutoutError")} (${msg})`
+        : t(language, "photoStudio.cutoutError")
+      setBgRemovalError(friendly)
+      toast.error(t(language, "photoStudio.cutoutError"))
+    }
+  }
+
+  const handleToggleCutout = () => {
+    if (!cutoutImageDataUrl || !originalImageDataUrl) return
+    if (isCutoutActive) {
+      setIsCutoutActive(false)
+      setImageDataUrl(originalImageDataUrl)
+      setImageMimeType(originalImageMimeType)
+    } else {
+      setIsCutoutActive(true)
+      setImageDataUrl(cutoutImageDataUrl)
+      setImageMimeType("image/png")
+      setHasAiScene(false)
+    }
   }
 
   const handleDownload = () => {
@@ -1623,13 +2267,139 @@ export function PhotoStudioPage() {
             </CardContent>
           </Card>
 
-          {/* Dedicated AI Scene & Background Studio (Separated from Local Tools) */}
+          {/* Standalone 0-Quota Local Browser Background Remover & Studio Backdrop */}
+          <Card className="border-emerald-500/25 bg-gradient-to-br from-emerald-500/[0.04] via-card to-teal-500/[0.04]">
+            <CardHeader className="pb-3 space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-base flex items-center gap-2 leading-[1.85]">
+                  <Scissors className="h-4 w-4 text-emerald-500 dark:text-emerald-400" aria-hidden="true" />
+                  <span className="font-myanmar">{t(language, "photoStudio.cutoutTitle")}</span>
+                </CardTitle>
+                <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 border border-emerald-500/25">
+                  {t(language, "photoStudio.cutoutBadge")}
+                </span>
+              </div>
+              <CardDescription className="text-xs leading-[1.85] font-myanmar">
+                {t(language, "photoStudio.cutoutDesc")}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3.5">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="default"
+                  disabled={!imageDataUrl || isRemovingBg || isGeneratingScene}
+                  onClick={handleRemoveBackground}
+                  className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white border-0 shadow-xs leading-[1.85] font-myanmar"
+                >
+                  {isRemovingBg ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden="true" />
+                      {t(language, "photoStudio.cutoutProcessing")}
+                    </>
+                  ) : (
+                    <>
+                      <Scissors className="h-4 w-4 mr-2" aria-hidden="true" />
+                      {t(language, "photoStudio.cutoutBtn")}
+                    </>
+                  )}
+                </Button>
+
+                {cutoutImageDataUrl && originalImageDataUrl && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isRemovingBg}
+                    onClick={handleToggleCutout}
+                    className="border-emerald-500/30 hover:bg-emerald-500/10 leading-[1.85] font-myanmar"
+                  >
+                    <Layers className="h-4 w-4 mr-1.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                    {isCutoutActive
+                      ? t(language, "photoStudio.cutoutShowOriginal")
+                      : t(language, "photoStudio.cutoutShowCutout")}
+                  </Button>
+                )}
+              </div>
+
+              {isRemovingBg && (
+                <div className="space-y-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5">
+                  <div className="flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-300 font-myanmar">
+                    <span>
+                      {bgRemovalStage.startsWith("fetch:")
+                        ? t(language, "photoStudio.cutoutLoadingModel")
+                        : t(language, "photoStudio.cutoutProcessing")}
+                    </span>
+                    <span className="font-mono font-semibold tabular-nums">
+                      {bgRemovalProgress !== null ? `${bgRemovalProgress}%` : "..."}
+                    </span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-emerald-500/20">
+                    <div
+                      className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-200"
+                      style={{ width: `${bgRemovalProgress ?? 15}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {bgRemovalError && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive font-myanmar leading-[1.7]"
+                >
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden="true" />
+                  <span>{bgRemovalError}</span>
+                </div>
+              )}
+
+              {isCutoutActive && cutoutImageDataUrl && (
+                <div className="space-y-2 pt-1 border-t border-border/60">
+                  <Label className="text-xs font-medium flex items-center gap-1.5 leading-[1.85] font-myanmar">
+                    <Layers className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+                    {t(language, "photoStudio.backdropPickerLabel")}
+                  </Label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                    {STUDIO_BACKDROPS.map((opt) => {
+                      const active = studioBackdrop === opt.id
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setStudioBackdrop(opt.id)}
+                          className={cn(
+                            "flex items-center gap-2 rounded-lg border p-2 text-left text-xs transition-all cursor-pointer",
+                            active
+                              ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/40 font-semibold"
+                              : "border-border/70 bg-background/60 hover:border-emerald-500/40"
+                          )}
+                        >
+                          <span
+                            className="h-5 w-5 shrink-0 rounded-full border border-black/15 dark:border-white/20 shadow-xs"
+                            style={{ background: opt.swatchStyle }}
+                            aria-hidden="true"
+                          />
+                          <span className="truncate font-myanmar leading-[1.5]">
+                            {t(language, opt.labelKey)}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Dedicated Hybrid Studio Scene Composer (0-Quota Local Cutout + Canvas Studio) */}
           <Card className="border-indigo-500/25 bg-gradient-to-br from-indigo-500/[0.04] via-card to-blue-500/[0.04]">
             <CardHeader className="pb-3 space-y-1">
               <div className="flex items-center justify-between gap-2">
                 <CardTitle className="text-base flex items-center gap-2 leading-[1.85]">
                   <Wand2 className="h-4 w-4 text-indigo-500 dark:text-indigo-400" aria-hidden="true" />
                   <span className="font-myanmar">{t(language, "photoStudio.sceneStudioTitle")}</span>
+                  <span className="inline-flex items-center rounded-full bg-indigo-500/15 px-2 py-0.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
+                    {t(language, "photoStudio.cutoutBadge")}
+                  </span>
                 </CardTitle>
                 {hasAiScene && originalImageDataUrl && (
                   <Button
@@ -1637,7 +2407,7 @@ export function PhotoStudioPage() {
                     variant="outline"
                     size="sm"
                     onClick={handleResetOriginalPhoto}
-                    disabled={isGeneratingScene}
+                    disabled={isGeneratingScene || isRemovingBg}
                     className="h-7 px-2.5 text-xs border-border/70"
                   >
                     <RotateCcw className="h-3 w-3 mr-1" aria-hidden="true" />
@@ -1651,20 +2421,18 @@ export function PhotoStudioPage() {
             </CardHeader>
             <CardContent className="space-y-3.5">
               {/* 1-Click Scene Presets */}
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2.5">
                 {SCENE_PRESETS.map((preset) => {
-                  const isActive = selectedScenePreset === preset.id
+                  const isActive =
+                    hasAiScene && isCutoutActive && studioBackdrop === preset.id
                   return (
                     <Button
                       key={preset.id}
                       type="button"
                       size="sm"
                       variant={isActive ? "default" : "outline"}
-                      disabled={!imageDataUrl || isGeneratingScene}
-                      onClick={() => {
-                        setSelectedScenePreset(preset.id)
-                        setScenePrompt(preset.prompt)
-                      }}
+                      disabled={!imageDataUrl || isGeneratingScene || isRemovingBg}
+                      onClick={() => handleApplyScene(preset.id, preset.prompt)}
                       className={cn(
                         "h-auto py-2 px-2.5 text-xs justify-start text-left leading-[1.6] whitespace-normal font-myanmar",
                         isActive &&
@@ -1677,6 +2445,30 @@ export function PhotoStudioPage() {
                 })}
               </div>
 
+              {(isGeneratingScene || isRemovingBg) && (
+                <div className="space-y-1.5 rounded-lg border border-indigo-500/25 bg-indigo-500/5 p-2.5">
+                  <div className="flex items-center justify-between text-xs text-indigo-700 dark:text-indigo-300 font-myanmar">
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                      {isRemovingBg
+                        ? bgRemovalStage.includes("fetch")
+                          ? t(language, "photoStudio.cutoutLoadingModel")
+                          : t(language, "photoStudio.cutoutProcessing")
+                        : t(language, "photoStudio.sceneGenerating")}
+                    </span>
+                    {bgRemovalProgress !== null && (
+                      <span className="font-mono font-medium">{bgRemovalProgress}%</span>
+                    )}
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-indigo-500/15">
+                    <div
+                      className="h-full rounded-full bg-indigo-500 transition-all duration-200"
+                      style={{ width: `${bgRemovalProgress ?? 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Custom Scene Prompt Input */}
               <div className="space-y-1.5">
                 <Label htmlFor="ai-scene-prompt" className="text-xs leading-[1.85] font-myanmar">
@@ -1687,10 +2479,15 @@ export function PhotoStudioPage() {
                   value={scenePrompt}
                   onChange={(e) => {
                     setScenePrompt(e.target.value)
-                    setSelectedScenePreset(null)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && scenePrompt.trim() && imageDataUrl) {
+                      e.preventDefault()
+                      handleApplyScene(null)
+                    }
                   }}
                   placeholder={t(language, "photoStudio.sceneCustomPlaceholder")}
-                  disabled={!imageDataUrl || isGeneratingScene}
+                  disabled={!imageDataUrl || isGeneratingScene || isRemovingBg}
                   className="text-xs font-myanmar leading-[1.85]"
                 />
               </div>
@@ -1698,11 +2495,16 @@ export function PhotoStudioPage() {
               <Button
                 type="button"
                 variant="default"
-                disabled={!imageDataUrl || !scenePrompt.trim() || isGeneratingScene}
-                onClick={() => handleGenerateScene()}
+                disabled={
+                  !imageDataUrl ||
+                  !scenePrompt.trim() ||
+                  isGeneratingScene ||
+                  isRemovingBg
+                }
+                onClick={() => handleApplyScene(null)}
                 className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white border-0 shadow-xs leading-[1.85] font-myanmar"
               >
-                {isGeneratingScene ? (
+                {isGeneratingScene || isRemovingBg ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden="true" />
                     {t(language, "photoStudio.sceneGenerating")}
@@ -2097,7 +2899,7 @@ export function PhotoStudioPage() {
                 <div className="flex justify-center bg-muted/20 rounded-xl p-2 sm:p-4 border">
                   <canvas
                     ref={canvasRef}
-                    className="max-w-full max-h-[540px] w-auto h-auto rounded-lg shadow-md object-contain"
+                    className="w-full max-w-[420px] mx-auto h-auto rounded-xl shadow-md object-contain"
                   />
                 </div>
               )}

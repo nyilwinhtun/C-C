@@ -7,12 +7,16 @@ import { fileURLToPath } from 'node:url'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: './',
   plugins: [react(), tailwindcss(), VitePWA({
     registerType: 'autoUpdate',
     devOptions: {
       enabled: true,
     },
     includeAssets: ['favicon.svg', 'pwa-192x192.png', 'pwa-512x512.png'],
+    workbox: {
+      maximumFileSizeToCacheInBytes: 30 * 1024 * 1024,
+    },
     manifest: {
       name: 'Content Creator',
       short_name: 'CC',
@@ -23,13 +27,13 @@ export default defineConfig({
       orientation: 'portrait',
       icons: [
         {
-          src: '/pwa-192x192.png',
+          src: 'pwa-192x192.png',
           sizes: '192x192',
           type: 'image/png',
           purpose: 'any maskable',
         },
         {
-          src: '/pwa-512x512.png',
+          src: 'pwa-512x512.png',
           sizes: '512x512',
           type: 'image/png',
           purpose: 'any maskable',

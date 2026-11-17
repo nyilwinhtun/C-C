@@ -250,7 +250,7 @@ export function PlannerPage() {
                 const items = groupedByDate.get(date) ?? []
                 return (
                   <div key={date} className="border border-border rounded-xl p-4">
-                    <div className="flex items-center gap-2 mb-3">
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
                       <Calendar className="h-4 w-4" aria-hidden="true" />
                       <h3 className="font-semibold leading-relaxed">
                         {formatDateLabel(date, language)}
@@ -281,7 +281,7 @@ export function PlannerPage() {
                                   {item.content}
                                 </p>
                               </div>
-                              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                              <div className="flex flex-wrap items-center gap-1.5">
                                 <button
                                   type="button"
                                   onClick={() => handleTogglePosted(item)}
@@ -369,7 +369,7 @@ export function PlannerPage() {
                 <Card key={item.id} className="border rounded-xl p-4">
                   <CardHeader className="p-0">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <h4 className="font-semibold leading-relaxed">
                           {item.title}
                         </h4>
