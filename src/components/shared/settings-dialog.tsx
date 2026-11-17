@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { t } from "@/locales/translations"
 import { useUIStore } from "@/store/useUIStore"
+import { useContentStore } from "@/store/useContentStore"
 import { useShallow } from "zustand/react/shallow"
 import { Eye, EyeOff, Link, ShieldAlert } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
@@ -15,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 
 import { Select } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
@@ -80,7 +82,15 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       }))
     )
 
+  const { brandSignature, setBrandSignature } = useContentStore(
+    useShallow((state) => ({
+      brandSignature: state.brandSignature,
+      setBrandSignature: state.setBrandSignature,
+    }))
+  )
+
   const [apiKey, setApiKey] = useState(aiApiKey)
+  const [signature, setSignature] = useState(brandSignature)
   const [showKey, setShowKey] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -92,11 +102,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   useEffect(() => {
     if (open) {
       setApiKey(aiApiKey)
+      setSignature(brandSignature)
       setIsCustomMode(!PRESET_MODELS[aiProvider].includes(aiModel) && Boolean(aiModel))
     }
     // Only re-sync local form state when the dialog opens or persisted key changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, aiApiKey])
+  }, [open, aiApiKey, brandSignature])
 
   const handleProviderChange = (provider: AIProvider) => {
     setAIProvider(provider)
@@ -226,6 +237,23 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               </span>
             </div>
           </div>
+          <div className="space-y-2">
+            <label htmlFor="brand-signature" className="text-sm font-medium font-myanmar">
+              {t(language, "settings.brandSignature")}
+            </label>
+            <Textarea
+              id="brand-signature"
+              rows={3}
+              value={signature}
+              onChange={(e) => setSignature(e.target.value)}
+              placeholder={t(language, "settings.brandSignaturePlaceholder")}
+              className="font-myanmar text-sm resize-y"
+              disabled={loading}
+            />
+            <p className="text-xs text-muted-foreground font-myanmar">
+              {t(language, "settings.brandSignatureHint")}
+            </p>
+          </div>
           <Separator />
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -234,6 +262,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <Button
               onClick={() => {
                 setAIApiKey(apiKey)
+                setBrandSignature(signature)
                 setLoading(true)
                 setTimeout(() => {
                   setLoading(false)
@@ -241,7 +270,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   onOpenChange(false)
                 }, 600)
               }}
-              disabled={loading || !apiKey}
+              disabled={loading || (!apiKey && signature === brandSignature)}
             >
               {loading ? t(language, "settings.saveSaving") : t(language, "settings.save")}
             </Button>

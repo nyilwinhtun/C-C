@@ -78,7 +78,7 @@ export function Layout() {
   ] as const
 
   return (
-    <div className="flex h-screen bg-slate-50/70 dark:bg-slate-950">
+    <div className="flex h-screen bg-background text-foreground">
       <Sidebar mobileOpen={mobileOpen} onMobileToggle={setMobileOpen} />
       <div
         className={cn(
@@ -91,13 +91,15 @@ export function Layout() {
           onMenuToggle={() => setMobileOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
         />
-        <main className="flex-1 overflow-y-auto bg-slate-50/70 dark:bg-slate-950 p-4 sm:p-6 pb-20 md:pb-8">
+        <main className="flex-1 overflow-y-auto bg-background text-foreground p-4 sm:p-6 pb-20 md:pb-8">
           <div className="mx-auto max-w-6xl">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6">
-              <StatCard title={t(language, "stats.savedIdeas")} value={savedCount} icon={FolderKanban} />
-              <StatCard title={t(language, "stats.scheduledPosts")} value={scheduledCount} icon={Calendar} />
-              <StatCard title={t(language, "stats.generatedCount")} value={generatedCount} icon={FileText} />
-            </div>
+            {activePageKey !== "generator" && activePageKey !== "photo-studio" && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6">
+                <StatCard title={t(language, "stats.savedIdeas")} value={savedCount} icon={FolderKanban} />
+                <StatCard title={t(language, "stats.scheduledPosts")} value={scheduledCount} icon={Calendar} />
+                <StatCard title={t(language, "stats.generatedCount")} value={generatedCount} icon={FileText} />
+              </div>
+            )}
             <Page />
           </div>
         </main>

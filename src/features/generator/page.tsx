@@ -23,6 +23,10 @@ import {
   Send,
   Sparkles,
   Repeat,
+  History,
+  Hash,
+  Store,
+  Check,
 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
@@ -32,7 +36,7 @@ import {
   type GeneratorFormInput,
 } from "@/features/generator/schema"
 import { useGenerateContent } from "@/features/generator/useGenerateContent"
-import { useContentStore } from "@/store/useContentStore"
+import { useContentStore, type GeneratedItem } from "@/store/useContentStore"
 import type { GeneratedContent } from "@/api/aiService"
 import { useUIStore } from "@/store/useUIStore"
 import { t } from "@/locales/translations"
@@ -51,6 +55,13 @@ import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
 
 import { Badge } from "@/components/ui/badge"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 
 
@@ -64,7 +75,7 @@ function getPlatformMeta(platform?: string) {
     case "facebook":
       return { icon: Globe, label: "Facebook", badgeClass: "text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/20" }
     case "tiktok":
-      return { icon: Video, label: "TikTok", badgeClass: "text-slate-900 dark:text-slate-100 bg-slate-500/10 border-slate-500/20" }
+      return { icon: Video, label: "TikTok", badgeClass: "text-foreground bg-muted/60 border-border" }
     case "youtube":
       return { icon: Video, label: "YouTube", badgeClass: "text-rose-600 dark:text-rose-400 bg-rose-500/10 border-rose-500/20" }
     case "telegram":
@@ -132,6 +143,29 @@ const REPURPOSE_OPTIONS = [
     contentType: "post_caption",
     instruction:
       "Transform the following post into a short, punchy 2-3 line Instagram caption with relevant hashtags at the end.",
+  },
+] as const
+
+const MYANMAR_HASHTAG_PACKS = [
+  {
+    id: "tech",
+    labelKey: "generator.hashtagTech",
+    tags: ["#TechMyanmar", "#MobileMyanmar", "#နည်းပညာ", "#ဖုန်းအရောင်းဆိုင်", "#GadgetMyanmar"],
+  },
+  {
+    id: "fashion",
+    labelKey: "generator.hashtagFashion",
+    tags: ["#FashionMyanmar", "#BeautyMyanmar", "#အလှကုန်", "#ဖက်ရှင်", "#SkincareMyanmar"],
+  },
+  {
+    id: "food",
+    labelKey: "generator.hashtagFood",
+    tags: ["#YangonFoodie", "#MyanmarFood", "#အစားအသောက်", "#စားသောက်ဆိုင်", "#FoodieMyanmar"],
+  },
+  {
+    id: "promo",
+    labelKey: "generator.hashtagPromo",
+    tags: ["#SpecialOffer", "#SaleMyanmar", "#အထူးလျှော့ဈေး", "#OnlineShopMyanmar", "#Promo"],
   },
 ] as const
 
@@ -206,16 +240,19 @@ export function GeneratorPage() {
     useShallow((state) => state.setDraftInput)
   )
   const draftInput = useContentStore(useShallow((state) => state.draftInput))
-  const { addGeneratedItem, saveToVault } = useContentStore(
+  const { addGeneratedItem, saveToVault, generatedHistory, brandSignature } = useContentStore(
     useShallow((state) => ({
       addGeneratedItem: state.addGeneratedItem,
       saveToVault: state.saveToVault,
+      generatedHistory: state.generatedHistory,
+      brandSignature: state.brandSignature,
     }))
   )
 
   const [activeAction, setActiveAction] = useState<ActiveAction | null>(null)
   const pendingActionRef = useRef<ActiveAction | null>(null)
   const previewRef = useRef<HTMLDivElement | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   const mutation = useGenerateContent({
     onSuccess: (data) => {
@@ -308,19 +345,82 @@ export function GeneratorPage() {
     generate({ ...data, includeHashtags: data.includeHashtags ?? true })
   }
 
+  const updatePreviewContent = useCallback(
+    (nextText: string) => {
+      setIsTypewriting(false)
+      setDisplayedText(nextText)
+      setTypewriterIndex(nextText.length)
+      setResult((prev) => {
+        if (prev) return { ...prev, content: nextText }
+        const values = form.getValues()
+        return {
+          id: crypto.randomUUID(),
+          topic: values.topic || "Draft",
+          platform: values.platform || "instagram",
+          contentType: values.contentType || "post_caption",
+          tone: values.tone || "engaging",
+          content: nextText,
+          createdAt: new Date().toISOString(),
+        }
+      })
+    },
+    [form]
+  )
+
   const handleCopy = useCallback(async () => {
-    const textToCopy = result?.content ?? displayedText
+    const textToCopy = isTypewriting ? displayedText : (result?.content ?? displayedText)
     if (!textToCopy) return
     setIsCopying(true)
     try {
       await navigator.clipboard.writeText(textToCopy)
       toast.success(t(language, "generator.copySuccess"))
     } catch {
-      toast.error("Failed to copy to clipboard")
+      toast.error(t(language, "generator.copyError"))
     } finally {
       setIsCopying(false)
     }
-  }, [result, displayedText, language])
+  }, [isTypewriting, result, displayedText, language])
+
+  const handleShare = useCallback(async () => {
+    const textToShare = isTypewriting ? displayedText : (result?.content ?? displayedText)
+    if (!textToShare) return
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      try {
+        await navigator.share({ text: textToShare })
+        toast.success(t(language, "generator.shareSuccess"))
+        return
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          return
+        }
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(textToShare)
+      toast.success(t(language, "generator.shareFallbackCopied"))
+    } catch {
+      toast.error(t(language, "generator.copyError"))
+    }
+  }, [isTypewriting, result, displayedText, language])
+
+  const handleRestoreRecent = useCallback(
+    (item: GeneratedItem) => {
+      setIsTypewriting(false)
+      setResult({
+        id: item.id,
+        topic: item.topic,
+        platform: item.platform,
+        contentType: item.contentType,
+        tone: item.tone,
+        content: item.content,
+        createdAt: item.createdAt,
+      })
+      setDisplayedText(item.content)
+      setTypewriterIndex(item.content.length)
+      toast.success(t(language, "generator.recentRestored"))
+    },
+    [language]
+  )
 
   const handleSaveToVault = useCallback(() => {
     if (!result) return
@@ -416,13 +516,58 @@ export function GeneratorPage() {
       : activeAction?.kind === "repurpose"
         ? t(language, "generator.repurposing")
         : t(language, "generator.generating")
-  const contentToShow = viewMode === "editor" ? (displayedText || (result?.content ?? "")) : (result?.content ?? "")
+  const contentToShow = isTypewriting
+    ? displayedText
+    : (result?.content ?? displayedText)
   const charCount = contentToShow.length
   const wordCount = contentToShow ? contentToShow.split(/\s+/).filter(Boolean).length : 0
   const activePlatform = result?.platform || formValues.platform || "instagram"
   const platformMeta = getPlatformMeta(activePlatform)
   const PlatformIcon = platformMeta.icon
   const selectedTone = formValues.tone
+
+  const trimmedSignature = brandSignature.trim()
+  const isFooterApplied = Boolean(
+    trimmedSignature && contentToShow.trimEnd().endsWith(trimmedSignature)
+  )
+
+  const handleToggleBrandFooter = useCallback(() => {
+    if (!trimmedSignature) {
+      toast(t(language, "generator.brandFooterEmpty"))
+      return
+    }
+    const base = contentToShow.trimEnd()
+    if (base.endsWith(trimmedSignature)) {
+      const stripped = base.slice(0, base.length - trimmedSignature.length).trimEnd()
+      updatePreviewContent(stripped)
+    } else {
+      const next = base ? `${base}\n\n${trimmedSignature}` : trimmedSignature
+      updatePreviewContent(next)
+    }
+  }, [trimmedSignature, contentToShow, language, updatePreviewContent])
+
+  const handleInsertHashtagPack = useCallback(
+    (tags: readonly string[]) => {
+      const missing = tags.filter((tag) => !contentToShow.includes(tag))
+      if (missing.length === 0) {
+        toast.success(t(language, "generator.hashtagsAdded"))
+        return
+      }
+      const trimmed = contentToShow.trimEnd()
+      const separator = !trimmed ? "" : /#[^\s#]+$/.test(trimmed) ? " " : "\n\n"
+      updatePreviewContent(`${trimmed}${separator}${missing.join(" ")}`)
+      toast.success(t(language, "generator.hashtagsAdded"))
+    },
+    [contentToShow, language, updatePreviewContent]
+  )
+
+  useEffect(() => {
+    if (viewMode !== "editor") return
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${Math.max(el.scrollHeight, 240)}px`
+  }, [contentToShow, viewMode])
 
   return (
     <div className="space-y-5">
@@ -447,9 +592,9 @@ export function GeneratorPage() {
       <div className="flex flex-col lg:flex-row gap-6 items-start">
         <div className="w-full flex-1 min-w-0">
           <Card className="border-border/60 shadow-sm">
-            <CardHeader className="pb-4 border-b border-border/60">
-              <CardTitle className="leading-relaxed">{t(language, "generator.title")}</CardTitle>
-              <CardDescription className="leading-relaxed">{t(language, "generator.desc")}</CardDescription>
+            <CardHeader className="pb-4 border-b border-border/60 space-y-1.5">
+              <CardTitle className="leading-[1.85]">{t(language, "generator.title")}</CardTitle>
+              <CardDescription className="leading-[1.85]">{t(language, "generator.desc")}</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
               <form
@@ -617,6 +762,58 @@ export function GeneratorPage() {
                   )}
                 </div>
                 <div className="flex gap-1 shrink-0">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 px-2.5 text-xs border-border/60 font-myanmar"
+                      >
+                        <History className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
+                        <span className="hidden sm:inline">{t(language, "generator.recent")}</span>
+                        {generatedHistory.length > 0 && (
+                          <span className="ml-1 rounded-full bg-muted px-1.5 py-0.2 text-[10px] font-medium">
+                            {generatedHistory.length}
+                          </span>
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-72 max-h-80 overflow-y-auto p-1">
+                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground font-myanmar">
+                        {t(language, "generator.recentTitle")}
+                      </div>
+                      <DropdownMenuSeparator />
+                      {generatedHistory.length === 0 ? (
+                        <div className="px-2 py-4 text-center text-xs text-muted-foreground font-myanmar">
+                          {t(language, "generator.recentEmpty")}
+                        </div>
+                      ) : (
+                        generatedHistory.map((item) => {
+                          const meta = getPlatformMeta(item.platform)
+                          return (
+                            <DropdownMenuItem
+                              key={item.id}
+                              onClick={() => handleRestoreRecent(item)}
+                              className="flex flex-col items-start gap-1 py-2 px-2 cursor-pointer"
+                            >
+                              <div className="flex items-center justify-between w-full gap-2">
+                                <span className="text-xs font-medium truncate font-myanmar">
+                                  {item.topic || "Untitled"}
+                                </span>
+                                <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] shrink-0 ${meta.badgeClass}`}>
+                                  {meta.label}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground line-clamp-1 w-full font-myanmar">
+                                {item.content}
+                              </p>
+                            </DropdownMenuItem>
+                          )
+                        })
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <Button
                     variant={viewMode === "editor" ? "default" : "outline"}
                     size="sm"
@@ -690,11 +887,15 @@ export function GeneratorPage() {
                 </div>
               ) : viewMode === "editor" ? (
                 <>
-                  <div className="overflow-y-auto max-h-[420px] font-myanmar leading-relaxed text-sm sm:text-[15px]">
-                    <p className="whitespace-pre-wrap break-words">
-                      {contentToShow}
-                    </p>
-                  </div>
+                  <textarea
+                    ref={textareaRef}
+                    value={contentToShow}
+                    onChange={(e) => updatePreviewContent(e.target.value)}
+                    placeholder={t(language, "generator.editablePlaceholder")}
+                    aria-label={t(language, "generator.textEditor")}
+                    rows={1}
+                    className="w-full min-h-[240px] max-h-[420px] overflow-y-auto resize-none border-0 bg-transparent p-0 font-myanmar leading-[1.85] text-sm sm:text-[15px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0"
+                  />
                   {isTypewriting && (
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
                       <span className="animate-pulse">&#9647;</span>
@@ -703,7 +904,7 @@ export function GeneratorPage() {
                 </>
               ) : (
                 <SocialPostPreview
-                  content={result?.content ?? ""}
+                  content={contentToShow}
                   platform={result?.platform ?? "instagram"}
                   charCount={charCount}
                   wordCount={wordCount}
@@ -716,7 +917,7 @@ export function GeneratorPage() {
                   variant="outline"
                   size="sm"
                   onClick={handleCopy}
-                  disabled={isCopying || (!result && !displayedText)}
+                  disabled={isCopying || !contentToShow}
                   className="flex-1 border-border/60"
                 >
                   {isCopying ? (
@@ -734,8 +935,18 @@ export function GeneratorPage() {
                 <Button
                   variant="outline"
                   size="sm"
+                  onClick={handleShare}
+                  disabled={!contentToShow}
+                  className="border-border/60"
+                >
+                  <Share2 className="h-3 w-3 mr-1.5" aria-hidden="true" />
+                  {t(language, "generator.share")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={handleSaveToVault}
-                  disabled={!result}
+                  disabled={!result || !contentToShow}
                   className="flex-1 border-border/60"
                 >
                   <Save className="h-3 w-3 mr-1.5" aria-hidden="true" />
@@ -744,6 +955,56 @@ export function GeneratorPage() {
               </div>
             </CardFooter>
           </Card>
+
+          {(result || displayedText) && !isGeneratingFlag && (
+            <div className="rounded-xl border border-border/60 bg-card p-4 space-y-3 shadow-xs">
+              <div className="flex items-center justify-between gap-2">
+                <Button
+                  type="button"
+                  variant={isFooterApplied ? "default" : "outline"}
+                  size="sm"
+                  onClick={handleToggleBrandFooter}
+                  className={`w-full justify-between h-9 text-xs font-myanmar ${
+                    isFooterApplied
+                      ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-0 shadow-xs"
+                      : "border-border/60"
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Store className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span>
+                      {isFooterApplied
+                        ? t(language, "generator.removeBrandFooter")
+                        : t(language, "generator.appendBrandFooter")}
+                    </span>
+                  </span>
+                  {isFooterApplied && <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+                </Button>
+              </div>
+
+              <div className="border-t border-border/60 pt-3 space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider font-myanmar">
+                  <Hash className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>{t(language, "generator.hashtagPacksTitle")}</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {MYANMAR_HASHTAG_PACKS.map((pack) => (
+                    <Button
+                      key={pack.id}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleInsertHashtagPack(pack.tags)}
+                      className="h-auto py-1 px-2.5 text-xs rounded-full border-border/60 bg-background/80 hover:bg-accent/70 font-myanmar"
+                    >
+                      <Hash className="h-3 w-3 mr-1 text-blue-600 dark:text-blue-400" aria-hidden="true" />
+                      {t(language, pack.labelKey)}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           {result && (
             <div className="rounded-xl border border-border/60 bg-card p-4 space-y-3 shadow-xs">
@@ -854,7 +1115,7 @@ function SocialPostPreview({
   const PlatformIcon = platformMeta.icon
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-4 font-myanmar leading-relaxed shadow-xs">
+    <div className="rounded-xl border border-border/60 bg-card p-4 font-myanmar leading-[1.85] shadow-xs">
       <div className="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-border/60">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center text-xs font-bold shadow-xs shrink-0">

@@ -25,7 +25,6 @@ export function PWAInstallBanner() {
   const [isIOS, setIsIOS] = useState(false)
   const [isStandalone, setIsStandalone] = useState(true)
   const [visible, setVisible] = useState(false)
-  const [dismissed, setDismissed] = useState(false)
   const [installing, setInstalling] = useState(false)
   const [showFallbackTip, setShowFallbackTip] = useState(false)
 
@@ -51,7 +50,6 @@ export function PWAInstallBanner() {
     } catch {
       // Ignore localStorage read failures
     }
-    setDismissed(wasDismissed)
 
     // 3. Detect iOS Safari (iPhone / iPad / iPod)
     const ua = window.navigator.userAgent.toLowerCase()
@@ -99,19 +97,8 @@ export function PWAInstallBanner() {
     } catch {
       // Ignore localStorage write failures
     }
-    setDismissed(true)
     setVisible(false)
     setShowFallbackTip(false)
-  }
-
-  const handleReopen = () => {
-    try {
-      localStorage.removeItem(STORAGE_KEY)
-    } catch {
-      // Ignore localStorage write failures
-    }
-    setDismissed(false)
-    setVisible(true)
   }
 
   const handleInstallClick = async () => {
@@ -134,26 +121,7 @@ export function PWAInstallBanner() {
     }
   }
 
-  if (isStandalone) return null
-
-  if (!visible) {
-    if (!dismissed) return null
-    return (
-      <button
-        type="button"
-        onClick={handleReopen}
-        aria-label="Install App / အက်ပ်ထည့်သွင်းမည်"
-        className={cn(
-          "fixed bottom-4 right-4 z-50 inline-flex items-center gap-1.5 rounded-full",
-          "border border-border/80 bg-card/95 backdrop-blur-md px-3 py-1.5 shadow-lg",
-          "text-xs font-medium text-foreground hover:bg-accent transition-colors"
-        )}
-      >
-        <Download className="h-3.5 w-3.5 text-primary" />
-        <span>{language === "my" ? "အက်ပ်ထည့်သွင်းမည်" : "Install App"}</span>
-      </button>
-    )
-  }
+  if (isStandalone || !visible) return null
 
   return (
     <aside

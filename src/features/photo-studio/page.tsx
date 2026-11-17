@@ -305,8 +305,8 @@ export function PhotoStudioPage() {
     if (headline.trim()) {
       ctx.save()
       ctx.font = `700 ${fontSize}px ${MYANMAR_FONT_STACK}`
-      const lineHeight = Math.round(fontSize * 1.32)
-      const maxWidth = width - padding * 2
+      const lineHeight = Math.round(fontSize * 1.45)
+      const maxWidth = Math.floor(width * 0.85)
       const lines = wrapCanvasText(ctx, headline.trim(), maxWidth)
 
       ctx.textAlign = "center"
@@ -350,7 +350,7 @@ export function PhotoStudioPage() {
       ctx.shadowColor = "rgba(0, 0, 0, 0.7)"
       ctx.shadowBlur = 8
       ctx.fillStyle = "rgba(255, 255, 255, 0.94)"
-      ctx.fillText(shopFooter.trim(), width / 2, height - 42, width - padding * 2)
+      ctx.fillText(shopFooter.trim(), width / 2, height - 42, Math.floor(width * 0.85))
       ctx.restore()
     }
   }, [
@@ -416,27 +416,22 @@ export function PhotoStudioPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">
-          {t(language, "photoStudio.title")}
-        </h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          {t(language, "photoStudio.desc")}
-        </p>
-      </div>
+    <div>
+      <p className="text-sm text-muted-foreground mb-6 leading-[1.85]">
+        {t(language, "photoStudio.desc")}
+      </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Controls Column */}
-        <div className="lg:col-span-6 space-y-4">
+        <div className="lg:col-span-6 space-y-5">
           {/* Upload & Aspect Ratio Card */}
           <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
+            <CardHeader className="pb-4 space-y-1.5">
+              <CardTitle className="text-base flex items-center gap-2 leading-[1.85]">
                 <Upload className="h-4 w-4" aria-hidden="true" />
                 {t(language, "photoStudio.uploadTitle")}
               </CardTitle>
-              <CardDescription>{t(language, "photoStudio.uploadDesc")}</CardDescription>
+              <CardDescription className="leading-[1.85]">{t(language, "photoStudio.uploadDesc")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <input
@@ -487,8 +482,8 @@ export function PhotoStudioPage() {
               </div>
 
               {/* Aspect Ratio Presets */}
-              <div className="space-y-2">
-                <Label>{t(language, "photoStudio.aspectRatio")}</Label>
+              <div className="space-y-2.5">
+                <Label className="leading-[1.85]">{t(language, "photoStudio.aspectRatio")}</Label>
                 <div className="grid grid-cols-3 gap-2">
                   {(Object.keys(ASPECT_RATIOS) as AspectRatioKey[]).map((key) => (
                     <Button
@@ -496,7 +491,10 @@ export function PhotoStudioPage() {
                       type="button"
                       variant={aspectRatio === key ? "default" : "outline"}
                       size="sm"
-                      className="h-auto py-2 px-2 text-xs leading-tight whitespace-normal"
+                      className={cn(
+                        "h-auto py-2 px-2 text-xs leading-[1.6] whitespace-normal",
+                        aspectRatio === key && "bg-blue-600 hover:bg-blue-700 text-white border-transparent"
+                      )}
                       onClick={() => setAspectRatio(key)}
                     >
                       {t(language, ASPECT_RATIOS[key].labelKey)}
@@ -509,7 +507,7 @@ export function PhotoStudioPage() {
               <Button
                 type="button"
                 variant="default"
-                className="w-full"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white leading-[1.85]"
                 disabled={!imageDataUrl || isAnalyzing}
                 onClick={handleAISuggest}
               >
@@ -530,15 +528,15 @@ export function PhotoStudioPage() {
 
           {/* Overlay & Typography Controls */}
           <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-base flex items-center gap-2 leading-[1.85]">
                 <Type className="h-4 w-4" aria-hidden="true" />
                 {t(language, "photoStudio.headlineLabel")}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="poster-headline">
+              <div className="space-y-2.5">
+                <Label htmlFor="poster-headline" className="leading-[1.85]">
                   {t(language, "photoStudio.headlineLabel")}
                 </Label>
                 <Textarea
@@ -547,14 +545,14 @@ export function PhotoStudioPage() {
                   value={headline}
                   onChange={(e) => setHeadline(e.target.value)}
                   placeholder={t(language, "photoStudio.headlinePlaceholder")}
-                  className="font-myanmar"
+                  className="font-myanmar leading-[1.85]"
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <Label htmlFor="poster-font-size">
+                    <Label htmlFor="poster-font-size" className="leading-[1.85]">
                       {t(language, "photoStudio.fontSize")}
                     </Label>
                     <span className="text-xs text-muted-foreground">{fontSize}px</span>
@@ -571,8 +569,8 @@ export function PhotoStudioPage() {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label>{t(language, "photoStudio.positionLabel")}</Label>
+                <div className="space-y-2.5">
+                  <Label className="leading-[1.85]">{t(language, "photoStudio.positionLabel")}</Label>
                   <div className="grid grid-cols-2 gap-2">
                     {(["bottom", "top"] as TextPositionKey[]).map((pos) => (
                       <Button
@@ -580,6 +578,10 @@ export function PhotoStudioPage() {
                         type="button"
                         size="sm"
                         variant={textPosition === pos ? "default" : "outline"}
+                        className={cn(
+                          "leading-[1.85]",
+                          textPosition === pos && "bg-blue-600 hover:bg-blue-700 text-white border-transparent"
+                        )}
                         onClick={() => setTextPosition(pos)}
                       >
                         {t(
@@ -595,8 +597,8 @@ export function PhotoStudioPage() {
               </div>
 
               {/* Text Color */}
-              <div className="space-y-2">
-                <Label>{t(language, "photoStudio.textColor")}</Label>
+              <div className="space-y-2.5">
+                <Label className="leading-[1.85]">{t(language, "photoStudio.textColor")}</Label>
                 <div className="grid grid-cols-3 gap-2">
                   {(Object.keys(TEXT_COLORS) as TextColorKey[]).map((c) => (
                     <Button
@@ -605,7 +607,10 @@ export function PhotoStudioPage() {
                       size="sm"
                       variant={textColor === c ? "default" : "outline"}
                       onClick={() => setTextColor(c)}
-                      className="flex items-center gap-2"
+                      className={cn(
+                        "flex items-center gap-2 leading-[1.85]",
+                        textColor === c && "bg-blue-600 hover:bg-blue-700 text-white border-transparent"
+                      )}
                     >
                       <span
                         className="h-3.5 w-3.5 rounded-full border border-border shrink-0"
@@ -619,8 +624,8 @@ export function PhotoStudioPage() {
 
               {/* Marketing Badge & Price Tag */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="poster-badge" className="flex items-center gap-1.5">
+                <div className="space-y-2.5">
+                  <Label htmlFor="poster-badge" className="flex items-center gap-1.5 leading-[1.85]">
                     <Tag className="h-3.5 w-3.5" aria-hidden="true" />
                     {t(language, "photoStudio.badgeLabel")}
                   </Label>
@@ -628,6 +633,7 @@ export function PhotoStudioPage() {
                     id="poster-badge"
                     value={badge}
                     onChange={(e) => setBadge(e.target.value as BadgeKey)}
+                    className="leading-[1.85]"
                   >
                     <option value="none">{t(language, "photoStudio.badgeNone")}</option>
                     <option value="new">{t(language, "photoStudio.badgeNew")}</option>
@@ -640,8 +646,8 @@ export function PhotoStudioPage() {
                   </Select>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="poster-price">
+                <div className="space-y-2.5">
+                  <Label htmlFor="poster-price" className="leading-[1.85]">
                     {t(language, "photoStudio.priceTagLabel")}
                   </Label>
                   <Input
@@ -649,13 +655,14 @@ export function PhotoStudioPage() {
                     value={priceTag}
                     onChange={(e) => setPriceTag(e.target.value)}
                     placeholder={t(language, "photoStudio.priceTagPlaceholder")}
+                    className="font-myanmar leading-[1.85]"
                   />
                 </div>
               </div>
 
               {/* Shop Footer / Watermark */}
-              <div className="space-y-2">
-                <Label htmlFor="poster-footer">
+              <div className="space-y-2.5">
+                <Label htmlFor="poster-footer" className="leading-[1.85]">
                   {t(language, "photoStudio.footerLabel")}
                 </Label>
                 <Input
@@ -663,6 +670,7 @@ export function PhotoStudioPage() {
                   value={shopFooter}
                   onChange={(e) => setShopFooter(e.target.value)}
                   placeholder={t(language, "photoStudio.footerPlaceholder")}
+                  className="font-myanmar leading-[1.85]"
                 />
               </div>
             </CardContent>
@@ -670,10 +678,10 @@ export function PhotoStudioPage() {
         </div>
 
         {/* Right Live Preview & Caption Column */}
-        <div className="lg:col-span-6 space-y-4">
+        <div className="lg:col-span-6 space-y-5">
           <Card>
-            <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2">
-              <CardTitle className="text-base">
+            <CardHeader className="pb-4 flex flex-row items-center justify-between gap-2">
+              <CardTitle className="text-base leading-[1.85]">
                 {t(language, "photoStudio.previewTitle")}
               </CardTitle>
               <Button
@@ -682,6 +690,7 @@ export function PhotoStudioPage() {
                 size="sm"
                 disabled={!loadedImage}
                 onClick={handleDownload}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
               >
                 <Download className="h-4 w-4 mr-1.5" aria-hidden="true" />
                 {t(language, "photoStudio.downloadPoster")}
@@ -691,7 +700,7 @@ export function PhotoStudioPage() {
               {!loadedImage ? (
                 <div className="flex flex-col items-center justify-center rounded-xl border border-dashed bg-muted/30 min-h-[320px] p-6 text-center text-muted-foreground">
                   <ImagePlus className="h-10 w-10 mb-2 opacity-50" aria-hidden="true" />
-                  <p className="text-sm">{t(language, "photoStudio.emptyPreview")}</p>
+                  <p className="text-sm leading-[1.85]">{t(language, "photoStudio.emptyPreview")}</p>
                 </div>
               ) : (
                 <div className="flex justify-center bg-muted/20 rounded-xl p-2 sm:p-4 border">
@@ -706,8 +715,8 @@ export function PhotoStudioPage() {
 
           {/* AI Social Media Caption Box */}
           <Card>
-            <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2">
-              <CardTitle className="text-base">
+            <CardHeader className="pb-4 flex flex-row items-center justify-between gap-2">
+              <CardTitle className="text-base leading-[1.85]">
                 {t(language, "photoStudio.captionTitle")}
               </CardTitle>
               <Button
@@ -727,7 +736,7 @@ export function PhotoStudioPage() {
                 value={caption}
                 onChange={(e) => setCaption(e.target.value)}
                 placeholder={t(language, "photoStudio.captionPlaceholder")}
-                className="font-myanmar leading-relaxed"
+                className="font-myanmar leading-[1.85]"
               />
             </CardContent>
           </Card>

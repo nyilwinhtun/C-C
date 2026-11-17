@@ -28,9 +28,11 @@ interface ContentState {
   draftInput: GeneratorFormValues
   generatedHistory: GeneratedItem[]
   savedVault: SavedVaultItem[]
+  brandSignature: string
   isSyncing: boolean
   setDraftInput: (input: Partial<GeneratorFormValues>) => void
   addGeneratedItem: (item: Omit<GeneratedItem, "id" | "createdAt">) => void
+  setBrandSignature: (signature: string) => void
   saveToVault: (item: Omit<SavedVaultItem, "id" | "status">) => void
   updateVaultItem: (id: string, updates: Partial<SavedVaultItem>) => void
   deleteVaultItem: (id: string) => void
@@ -53,6 +55,7 @@ export const useContentStore = create<ContentState>()(
       draftInput: defaultDraft,
       generatedHistory: [],
       savedVault: [],
+      brandSignature: "",
       isSyncing: false,
 
       setDraftInput: (input) =>
@@ -67,8 +70,14 @@ export const useContentStore = create<ContentState>()(
             id: crypto.randomUUID(),
             createdAt: new Date().toISOString(),
           }
-          return { generatedHistory: [entry, ...state.generatedHistory] }
+          const normalizedContent = item.content.trim()
+          const deduped = state.generatedHistory.filter(
+            (existing) => existing.content.trim() !== normalizedContent
+          )
+          return { generatedHistory: [entry, ...deduped].slice(0, 10) }
         }),
+
+      setBrandSignature: (brandSignature) => set({ brandSignature }),
 
       saveToVault: (item: Omit<SavedVaultItem, "id" | "status">) =>
         set((state) => {
@@ -136,8 +145,9 @@ export const useContentStore = create<ContentState>()(
       name: "content-creator-content",
       partialize: (state) => ({
         draftInput: state.draftInput ?? defaultDraft,
-        generatedHistory: state.generatedHistory ?? [],
+        generatedHistory: (state.generatedHistory ?? []).slice(0, 10),
         savedVault: state.savedVault ?? [],
+        brandSignature: state.brandSignature ?? "",
       }),
     }
   )
