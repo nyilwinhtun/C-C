@@ -29,10 +29,20 @@ export interface UIState {
   setAIModel: (model: string) => void
 }
 
+const ENV_GEMINI_API_KEY =
+  (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ?? ""
+
 const DEFAULT_MODELS: Record<AIProvider, string> = {
-  gemini: "gemini-2.5-flash",
+  gemini: "gemini-3.5-flash-lite",
   groq: "llama-3.3-70b-versatile",
   openrouter: "openrouter/auto",
+}
+
+function migrateGeminiModel(model: string | undefined, provider: AIProvider): string {
+  if (!model || model === "gemini-2.5-flash-lite") {
+    return provider === "gemini" ? "gemini-3.5-flash-lite" : DEFAULT_MODELS[provider]
+  }
+  return model
 }
 
 export const useUIStore = create<UIState>()(
@@ -55,7 +65,7 @@ export const useUIStore = create<UIState>()(
       signOut: () => set({ user: null, session: null }),
       // BYOK
       aiProvider: "gemini",
-      aiApiKey: "",
+      aiApiKey: ENV_GEMINI_API_KEY,
       aiModel: DEFAULT_MODELS.gemini,
       setAIProvider: (provider) =>
         set(() => ({
@@ -73,8 +83,28 @@ export const useUIStore = create<UIState>()(
         language: state.language ?? "en",
         aiProvider: state.aiProvider ?? "gemini",
         aiApiKey: state.aiApiKey ?? "",
-        aiModel: state.aiModel ?? "gemini-2.5-flash",
+        aiModel: migrateGeminiModel(state.aiModel, state.aiProvider ?? "gemini"),
       }),
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState ?? {}) as Partial<UIState>
+        const provider = persisted.aiProvider ?? currentState.aiProvider
+        const apiKey =
+          persisted.aiApiKey ||
+          (provider === "gemini" ? ENV_GEMINI_API_KEY : "") ||
+          currentState.aiApiKey
+        return {
+          ...currentState,
+          ...persisted,
+          aiProvider: provider,
+          aiApiKey: apiKey,
+          aiModel: migrateGeminiModel(persisted.aiModel, provider),
+        }
+      },
+      onRehydrateStorage: () => (state) => {
+        if (state && state.aiModel === "gemini-2.5-flash-lite") {
+          state.setAIModel("gemini-3.5-flash-lite")
+        }
+      },
     }
   )
 )

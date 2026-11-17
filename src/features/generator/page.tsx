@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import {
@@ -14,6 +14,13 @@ import {
   Share2,
   MessageCircle,
   Clock,
+  Minimize2,
+  Smile,
+  Megaphone,
+  Video,
+  Send,
+  Sparkles,
+  Repeat,
 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
@@ -48,6 +55,66 @@ import { Badge } from "@/components/ui/badge"
 function extractHashtags(text: string): string[] {
   return [...text.matchAll(/#[^\s#]+/g)].map((match) => match[0].slice(1))
 }
+
+type ActiveAction = {
+  kind: "generate" | "refine" | "repurpose"
+  id: string
+  baseTopic?: string
+}
+
+const REFINE_OPTIONS = [
+  {
+    id: "shorten",
+    labelKey: "generator.refineShorten",
+    icon: Minimize2,
+    instruction:
+      "Condense the following post to be shorter and punchier while keeping all key selling points and core message.",
+  },
+  {
+    id: "emojis",
+    labelKey: "generator.refineEmojis",
+    icon: Smile,
+    instruction:
+      "Enrich the following post with engaging, relevant emojis while keeping the meaning and structure natural.",
+  },
+  {
+    id: "sales_cta",
+    labelKey: "generator.refineSalesCta",
+    icon: Megaphone,
+    instruction:
+      "Rewrite the following post with stronger sales urgency and a clear, compelling call-to-action (CTA).",
+  },
+] as const
+
+const REPURPOSE_OPTIONS = [
+  {
+    id: "tiktok_script",
+    labelKey: "generator.repurposeTiktok",
+    icon: Video,
+    platform: "tiktok",
+    contentType: "video_script",
+    instruction:
+      "Transform the following post into a 30-second TikTok video script with a spoken hook, concise body, and [Visual Cue] directions.",
+  },
+  {
+    id: "telegram_post",
+    labelKey: "generator.repurposeTelegram",
+    icon: Send,
+    platform: "telegram",
+    contentType: "post_caption",
+    instruction:
+      "Transform the following post into a Telegram channel post formatted with clear bullet points and **bold** highlights.",
+  },
+  {
+    id: "ig_caption",
+    labelKey: "generator.repurposeIg",
+    icon: Sparkles,
+    platform: "instagram",
+    contentType: "post_caption",
+    instruction:
+      "Transform the following post into a short, punchy 2-3 line Instagram caption with relevant hashtags at the end.",
+  },
+] as const
 
 export function GeneratorPage() {
   const { language } = useUIStore(
@@ -127,23 +194,46 @@ export function GeneratorPage() {
     }))
   )
 
+  const [activeAction, setActiveAction] = useState<ActiveAction | null>(null)
+  const pendingActionRef = useRef<ActiveAction | null>(null)
+
   const mutation = useGenerateContent({
     onSuccess: (data) => {
-      setResult(data)
+      const action = pendingActionRef.current
+      pendingActionRef.current = null
+      setActiveAction(null)
+      setIsGenerating(false)
+
+      const normalizedData: GeneratedContent = action?.baseTopic
+        ? { ...data, topic: action.baseTopic }
+        : data
+
+      setResult(normalizedData)
       setDisplayedText("")
       setTypewriterIndex(0)
       setIsTypewriting(true)
       addGeneratedItem({
-        topic: data.topic,
-        platform: data.platform,
-        contentType: data.contentType,
-        tone: data.tone,
-        content: data.content,
+        topic: normalizedData.topic,
+        platform: normalizedData.platform,
+        contentType: normalizedData.contentType,
+        tone: normalizedData.tone,
+        content: normalizedData.content,
       })
-      toast.success(t(language, "generator.genSuccess"))
+      const successKey =
+        action?.kind === "refine"
+          ? "generator.refineSuccess"
+          : action?.kind === "repurpose"
+            ? "generator.repurposeSuccess"
+            : "generator.genSuccess"
+      toast.success(t(language, successKey))
     },
-    onError: () => {
-      toast.error(t(language, "generator.genError"))
+    onError: (err) => {
+      pendingActionRef.current = null
+      setActiveAction(null)
+      setIsGenerating(false)
+      const baseMsg = t(language, "generator.genError")
+      const detail = err instanceof Error && err.message ? err.message : String(err ?? "")
+      toast.error(detail ? `${baseMsg}: ${detail}` : baseMsg)
     },
   })
 
@@ -181,6 +271,9 @@ export function GeneratorPage() {
   }, [isTypewriting, typewriterIndex, result])
 
   const onSubmit = (data: GeneratorFormInput) => {
+    const action: ActiveAction = { kind: "generate", id: "generate" }
+    pendingActionRef.current = action
+    setActiveAction(action)
     setIsGenerating(true)
     setResult(null)
     setDisplayedText("")
@@ -217,6 +310,9 @@ export function GeneratorPage() {
   const handleRegenerate = useCallback(() => {
     if (!result) return
     const values = form.getValues()
+    const action: ActiveAction = { kind: "generate", id: "regenerate" }
+    pendingActionRef.current = action
+    setActiveAction(action)
     setIsGenerating(true)
     setResult(null)
     setDisplayedText("")
@@ -232,6 +328,51 @@ export function GeneratorPage() {
     })
   }, [result, form, generate])
 
+  const isGeneratingFlag = isPending || isGenerating
+
+  const runTransform = useCallback(
+    (params: {
+      kind: "refine" | "repurpose"
+      id: string
+      instruction: string
+      platform?: string
+      contentType?: string
+    }) => {
+      const currentText = result?.content || displayedText
+      if (!currentText || isGeneratingFlag) return
+      const values = form.getValues()
+      const selectedLang = values.language || "english"
+      const languageDirective =
+        selectedLang === "myanmar"
+          ? "Output language: Myanmar (Burmese Unicode script only)."
+          : selectedLang === "bilingual"
+            ? "Output language: Bilingual (natural blend of Myanmar Unicode and English)."
+            : "Output language: English."
+
+      const action: ActiveAction = {
+        kind: params.kind,
+        id: params.id,
+        baseTopic: result?.topic || values.topic,
+      }
+      pendingActionRef.current = action
+      setActiveAction(action)
+      setIsGenerating(true)
+      setIsTypewriting(false)
+
+      generate({
+        topic: result?.topic || values.topic || "Social Media Post",
+        platform: params.platform ?? result?.platform ?? values.platform,
+        contentType: params.contentType ?? result?.contentType ?? values.contentType,
+        tone: result?.tone ?? values.tone,
+        language: selectedLang,
+        includeHashtags: values.includeHashtags ?? true,
+        instruction: `${params.instruction}\n${languageDirective}`,
+        currentContent: currentText,
+      })
+    },
+    [result, displayedText, isGeneratingFlag, form, generate]
+  )
+
   const handleLoadTemplate = useCallback((template: any) => {
     form.setValues({
       topic: template.topic,
@@ -243,7 +384,12 @@ export function GeneratorPage() {
     })
   }, [form])
 
-  const isGeneratingFlag = isPending || isGenerating
+  const loadingLabel =
+    activeAction?.kind === "refine"
+      ? t(language, "generator.refining")
+      : activeAction?.kind === "repurpose"
+        ? t(language, "generator.repurposing")
+        : t(language, "generator.generating")
   const contentToShow = viewMode === "editor" ? (displayedText || (result?.content ?? "")) : (result?.content ?? "")
   const charCount = contentToShow.length
   const wordCount = contentToShow ? contentToShow.split(/\s+/).filter(Boolean).length : 0
@@ -370,6 +516,7 @@ export function GeneratorPage() {
                     )}
                   </Button>
                   <Button
+                    type="button"
                     variant="outline"
                     disabled={!result || isGeneratingFlag}
                     onClick={handleRegenerate}
@@ -412,11 +559,11 @@ export function GeneratorPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="min-h-[300px] flex flex-col gap-4">
-              {!result && isGeneratingFlag ? (
-                <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+              {isGeneratingFlag ? (
+                <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 text-muted-foreground">
                   <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
                   <p className="text-sm leading-relaxed">
-                    {t(language, "generator.generating")}
+                    {loadingLabel}
                   </p>
                 </div>
               ) : !result && !displayedText ? (
@@ -480,6 +627,92 @@ export function GeneratorPage() {
               </div>
             </CardFooter>
           </Card>
+
+          {result && (
+            <div className="rounded-xl border bg-card p-4 space-y-3">
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>{t(language, "generator.refineTitle")}</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {REFINE_OPTIONS.map((opt) => {
+                    const Icon = opt.icon
+                    const isThisLoading =
+                      isGeneratingFlag &&
+                      activeAction?.kind === "refine" &&
+                      activeAction.id === opt.id
+                    return (
+                      <Button
+                        key={opt.id}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isGeneratingFlag}
+                        onClick={() =>
+                          runTransform({
+                            kind: "refine",
+                            id: opt.id,
+                            instruction: opt.instruction,
+                          })
+                        }
+                        className="h-auto py-1.5 px-2.5 text-xs font-myanmar"
+                      >
+                        {isThisLoading ? (
+                          <Loader2 className="h-3 w-3 animate-spin mr-1.5" aria-hidden="true" />
+                        ) : (
+                          <Icon className="h-3 w-3 mr-1.5" aria-hidden="true" />
+                        )}
+                        {t(language, opt.labelKey)}
+                      </Button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="border-t pt-3 space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  <Repeat className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>{t(language, "generator.repurposeTitle")}</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {REPURPOSE_OPTIONS.map((opt) => {
+                    const Icon = opt.icon
+                    const isThisLoading =
+                      isGeneratingFlag &&
+                      activeAction?.kind === "repurpose" &&
+                      activeAction.id === opt.id
+                    return (
+                      <Button
+                        key={opt.id}
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={isGeneratingFlag}
+                        onClick={() =>
+                          runTransform({
+                            kind: "repurpose",
+                            id: opt.id,
+                            instruction: opt.instruction,
+                            platform: opt.platform,
+                            contentType: opt.contentType,
+                          })
+                        }
+                        className="h-auto py-1.5 px-2.5 text-xs font-myanmar"
+                      >
+                        {isThisLoading ? (
+                          <Loader2 className="h-3 w-3 animate-spin mr-1.5" aria-hidden="true" />
+                        ) : (
+                          <Icon className="h-3 w-3 mr-1.5" aria-hidden="true" />
+                        )}
+                        {t(language, opt.labelKey)}
+                      </Button>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

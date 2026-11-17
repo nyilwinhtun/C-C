@@ -1,6 +1,99 @@
 import { useUIStore } from "@/store/useUIStore"
 
-export const GEMINI_MODEL = "gemini-2.5-flash"
+export const GEMINI_MODEL = "gemini-3.5-flash-lite"
+export const GEMINI_FALLBACK_MODEL = "gemini-3.5-flash-lite"
+export const QUOTA_EXCEEDED_MESSAGE =
+  "Daily/minute API quota exceeded. Please switch model in Settings or wait a moment."
+
+export class ApiError extends Error {
+  status: number
+  isQuotaExceeded: boolean
+
+  constructor(status: number, message: string, isQuotaExceeded = false) {
+    super(message)
+    this.name = "ApiError"
+    this.status = status
+    this.isQuotaExceeded = isQuotaExceeded
+  }
+}
+
+function parseApiError(provider: string, status: number, rawText: string): ApiError {
+  let extractedMessage = ""
+  let isQuota = status === 429
+
+  if (rawText) {
+    try {
+      const parsed = JSON.parse(rawText)
+      const err = parsed.error ?? parsed
+
+      if (typeof err === "string") {
+        extractedMessage = err
+      } else if (err && typeof err === "object") {
+        if (typeof err.message === "string") {
+          extractedMessage = err.message
+        } else if (typeof parsed.message === "string") {
+          extractedMessage = parsed.message
+        } else if (Array.isArray(parsed.errors) && parsed.errors[0]?.message) {
+          extractedMessage = String(parsed.errors[0].message)
+        }
+
+        if (
+          err.status === "RESOURCE_EXHAUSTED" ||
+          err.code === 429 ||
+          err.code === "rate_limit_exceeded" ||
+          err.type === "rate_limit_exceeded"
+        ) {
+          isQuota = true
+        }
+      }
+    } catch {
+      // Not JSON
+      if (rawText.includes("<html") || rawText.includes("<!DOCTYPE")) {
+        extractedMessage = `Server error (${status})`
+      } else {
+        extractedMessage = rawText.trim()
+      }
+    }
+  }
+
+  const lower = (extractedMessage + " " + rawText).toLowerCase()
+  if (
+    status === 429 ||
+    lower.includes("resource_exhausted") ||
+    lower.includes("quota exceeded") ||
+    lower.includes("rate limit") ||
+    lower.includes("too many requests") ||
+    lower.includes("tokens per minute") ||
+    lower.includes("requests per minute") ||
+    lower.includes("requests per day")
+  ) {
+    isQuota = true
+  }
+
+  if (isQuota) {
+    return new ApiError(status || 429, QUOTA_EXCEEDED_MESSAGE, true)
+  }
+
+  if (
+    status === 401 ||
+    lower.includes("api key not valid") ||
+    lower.includes("invalid api key") ||
+    lower.includes("invalid_api_key")
+  ) {
+    return new ApiError(
+      status,
+      `Invalid API key for ${provider}. Please check your API key in Settings.`,
+      false
+    )
+  }
+
+  const cleanMessage = extractedMessage ? extractedMessage.replace(/\s+/g, " ").trim() : ""
+  const finalMessage = cleanMessage
+    ? `${provider} error (${status}): ${cleanMessage}`
+    : `${provider} error (${status}): Request failed`
+
+  return new ApiError(status, finalMessage, false)
+}
 
 export type AIProvider = "gemini" | "groq" | "openrouter"
 
@@ -11,6 +104,8 @@ export interface GenerateContentRequest {
   tone: string
   language: string
   includeHashtags: boolean
+  instruction?: string
+  currentContent?: string
 }
 
 export interface GeneratedContent {
@@ -39,8 +134,25 @@ Rules:
 
 function buildUserPrompt(request: GenerateContentRequest): string {
   const hashtagInstruction = request.includeHashtags
-    ? " Include relevant hashtags at the end."
-    : " Do not include hashtags."
+    ? "Include relevant hashtags at the end."
+    : "Do not include hashtags."
+
+  if (request.instruction && request.currentContent) {
+    return `Task: ${request.instruction}
+Target Platform: ${request.platform}
+Target Content Type: ${request.contentType}
+Tone: ${request.tone}
+Output Language: ${request.language}
+${hashtagInstruction}
+
+Current content to transform:
+"""
+${request.currentContent}
+"""
+
+Output only the final transformed content now.`
+  }
+
   return `Platform: ${request.platform}
 Content type: ${request.contentType}
 Tone: ${request.tone}
@@ -83,7 +195,15 @@ function mockGenerate(request: GenerateContentRequest): GeneratedContent {
 
 function getAiConfig() {
   const { aiProvider, aiApiKey, aiModel } = useUIStore.getState()
-  return { provider: aiProvider, apiKey: aiApiKey, model: aiModel }
+  const envGeminiKey =
+    aiProvider === "gemini"
+      ? ((import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ?? "")
+      : ""
+  return {
+    provider: aiProvider,
+    apiKey: aiApiKey || envGeminiKey,
+    model: aiModel === "gemini-2.5-flash-lite" ? GEMINI_FALLBACK_MODEL : aiModel,
+  }
 }
 
 async function generateWithGemini(
@@ -95,7 +215,7 @@ async function generateWithGemini(
   const body = {
     systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
     contents: [{ parts: [{ text: buildUserPrompt(request) }] }],
-    generationConfig: { temperature: 0.7, topP: 0.95, maxOutputTokens: 2048 },
+    generationConfig: { temperature: 0.7, topP: 0.95, maxOutputTokens: 4096 },
   }
 
   const res = await fetch(url, {
@@ -106,15 +226,25 @@ async function generateWithGemini(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "")
-    throw new Error(`Gemini API error (${res.status}): ${text}`)
+    throw parseApiError("Gemini", res.status, text)
   }
 
   const data = await res.json()
-  const content =
-    data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? ""
+  const parts: Array<{ text?: string; thought?: boolean }> =
+    data.candidates?.[0]?.content?.parts ?? []
+  const content = parts
+    .filter((part) => !part.thought && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("")
+    .trim()
 
   if (!content) {
-    throw new Error("No content returned from Gemini API.")
+    const finishReason = data.candidates?.[0]?.finishReason
+    throw new Error(
+      finishReason
+        ? `No content returned from Gemini API (finishReason: ${finishReason}).`
+        : "No content returned from Gemini API."
+    )
   }
 
   return {
@@ -168,7 +298,8 @@ async function generateWithOpenAICompatible(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "")
-    throw new Error(`${provider} API error (${res.status}): ${text}`)
+    const providerName = provider === "groq" ? "Groq" : "OpenRouter"
+    throw parseApiError(providerName, res.status, text)
   }
 
   const data = await res.json()
@@ -193,17 +324,44 @@ export async function generateContent(
   request: GenerateContentRequest
 ): Promise<GeneratedContent> {
   const { provider, apiKey, model } = getAiConfig()
+  const trimmedKey = apiKey.trim()
 
-  if (!apiKey) {
+  if (!trimmedKey) {
     await delay(1000)
     return mockGenerate(request)
   }
 
   try {
     if (provider === "gemini") {
-      return generateWithGemini(request, apiKey, model || GEMINI_MODEL)
+      const primaryModel = model || GEMINI_MODEL
+      try {
+        return await generateWithGemini(request, trimmedKey, primaryModel)
+      } catch (err) {
+        const isQuota =
+          (err instanceof ApiError && err.isQuotaExceeded) ||
+          (err instanceof Error &&
+            (err.message === QUOTA_EXCEEDED_MESSAGE ||
+              err.message.includes("429") ||
+              err.message.includes("RESOURCE_EXHAUSTED") ||
+              err.message.toLowerCase().includes("quota")))
+
+        if (isQuota && primaryModel !== GEMINI_FALLBACK_MODEL) {
+          console.warn(
+            `Gemini quota exceeded for "${primaryModel}". Automatically falling back to "${GEMINI_FALLBACK_MODEL}"...`
+          )
+          return await generateWithGemini(request, trimmedKey, GEMINI_FALLBACK_MODEL)
+        }
+        throw err
+      }
     }
-    return generateWithOpenAICompatible(request, provider, apiKey, model)
+    const fallbackModel =
+      provider === "groq" ? "llama-3.3-70b-versatile" : "openrouter/auto"
+    return await generateWithOpenAICompatible(
+      request,
+      provider,
+      trimmedKey,
+      model || fallbackModel
+    )
   } catch (err) {
     console.error(`AI generation failed via ${provider}`, err)
     throw err

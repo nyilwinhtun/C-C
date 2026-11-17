@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { t } from "@/locales/translations"
 import { useUIStore } from "@/store/useUIStore"
 import { useShallow } from "zustand/react/shallow"
@@ -20,6 +20,25 @@ import { Select } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 
 type AIProvider = "gemini" | "groq" | "openrouter"
+
+const PRESET_MODELS: Record<AIProvider, string[]> = {
+  gemini: [
+    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-pro",
+  ],
+  groq: [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "mixtral-8x7b-32768",
+  ],
+  openrouter: [
+    "openrouter/auto",
+    "anthropic/claude-3.5-sonnet",
+    "meta-llama/llama-3.1-405b-instruct",
+  ],
+}
 
 interface SettingsDialogProps {
   open: boolean
@@ -48,15 +67,12 @@ const PROVIDER_INFO: Record<
 }
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
-  const [apiKey, setApiKey] = useState("")
-  const [showKey, setShowKey] = useState(false)
-  const [loading, setLoading] = useState(false)
-
-  const { language, aiProvider, aiModel, setAIProvider, setAIApiKey, setAIModel } =
+  const { language, aiProvider, aiApiKey, aiModel, setAIProvider, setAIApiKey, setAIModel } =
     useUIStore(
       useShallow((state) => ({
         language: state.language,
         aiProvider: state.aiProvider,
+        aiApiKey: state.aiApiKey,
         aiModel: state.aiModel,
         setAIProvider: state.setAIProvider,
         setAIApiKey: state.setAIApiKey,
@@ -64,7 +80,39 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       }))
     )
 
+  const [apiKey, setApiKey] = useState(aiApiKey)
+  const [showKey, setShowKey] = useState(false)
+  const [loading, setLoading] = useState(false)
+
   const providerInfo = PROVIDER_INFO[aiProvider]
+  const currentPresets = PRESET_MODELS[aiProvider]
+  const isPreset = currentPresets.includes(aiModel)
+  const [isCustomMode, setIsCustomMode] = useState(!isPreset && Boolean(aiModel))
+
+  useEffect(() => {
+    if (open) {
+      setApiKey(aiApiKey)
+      setIsCustomMode(!PRESET_MODELS[aiProvider].includes(aiModel) && Boolean(aiModel))
+    }
+    // Only re-sync local form state when the dialog opens or persisted key changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, aiApiKey])
+
+  const handleProviderChange = (provider: AIProvider) => {
+    setAIProvider(provider)
+    setIsCustomMode(false)
+  }
+
+  const handleModelSelect = (val: string) => {
+    if (val === "custom") {
+      setIsCustomMode(true)
+    } else {
+      setIsCustomMode(false)
+      setAIModel(val)
+    }
+  }
+
+  const selectedModelValue = isCustomMode ? "custom" : isPreset ? aiModel : "custom"
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -78,7 +126,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <label className="text-sm font-medium">{t(language, "settings.aiProvider")}</label>
             <Select
               value={aiProvider}
-              onChange={(e) => setAIProvider((e.target as HTMLSelectElement).value as AIProvider)}
+              onChange={(e) => handleProviderChange((e.target as HTMLSelectElement).value as AIProvider)}
             >
               <option value="gemini">Google Gemini</option>
               <option value="groq">Groq</option>
@@ -87,12 +135,14 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">{t(language, "settings.model")}</label>
-            <Select value={aiModel} onChange={(e) => setAIModel((e.target as HTMLSelectElement).value)}>
+            <Select value={selectedModelValue} onChange={(e) => handleModelSelect((e.target as HTMLSelectElement).value)}>
               {aiProvider === "gemini" ? (
                 <>
+                  <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
                   <option value="gemini-2.5-flash">gemini-2.5-flash</option>
                   <option value="gemini-2.0-flash">gemini-2.0-flash</option>
                   <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                  <option value="custom">Custom model...</option>
                 </>
               ) : aiProvider === "groq" ? (
                 <>
@@ -101,6 +151,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   </option>
                   <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
                   <option value="mixtral-8x7b-32768">mixtral-8x7b-32768</option>
+                  <option value="custom">Custom model...</option>
                 </>
               ) : (
                 <>
@@ -111,9 +162,23 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   <option value="meta-llama/llama-3.1-405b-instruct">
                     meta-llama/llama-3.1-405b-instruct
                   </option>
+                  <option value="custom">Custom model...</option>
                 </>
               )}
             </Select>
+            {(isCustomMode || !isPreset) && (
+              <Input
+                type="text"
+                value={aiModel}
+                onChange={(e) => setAIModel(e.target.value)}
+                placeholder={
+                  aiProvider === "gemini"
+                    ? "Enter model (e.g. gemini-3.5-flash-lite)"
+                    : "Enter custom model name"
+                }
+                className="mt-2"
+              />
+            )}
           </div>
           <div className="space-y-2">
             <div className="flex items-center gap-2">
