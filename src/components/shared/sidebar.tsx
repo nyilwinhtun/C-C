@@ -176,17 +176,20 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
       </aside>
 
       {mobileOpen && (
-        <Sheet open={mobileOpen} onOpenChange={onMobileToggle} className="border-l border-border/60">
-          <SheetContent className="w-[260px]">
-            <SheetHeader className="pb-4 px-4 border-b border-border/60">
-              <div className="flex items-center gap-2.5 mb-1">
+        <Sheet open={mobileOpen} onOpenChange={onMobileToggle} className="w-[280px] max-w-[82vw] border-l border-border/60">
+          <SheetContent className="w-full p-0">
+            <SheetHeader className="relative flex flex-col items-start gap-1 text-left pr-8 pt-4 pb-4 px-4 border-b border-border/60">
+              <div className="flex items-center gap-2.5">
                 <CCLogo size={26} className="h-6.5 w-6.5 shrink-0 rounded-lg shadow-sm" />
-                <SheetTitle>{t(language, "sidebar.mobile_nav_title")}</SheetTitle>
+                <SheetTitle className="text-base leading-tight">{t(language, "sidebar.mobile_nav_title")}</SheetTitle>
               </div>
-              <SheetDescription>{t(language, "sidebar.mobile_nav_description")}</SheetDescription>
+              <SheetDescription className="text-xs leading-snug whitespace-nowrap truncate max-w-full">
+                {t(language, "sidebar.mobile_nav_description")}
+              </SheetDescription>
               <SheetClose
                 onClick={() => onMobileToggle(false)}
                 aria-label={t(language, "sidebar.close_menu_label")}
+                className="absolute right-3 top-4 p-1.5 rounded-lg hover:bg-accent"
               />
             </SheetHeader>
             <nav className="flex flex-col gap-1 px-3 py-4 border-b border-border/60">

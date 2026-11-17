@@ -17,6 +17,12 @@ interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>
 }
 
+declare global {
+  interface Window {
+    __deferredInstallPrompt?: BeforeInstallPromptEvent | null
+  }
+}
+
 const STORAGE_KEY = "cc_pwa_banner_dismissed"
 
 export function PWAInstallBanner() {
@@ -66,10 +72,27 @@ export function PWAInstallBanner() {
       setVisible(true)
     }
 
-    // 4. Listen for beforeinstallprompt on Chrome / Android / Desktop
+    // 4. Read early-captured beforeinstallprompt and listen for future events
+    if (window.__deferredInstallPrompt) {
+      setDeferredPrompt(window.__deferredInstallPrompt)
+      setShowFallbackTip(false)
+    }
+
+    const handlePromptReady = () => {
+      if (window.__deferredInstallPrompt) {
+        setDeferredPrompt(window.__deferredInstallPrompt)
+        setShowFallbackTip(false)
+        if (!wasDismissed) {
+          setVisible(true)
+        }
+      }
+    }
+
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault()
-      setDeferredPrompt(e as BeforeInstallPromptEvent)
+      const promptEvent = e as BeforeInstallPromptEvent
+      window.__deferredInstallPrompt = promptEvent
+      setDeferredPrompt(promptEvent)
       setShowFallbackTip(false)
       if (!wasDismissed) {
         setVisible(true)
@@ -77,15 +100,18 @@ export function PWAInstallBanner() {
     }
 
     const handleAppInstalled = () => {
+      window.__deferredInstallPrompt = null
       setVisible(false)
       setIsStandalone(true)
       setDeferredPrompt(null)
     }
 
+    window.addEventListener("pwa-prompt-ready", handlePromptReady)
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt)
     window.addEventListener("appinstalled", handleAppInstalled)
 
     return () => {
+      window.removeEventListener("pwa-prompt-ready", handlePromptReady)
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt)
       window.removeEventListener("appinstalled", handleAppInstalled)
     }
@@ -118,6 +144,7 @@ export function PWAInstallBanner() {
     } finally {
       setInstalling(false)
       setDeferredPrompt(null)
+      window.__deferredInstallPrompt = null
     }
   }
 
