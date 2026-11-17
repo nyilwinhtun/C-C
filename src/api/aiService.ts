@@ -368,19 +368,37 @@ export async function generateContent(
   }
 }
 
+export type PhotoCategoryKey =
+  | "tech"
+  | "flash_sale"
+  | "new_arrival"
+  | "fashion"
+  | "food"
+
 export interface PhotoSuggestionRequest {
   imageBase64: string
   mimeType: string
   language: "en" | "my"
+  category?: PhotoCategoryKey
 }
 
 export interface PhotoSuggestionResult {
   headline: string
+  spec1: string
+  spec2: string
+  spec3: string
+  suggestedPrice: string
   caption: string
 }
 
-function stripMarkdownAsterisks(text: string): string {
-  return text.replace(/\*{1,3}([^*]+)\*{1,3}/g, "$1").replace(/\*/g, "").trim()
+function stripMarkdownArtifacts(text: string, allowHashtags = false): string {
+  let cleaned = text.replace(/\*{1,3}([^*]+)\*{1,3}/g, "$1").replace(/\*/g, "")
+  if (allowHashtags) {
+    cleaned = cleaned.replace(/^#{1,6}\s+/gm, "")
+  } else {
+    cleaned = cleaned.replace(/#/g, "")
+  }
+  return cleaned.trim()
 }
 
 function parsePhotoSuggestionResponse(raw: string): PhotoSuggestionResult {
@@ -391,11 +409,22 @@ function parsePhotoSuggestionResponse(raw: string): PhotoSuggestionResult {
     .trim()
 
   try {
-    const parsed = JSON.parse(cleaned) as { headline?: string; caption?: string }
+    const parsed = JSON.parse(cleaned) as {
+      headline?: string
+      spec1?: string
+      spec2?: string
+      spec3?: string
+      suggestedPrice?: string
+      caption?: string
+    }
     if (typeof parsed.headline === "string" || typeof parsed.caption === "string") {
       return {
-        headline: stripMarkdownAsterisks(parsed.headline ?? ""),
-        caption: stripMarkdownAsterisks(parsed.caption ?? ""),
+        headline: stripMarkdownArtifacts(parsed.headline ?? ""),
+        spec1: stripMarkdownArtifacts(parsed.spec1 ?? ""),
+        spec2: stripMarkdownArtifacts(parsed.spec2 ?? ""),
+        spec3: stripMarkdownArtifacts(parsed.spec3 ?? ""),
+        suggestedPrice: stripMarkdownArtifacts(parsed.suggestedPrice ?? ""),
+        caption: stripMarkdownArtifacts(parsed.caption ?? "", true),
       }
     }
   } catch {
@@ -403,25 +432,69 @@ function parsePhotoSuggestionResponse(raw: string): PhotoSuggestionResult {
   }
 
   const lines = cleaned.split("\n").map((l) => l.trim()).filter(Boolean)
-  const headline = stripMarkdownAsterisks(lines[0] ?? "")
-  const caption = stripMarkdownAsterisks(lines.slice(1).join("\n") || cleaned)
-  return { headline, caption }
+  const headline = stripMarkdownArtifacts(lines[0] ?? "")
+  const caption = stripMarkdownArtifacts(lines.slice(1).join("\n") || cleaned, true)
+  return {
+    headline,
+    spec1: "",
+    spec2: "",
+    spec3: "",
+    suggestedPrice: "",
+    caption,
+  }
 }
 
-function buildPhotoPrompt(language: "en" | "my"): string {
-  if (language === "my") {
-    return `You are a Myanmar social media marketing expert. Look at this product photo carefully and generate:
-1. "headline": A short, punchy poster headline (3 to 7 words max) in natural Myanmar (Burmese) Unicode script. Do NOT use Markdown asterisks (*) or quotes.
-2. "caption": A ready-to-post Facebook/Instagram social media caption in natural Myanmar (Burmese) Unicode script with relevant emojis and 3-5 hashtags at the end. Do NOT use Markdown asterisks (*).
+const PHOTO_CATEGORY_GUIDANCE: Record<PhotoCategoryKey, string> = {
+  tech: "Tech & Gadgets (smartphones, laptops, electronics). Focus spec1, spec2, spec3 on concise hardware/warranty specs (e.g., '8GB / 256GB', '5000mAh', '1 Year Warranty').",
+  flash_sale:
+    "Flash Sale & Discount (limited-time promotion). Emphasize urgency and savings in headline and specs (e.g., 'Save 30%', 'Today Only', 'Free Delivery').",
+  new_arrival:
+    "New Arrival (newly launched product showcase). Highlight freshness, key feature, and availability.",
+  fashion:
+    "Fashion & Beauty (apparel, skincare, cosmetics, lifestyle). Highlight style, texture/material, or skin/fit benefits.",
+  food: "Food & Drink (cafes, restaurants, snacks, beverages). Highlight taste, freshness, and fast delivery.",
+}
 
-Return ONLY a valid JSON object with keys "headline" and "caption".`
+function buildPhotoPrompt(
+  language: "en" | "my",
+  category: PhotoCategoryKey = "new_arrival"
+): string {
+  const categoryGuide = PHOTO_CATEGORY_GUIDANCE[category]
+
+  if (language === "my") {
+    return `You are a Myanmar social media marketing expert. Look at this product photo carefully.
+Selected Business Category: ${categoryGuide}
+
+Generate a JSON object with these exact 6 keys:
+1. "headline": A short, punchy poster headline (3 to 7 words max) in natural Myanmar (Burmese) Unicode script.
+2. "spec1": Short highlight pill #1 (2 to 4 words, max 22 characters).
+3. "spec2": Short highlight pill #2 (2 to 4 words, max 22 characters).
+4. "spec3": Short highlight pill #3 (2 to 4 words, max 22 characters).
+5. "suggestedPrice": A realistic price tag string for Myanmar market (e.g., "45,000 Ks") or "" if unclear.
+6. "caption": A ready-to-post Facebook/Instagram caption in natural Myanmar (Burmese) Unicode script with relevant emojis and 3-5 hashtags at the end.
+
+CRITICAL RULES:
+- When writing in Burmese, keep ALL international brand names, model names, and technical terms (e.g., Redmi, iPhone, Samsung, Pro Max, 5G, OLED, SPF, Latte) in their original English spelling. NEVER transliterate brand or model names phonetically into Burmese.
+- Do NOT use raw Markdown symbols (* or #) in headline, spec1, spec2, spec3, or suggestedPrice.
+- Do NOT use Markdown * or # heading syntax in caption (only normal #hashtags at the end).
+- Return ONLY valid JSON.`
   }
 
-  return `You are a social media marketing expert. Look at this product photo carefully and generate:
-1. "headline": A short, punchy poster headline (3 to 7 words max) in English. Do NOT use Markdown asterisks (*) or quotes.
-2. "caption": A ready-to-post Facebook/Instagram social media caption in English with relevant emojis and 3-5 hashtags at the end. Do NOT use Markdown asterisks (*).
+  return `You are a social media marketing expert. Look at this product photo carefully.
+Selected Business Category: ${categoryGuide}
 
-Return ONLY a valid JSON object with keys "headline" and "caption".`
+Generate a JSON object with these exact 6 keys:
+1. "headline": A short, punchy poster headline (3 to 7 words max) in English.
+2. "spec1": Short highlight pill #1 (2 to 4 words, max 22 characters).
+3. "spec2": Short highlight pill #2 (2 to 4 words, max 22 characters).
+4. "spec3": Short highlight pill #3 (2 to 4 words, max 22 characters).
+5. "suggestedPrice": A realistic price tag string (e.g., "45,000 Ks" or "$29.99") or "" if unclear.
+6. "caption": A ready-to-post Facebook/Instagram caption in English with relevant emojis and 3-5 hashtags at the end.
+
+CRITICAL RULES:
+- Do NOT use raw Markdown symbols (* or #) in headline, spec1, spec2, spec3, or suggestedPrice.
+- Do NOT use Markdown * or # heading syntax in caption (only normal #hashtags at the end).
+- Return ONLY valid JSON.`
 }
 
 async function suggestPhotoWithGemini(
@@ -441,7 +514,7 @@ async function suggestPhotoWithGemini(
               data: base64Data,
             },
           },
-          { text: buildPhotoPrompt(request.language) },
+          { text: buildPhotoPrompt(request.language, request.category) },
         ],
       },
     ],
@@ -512,7 +585,7 @@ async function suggestPhotoWithOpenAICompatible(
         {
           role: "user",
           content: [
-            { type: "text", text: buildPhotoPrompt(request.language) },
+            { type: "text", text: buildPhotoPrompt(request.language, request.category) },
             { type: "image_url", image_url: { url: dataUrl } },
           ],
         },
@@ -545,18 +618,106 @@ export async function suggestFromPhoto(
 
   if (!trimmedKey) {
     await delay(900)
+    const cat = request.category ?? "new_arrival"
     if (request.language === "my") {
-      return {
-        headline: "အရည်အသွေးမြင့် ပစ္စည်းသစ် ရောက်ရှိပါပြီ",
-        caption:
-          "✨ သင့်အတွက် အကောင်းဆုံး ရွေးချယ်မှု!\n\nအရည်အသွေးကောင်းမွန်ပြီး စိတ်ချရတဲ့ ပစ္စည်းလေးကို အခုပဲ မှာယူလိုက်ပါ။ 🛍️\n\n📩 မှာယူလိုပါက Inbox မှတစ်ဆင့် ဆက်သွယ်နိုင်ပါတယ်ခင်ဗျာ။\n\n#NewArrival #OnlineShopMyanmar #QualityFirst",
+      const mockByCategory: Record<PhotoCategoryKey, PhotoSuggestionResult> = {
+        tech: {
+          headline: "Redmi Note 13 Pro 5G အသစ်ရောက်ရှိ",
+          spec1: "8GB / 256GB",
+          spec2: "5000mAh Battery",
+          spec3: "1 Year Warranty",
+          suggestedPrice: "890,000 Ks",
+          caption:
+            "📱 စွမ်းဆောင်ရည်မြင့် Redmi Note 13 Pro 5G ရောက်ရှိပါပြီ!\n\n8GB RAM / 256GB Storage နှင့် 5000mAh Battery ပါဝင်ပြီး Official Warranty ၁ နှစ် အပြည့်အဝ ရရှိမှာပါ။\n\n📩 မှာယူလိုပါက Inbox မှတစ်ဆင့် ဆက်သွယ်နိုင်ပါတယ်ခင်ဗျာ။\n\n#TechMyanmar #Smartphone #NewArrival",
+        },
+        flash_sale: {
+          headline: "ယနေ့တစ်ရက်တည်း အထူးလျှော့ဈေး!",
+          spec1: "Save 30%",
+          spec2: "Today Only",
+          spec3: "Fast Delivery",
+          suggestedPrice: "35,000 Ks",
+          caption:
+            "⚡ Flash Sale! ယနေ့တစ်ရက်တည်းသာ ရရှိမယ့် အထူးလျှော့ဈေး!\n\nပစ္စည်းအရေအတွက် ကန့်သတ်ထားတာမို့ မြန်မြန်လေး မှာယူလိုက်ပါနော်။ 🛍️\n\n#FlashSale #SpecialOffer #OnlineShopMyanmar",
+        },
+        new_arrival: {
+          headline: "အရည်အသွေးမြင့် ပစ္စည်းသစ် ရောက်ရှိပါပြီ",
+          spec1: "Premium Quality",
+          spec2: "Ready Stock",
+          spec3: "Cash on Delivery",
+          suggestedPrice: "45,000 Ks",
+          caption:
+            "✨ သင့်အတွက် အကောင်းဆုံး ရွေးချယ်မှု!\n\nအရည်အသွေးကောင်းမွန်ပြီး စိတ်ချရတဲ့ ပစ္စည်းလေးကို အခုပဲ မှာယူလိုက်ပါ။ 🛍️\n\n📩 မှာယူလိုပါက Inbox မှတစ်ဆင့် ဆက်သွယ်နိုင်ပါတယ်ခင်ဗျာ။\n\n#NewArrival #OnlineShopMyanmar #QualityFirst",
+        },
+        fashion: {
+          headline: "စတိုင်ကျလှပတဲ့ Fashion Collection အသစ်",
+          spec1: "Soft Fabric",
+          spec2: "Free Size / S-XL",
+          spec3: "Limited Edition",
+          suggestedPrice: "38,000 Ks",
+          caption:
+            "🌸 နေ့စဉ် စတိုင်ကျကျ ဝတ်ဆင်နိုင်မယ့် Collection အသစ် ရောက်ရှိပါပြီ!\n\nအရောင်အသွေး လှပပြီး ဝတ်ဆင်ရတာ သက်တောင့်သက်သာရှိပါတယ်။\n\n#FashionMyanmar #BeautyStyle #NewCollection",
+        },
+        food: {
+          headline: "လတ်ဆတ်အရသာရှိတဲ့ အထူးမီနူး",
+          spec1: "Freshly Made",
+          spec2: "100% Halal",
+          spec3: "Fast Delivery",
+          suggestedPrice: "6,500 Ks",
+          caption:
+            "☕ နေ့တိုင်း လတ်လတ်ဆတ်ဆတ် ဖန်တီးပေးထားတဲ့ အရသာကောင်းမွန်သော မီနူး!\n\nအိမ်တိုင်ရာရောက် ပို့ဆောင်ပေးနေပါပြီ။ 🛵\n\n#FoodMyanmar #CafeStyle #FreshDelivery",
+        },
       }
+      return mockByCategory[cat]
     }
-    return {
-      headline: "Premium Quality Just Arrived",
-      caption:
-        "✨ Upgrade your everyday style with our latest arrival!\n\nCrafted with care and ready to order today. Limited stock available—send us a message to grab yours! 🛍️\n\n#NewArrival #ShopNow #FeaturedProduct",
+
+    const mockEnByCategory: Record<PhotoCategoryKey, PhotoSuggestionResult> = {
+      tech: {
+        headline: "Redmi Note 13 Pro 5G In Stock",
+        spec1: "8GB / 256GB",
+        spec2: "5000mAh Battery",
+        spec3: "1 Year Warranty",
+        suggestedPrice: "$299",
+        caption:
+          "📱 Upgrade your daily driver with the Redmi Note 13 Pro 5G!\n\nPacked with 8GB / 256GB, a 5000mAh battery, and a full 1 Year Warranty. Message us to order today!\n\n#TechDeals #Smartphone #NewArrival",
+      },
+      flash_sale: {
+        headline: "24-Hour Flash Sale — Save Big",
+        spec1: "Up to 30% Off",
+        spec2: "Limited Stock",
+        spec3: "Fast Shipping",
+        suggestedPrice: "35,000 Ks",
+        caption:
+          "⚡ Don't miss today's Flash Sale! Grab this deal before stock runs out.\n\nSend us a DM to lock in your promo price! 🛍️\n\n#FlashSale #LimitedOffer #ShopNow",
+      },
+      new_arrival: {
+        headline: "Premium Quality Just Arrived",
+        spec1: "Premium Finish",
+        spec2: "In Stock Now",
+        spec3: "Fast Delivery",
+        suggestedPrice: "45,000 Ks",
+        caption:
+          "✨ Upgrade your everyday style with our latest arrival!\n\nCrafted with care and ready to order today. Limited stock available—send us a message to grab yours! 🛍️\n\n#NewArrival #ShopNow #FeaturedProduct",
+      },
+      fashion: {
+        headline: "Effortless Style New Collection",
+        spec1: "Breathable Fit",
+        spec2: "All Sizes",
+        spec3: "Gift Ready",
+        suggestedPrice: "38,000 Ks",
+        caption:
+          "🌸 Elevate your wardrobe with our latest collection! Soft, comfortable, and effortlessly chic.\n\nDM us to order your favorite shade today! ✨\n\n#FashionStyle #Beauty #NewCollection",
+      },
+      food: {
+        headline: "Freshly Crafted Daily Special",
+        spec1: "Fresh Ingredients",
+        spec2: "Made to Order",
+        spec3: "30 Min Delivery",
+        suggestedPrice: "6,500 Ks",
+        caption:
+          "☕ Treat yourself to our freshly made daily special! Crafted to order and delivered hot & fresh right to your door. 🛵\n\n#FreshFood #CafeVibes #OrderNow",
+      },
     }
+    return mockEnByCategory[cat]
   }
 
   if (provider === "gemini") {
