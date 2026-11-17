@@ -18,12 +18,22 @@ import {
   Shirt,
   PackagePlus,
   RotateCcw,
+  Stamp,
+  Wand2,
+  Trash2,
+  Eye,
+  EyeOff,
 } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
 import { toast } from "@/components/ui/sonner"
 import { useUIStore } from "@/store/useUIStore"
+import { useContentStore } from "@/store/useContentStore"
 import { t } from "@/locales/translations"
-import { suggestFromPhoto, type PhotoCategoryKey } from "@/api/aiService"
+import {
+  generateProductScene,
+  suggestFromPhoto,
+  type PhotoCategoryKey,
+} from "@/api/aiService"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -136,6 +146,80 @@ const BADGE_STYLES: Record<
 
 const MYANMAR_FONT_STACK =
   '"Noto Sans Myanmar", "Pyidaungsu", "Padauk", system-ui, -apple-system, sans-serif'
+
+const BRAND_LOGO_STORAGE_KEY = "content-creator-brand-logo"
+const BRAND_LOGO_ENABLED_KEY = "content-creator-brand-logo-enabled"
+const BRAND_LOGO_POSITION_KEY = "content-creator-brand-logo-position"
+
+type LogoPositionKey = "top-left" | "top-right"
+
+const PROMO_STAMPS = [
+  "COD ရသည်",
+  "Instock ရှိသည်",
+  "အာမခံ ၁ နှစ်ပါသည်",
+  "Free Delivery",
+] as const
+
+const SCENE_PRESETS = [
+  {
+    id: "white",
+    labelKey: "photoStudio.scenePresetWhite",
+    prompt:
+      "Clean, seamless pure white photography studio cyclorama backdrop with soft diffused overhead lighting and subtle natural contact shadow under the product",
+  },
+  {
+    id: "desk",
+    labelKey: "photoStudio.scenePresetDesk",
+    prompt:
+      "Modern minimalist dark oak tech desk setup with soft ambient LED rim light, sleek matte desk mat, and subtle shallow depth-of-field background",
+  },
+  {
+    id: "marble",
+    labelKey: "photoStudio.scenePresetMarble",
+    prompt:
+      "Luxury white and gold-veined Carrara marble tabletop with warm natural window sunlight and soft editorial shadows",
+  },
+  {
+    id: "cafe",
+    labelKey: "photoStudio.scenePresetCafe",
+    prompt:
+      "Warm rustic wooden cafe table with cozy golden hour ambient light and softly blurred warm cafe interior background",
+  },
+] as const
+
+function resizeLogoToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error("Failed to read logo file"))
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : ""
+      if (!result) {
+        reject(new Error("Empty logo file"))
+        return
+      }
+      const img = new Image()
+      img.onerror = () => reject(new Error("Invalid logo image"))
+      img.onload = () => {
+        const maxDim = 360
+        const scale = Math.min(1, maxDim / Math.max(img.naturalWidth || 1, img.naturalHeight || 1))
+        const targetW = Math.max(1, Math.round((img.naturalWidth || maxDim) * scale))
+        const targetH = Math.max(1, Math.round((img.naturalHeight || maxDim) * scale))
+        const offscreen = document.createElement("canvas")
+        offscreen.width = targetW
+        offscreen.height = targetH
+        const oCtx = offscreen.getContext("2d")
+        if (!oCtx) {
+          resolve(result)
+          return
+        }
+        oCtx.drawImage(img, 0, 0, targetW, targetH)
+        resolve(offscreen.toDataURL("image/png"))
+      }
+      img.src = result
+    }
+    reader.readAsDataURL(file)
+  })
+}
 
 function segmentGraphemes(text: string): string[] {
   if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
@@ -284,6 +368,86 @@ function drawMarketingBadge(
   ctx.textBaseline = "middle"
   ctx.textAlign = "left"
   ctx.fillText(labelText, x + 22, y + pillH / 2 + 1)
+  ctx.restore()
+}
+
+function drawBrandLogo(
+  ctx: CanvasRenderingContext2D,
+  logoImg: HTMLImageElement,
+  position: LogoPositionKey,
+  canvasWidth: number,
+  padding: number,
+  topOffset: number
+) {
+  const maxW = 140
+  const maxH = 88
+  const natW = logoImg.naturalWidth || maxW
+  const natH = logoImg.naturalHeight || maxH
+  const scale = Math.min(maxW / natW, maxH / natH)
+  const drawW = Math.max(1, Math.round(natW * scale))
+  const drawH = Math.max(1, Math.round(natH * scale))
+
+  const boxPad = 10
+  const boxW = drawW + boxPad * 2
+  const boxH = drawH + boxPad * 2
+  const x = position === "top-left" ? padding : canvasWidth - padding - boxW
+  const y = padding + topOffset
+
+  ctx.save()
+  ctx.shadowColor = "rgba(0, 0, 0, 0.35)"
+  ctx.shadowBlur = 14
+  ctx.shadowOffsetY = 4
+  ctx.fillStyle = "rgba(255, 255, 255, 0.88)"
+  drawRoundedRect(ctx, x, y, boxW, boxH, 16)
+  ctx.fill()
+  ctx.shadowColor = "transparent"
+  ctx.drawImage(logoImg, x + boxPad, y + boxPad, drawW, drawH)
+  ctx.restore()
+}
+
+function drawPromoStamp(
+  ctx: CanvasRenderingContext2D,
+  stampText: string,
+  anchorX: number,
+  anchorY: number,
+  alignRight: boolean,
+  accentColor: string
+) {
+  if (!stampText.trim()) return
+  const label = `✓ ${stampText.trim()}`
+  ctx.save()
+  ctx.font = `700 25px ${MYANMAR_FONT_STACK}`
+  const textW = ctx.measureText(label).width
+  const pillW = textW + 44
+  const pillH = 54
+
+  const drawX = alignRight ? anchorX - pillW : anchorX
+  const drawY = anchorY - pillH
+  const cx = drawX + pillW / 2
+  const cy = drawY + pillH / 2
+
+  ctx.translate(cx, cy)
+  ctx.rotate((-3 * Math.PI) / 180)
+  ctx.translate(-cx, -cy)
+
+  ctx.shadowColor = "rgba(0, 0, 0, 0.38)"
+  ctx.shadowBlur = 16
+  ctx.shadowOffsetY = 5
+
+  ctx.fillStyle = accentColor
+  drawRoundedRect(ctx, drawX, drawY, pillW, pillH, 14)
+  ctx.fill()
+
+  ctx.shadowColor = "transparent"
+  ctx.lineWidth = 2.5
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.92)"
+  drawRoundedRect(ctx, drawX + 4, drawY + 4, pillW - 8, pillH - 8, 10)
+  ctx.stroke()
+
+  ctx.fillStyle = "#FFFFFF"
+  ctx.textAlign = "center"
+  ctx.textBaseline = "middle"
+  ctx.fillText(label, cx, cy + 1)
   ctx.restore()
 }
 
@@ -450,12 +614,20 @@ function drawSpecPillRows(
 
 export function PhotoStudioPage() {
   const language = useUIStore(useShallow((state) => state.language))
+  const { posterDraft, setPosterDraft } = useContentStore(
+    useShallow((state) => ({
+      posterDraft: state.posterDraft,
+      setPosterDraft: state.setPosterDraft,
+    }))
+  )
 
   const [category, setCategory] = useState<PhotoCategoryKey>("tech")
   const [layoutTemplate, setLayoutTemplate] = useState<LayoutTemplateKey>("gradient")
 
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
   const [imageMimeType, setImageMimeType] = useState<string>("image/jpeg")
+  const [originalImageDataUrl, setOriginalImageDataUrl] = useState<string | null>(null)
+  const [originalImageMimeType, setOriginalImageMimeType] = useState<string>("image/jpeg")
   const [loadedImage, setLoadedImage] = useState<HTMLImageElement | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
@@ -468,6 +640,7 @@ export function PhotoStudioPage() {
   const [textColor, setTextColor] = useState<TextColorKey>("white")
   const [textPosition, setTextPosition] = useState<TextPositionKey>("bottom")
   const [badge, setBadge] = useState<BadgeKey>("none")
+  const [promoStamp, setPromoStamp] = useState<string | null>(null)
 
   const [spec1, setSpec1] = useState("")
   const [spec2, setSpec2] = useState("")
@@ -477,11 +650,53 @@ export function PhotoStudioPage() {
   const [priceTag, setPriceTag] = useState("")
   const [shopFooter, setShopFooter] = useState("")
 
+  const [brandLogoDataUrl, setBrandLogoDataUrl] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(BRAND_LOGO_STORAGE_KEY)
+    } catch {
+      return null
+    }
+  })
+  const [showBrandLogo, setShowBrandLogo] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(BRAND_LOGO_ENABLED_KEY) !== "false"
+    } catch {
+      return true
+    }
+  })
+  const [logoPosition, setLogoPosition] = useState<LogoPositionKey>(() => {
+    try {
+      const saved = localStorage.getItem(BRAND_LOGO_POSITION_KEY)
+      return saved === "top-right" ? "top-right" : "top-left"
+    } catch {
+      return "top-left"
+    }
+  })
+  const [loadedLogo, setLoadedLogo] = useState<HTMLImageElement | null>(null)
+
+  const [scenePrompt, setScenePrompt] = useState("")
+  const [selectedScenePreset, setSelectedScenePreset] = useState<string | null>(null)
+  const [isGeneratingScene, setIsGeneratingScene] = useState(false)
+  const [hasAiScene, setHasAiScene] = useState(false)
+
   const [caption, setCaption] = useState("")
   const [isAnalyzing, setIsAnalyzing] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const logoInputRef = useRef<HTMLInputElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  // Consume shared posterDraft from Text Generator
+  useEffect(() => {
+    if (!posterDraft) return
+    setHeadline(posterDraft.headline)
+    setSpec1(posterDraft.spec1)
+    setSpec2(posterDraft.spec2)
+    setSpec3(posterDraft.spec3)
+    setCaption(posterDraft.caption)
+    setPosterDraft(null)
+    toast.success(t(language, "photoStudio.draftLoaded"))
+  }, [posterDraft, setPosterDraft, language])
 
   const handleCategoryChange = (nextCat: PhotoCategoryKey) => {
     setCategory(nextCat)
@@ -496,16 +711,84 @@ export function PhotoStudioPage() {
         return
       }
       setImageMimeType(file.type)
+      setOriginalImageMimeType(file.type)
       const reader = new FileReader()
       reader.onload = () => {
         if (typeof reader.result === "string") {
           setImageDataUrl(reader.result)
+          setOriginalImageDataUrl(reader.result)
+          setHasAiScene(false)
         }
       }
       reader.readAsDataURL(file)
     },
     [language]
   )
+
+  const handleLogoUpload = useCallback(
+    async (file: File) => {
+      const validTypes = ["image/jpeg", "image/png", "image/webp", "image/svg+xml"]
+      if (!validTypes.includes(file.type)) {
+        toast.error(t(language, "photoStudio.brandLogoInvalid"))
+        return
+      }
+      try {
+        const dataUrl = await resizeLogoToDataUrl(file)
+        setBrandLogoDataUrl(dataUrl)
+        setShowBrandLogo(true)
+        try {
+          localStorage.setItem(BRAND_LOGO_STORAGE_KEY, dataUrl)
+          localStorage.setItem(BRAND_LOGO_ENABLED_KEY, "true")
+        } catch {
+          // Ignore storage quota errors
+        }
+      } catch {
+        toast.error(t(language, "photoStudio.brandLogoInvalid"))
+      }
+    },
+    [language]
+  )
+
+  const handleRemoveLogo = () => {
+    setBrandLogoDataUrl(null)
+    setLoadedLogo(null)
+    try {
+      localStorage.removeItem(BRAND_LOGO_STORAGE_KEY)
+    } catch {
+      // Ignore
+    }
+  }
+
+  const handleToggleShowLogo = () => {
+    setShowBrandLogo((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem(BRAND_LOGO_ENABLED_KEY, String(next))
+      } catch {
+        // Ignore
+      }
+      return next
+    })
+  }
+
+  const handleChangeLogoPosition = (pos: LogoPositionKey) => {
+    setLogoPosition(pos)
+    try {
+      localStorage.setItem(BRAND_LOGO_POSITION_KEY, pos)
+    } catch {
+      // Ignore
+    }
+  }
+
+  useEffect(() => {
+    if (!brandLogoDataUrl) {
+      setLoadedLogo(null)
+      return
+    }
+    const img = new Image()
+    img.onload = () => setLoadedLogo(img)
+    img.src = brandLogoDataUrl
+  }, [brandLogoDataUrl])
 
   useEffect(() => {
     if (!imageDataUrl) {
@@ -952,6 +1235,71 @@ export function PhotoStudioPage() {
         ctx.restore()
       }
     }
+
+    // Draw Brand Logo Watermark (top-left or top-right corner)
+    if (showBrandLogo && loadedLogo) {
+      const hasTopLeftBadge = badge !== "none"
+      const hasTopRightPrice =
+        Boolean(priceTag.trim()) ||
+        (category === "flash_sale" && Boolean(originalPrice.trim()))
+      const basePad = layoutTemplate === "frame" ? 54 : padding
+      const logoOffset =
+        logoPosition === "top-left"
+          ? hasTopLeftBadge
+            ? 68
+            : 0
+          : hasTopRightPrice
+            ? category === "flash_sale" && originalPrice.trim()
+              ? 104
+              : 74
+            : 0
+      drawBrandLogo(ctx, loadedLogo, logoPosition, width, basePad, logoOffset)
+    }
+
+    // Draw Burmese / English Promo Stamp
+    if (promoStamp) {
+      if (layoutTemplate === "split") {
+        drawPromoStamp(
+          ctx,
+          promoStamp,
+          width - padding,
+          Math.round(height * 0.65) - 24,
+          true,
+          theme.accent
+        )
+      } else if (layoutTemplate === "frame") {
+        const photoBottom = height - Math.round(height * 0.27)
+        drawPromoStamp(
+          ctx,
+          promoStamp,
+          width - 54 - 22,
+          photoBottom - 22,
+          true,
+          theme.accent
+        )
+      } else if (layoutTemplate === "gradient" && textPosition === "top") {
+        drawPromoStamp(
+          ctx,
+          promoStamp,
+          width - padding,
+          height - (shopFooter.trim() ? 96 : 42),
+          true,
+          theme.accent
+        )
+      } else {
+        const badgeOffset = badge !== "none" ? 72 : 0
+        const logoOffset =
+          showBrandLogo && loadedLogo && logoPosition === "top-left" ? 116 : 0
+        drawPromoStamp(
+          ctx,
+          promoStamp,
+          padding,
+          padding + badgeOffset + logoOffset + 54,
+          false,
+          theme.accent
+        )
+      }
+    }
   }, [
     loadedImage,
     category,
@@ -964,6 +1312,7 @@ export function PhotoStudioPage() {
     textColor,
     textPosition,
     badge,
+    promoStamp,
     spec1,
     spec2,
     spec3,
@@ -971,6 +1320,9 @@ export function PhotoStudioPage() {
     priceTag,
     shopFooter,
     language,
+    showBrandLogo,
+    loadedLogo,
+    logoPosition,
   ])
 
   const handleAISuggest = async () => {
@@ -1000,6 +1352,42 @@ export function PhotoStudioPage() {
     } finally {
       setIsAnalyzing(false)
     }
+  }
+
+  const handleGenerateScene = async (overridePrompt?: string) => {
+    const sourceImage = originalImageDataUrl || imageDataUrl
+    const sourceMime = originalImageDataUrl ? originalImageMimeType : imageMimeType
+    const activePrompt = (overridePrompt ?? scenePrompt).trim()
+    if (!sourceImage || !activePrompt) return
+
+    setIsGeneratingScene(true)
+    try {
+      const result = await generateProductScene({
+        imageBase64: sourceImage,
+        mimeType: sourceMime,
+        scenePrompt: activePrompt,
+      })
+      setImageDataUrl(result.imageDataUrl)
+      setImageMimeType(result.mimeType)
+      setHasAiScene(true)
+      toast.success(t(language, "photoStudio.sceneGenerateSuccess"))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err ?? "")
+      toast.error(
+        msg
+          ? `${t(language, "photoStudio.sceneGenerateError")}: ${msg}`
+          : t(language, "photoStudio.sceneGenerateError")
+      )
+    } finally {
+      setIsGeneratingScene(false)
+    }
+  }
+
+  const handleResetOriginalPhoto = () => {
+    if (!originalImageDataUrl) return
+    setImageDataUrl(originalImageDataUrl)
+    setImageMimeType(originalImageMimeType)
+    setHasAiScene(false)
   }
 
   const handleDownload = () => {
@@ -1235,6 +1623,100 @@ export function PhotoStudioPage() {
             </CardContent>
           </Card>
 
+          {/* Dedicated AI Scene & Background Studio (Separated from Local Tools) */}
+          <Card className="border-indigo-500/25 bg-gradient-to-br from-indigo-500/[0.04] via-card to-blue-500/[0.04]">
+            <CardHeader className="pb-3 space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-base flex items-center gap-2 leading-[1.85]">
+                  <Wand2 className="h-4 w-4 text-indigo-500 dark:text-indigo-400" aria-hidden="true" />
+                  <span className="font-myanmar">{t(language, "photoStudio.sceneStudioTitle")}</span>
+                </CardTitle>
+                {hasAiScene && originalImageDataUrl && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleResetOriginalPhoto}
+                    disabled={isGeneratingScene}
+                    className="h-7 px-2.5 text-xs border-border/70"
+                  >
+                    <RotateCcw className="h-3 w-3 mr-1" aria-hidden="true" />
+                    {t(language, "photoStudio.sceneResetOriginal")}
+                  </Button>
+                )}
+              </div>
+              <CardDescription className="text-xs leading-[1.85] font-myanmar">
+                {t(language, "photoStudio.sceneStudioDesc")}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3.5">
+              {/* 1-Click Scene Presets */}
+              <div className="grid grid-cols-2 gap-2">
+                {SCENE_PRESETS.map((preset) => {
+                  const isActive = selectedScenePreset === preset.id
+                  return (
+                    <Button
+                      key={preset.id}
+                      type="button"
+                      size="sm"
+                      variant={isActive ? "default" : "outline"}
+                      disabled={!imageDataUrl || isGeneratingScene}
+                      onClick={() => {
+                        setSelectedScenePreset(preset.id)
+                        setScenePrompt(preset.prompt)
+                      }}
+                      className={cn(
+                        "h-auto py-2 px-2.5 text-xs justify-start text-left leading-[1.6] whitespace-normal font-myanmar",
+                        isActive &&
+                          "bg-indigo-600 hover:bg-indigo-700 text-white border-transparent shadow-xs"
+                      )}
+                    >
+                      {t(language, preset.labelKey)}
+                    </Button>
+                  )
+                })}
+              </div>
+
+              {/* Custom Scene Prompt Input */}
+              <div className="space-y-1.5">
+                <Label htmlFor="ai-scene-prompt" className="text-xs leading-[1.85] font-myanmar">
+                  {t(language, "photoStudio.sceneCustomLabel")}
+                </Label>
+                <Input
+                  id="ai-scene-prompt"
+                  value={scenePrompt}
+                  onChange={(e) => {
+                    setScenePrompt(e.target.value)
+                    setSelectedScenePreset(null)
+                  }}
+                  placeholder={t(language, "photoStudio.sceneCustomPlaceholder")}
+                  disabled={!imageDataUrl || isGeneratingScene}
+                  className="text-xs font-myanmar leading-[1.85]"
+                />
+              </div>
+
+              <Button
+                type="button"
+                variant="default"
+                disabled={!imageDataUrl || !scenePrompt.trim() || isGeneratingScene}
+                onClick={() => handleGenerateScene()}
+                className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white border-0 shadow-xs leading-[1.85] font-myanmar"
+              >
+                {isGeneratingScene ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden="true" />
+                    {t(language, "photoStudio.sceneGenerating")}
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="h-4 w-4 mr-2" aria-hidden="true" />
+                    {t(language, "photoStudio.sceneGenerateBtn")}
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+
           {/* Layout Template, Typography & Category Fields Card */}
           <Card>
             <CardHeader className="pb-4">
@@ -1450,6 +1932,137 @@ export function PhotoStudioPage() {
                   placeholder={t(language, "photoStudio.footerPlaceholder")}
                   className="font-myanmar leading-[1.85]"
                 />
+              </div>
+
+              {/* 1-Click Burmese & English Promo Stamps */}
+              <div className="space-y-2.5">
+                <Label className="flex items-center gap-1.5 leading-[1.85] font-myanmar">
+                  <Stamp className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t(language, "photoStudio.promoStampsLabel")}
+                </Label>
+                <div className="flex flex-wrap gap-2">
+                  {PROMO_STAMPS.map((stamp) => {
+                    const active = promoStamp === stamp
+                    return (
+                      <Button
+                        key={stamp}
+                        type="button"
+                        size="sm"
+                        variant={active ? "default" : "outline"}
+                        onClick={() => setPromoStamp(active ? null : stamp)}
+                        className={cn(
+                          "h-8 rounded-full px-3 text-xs font-myanmar leading-[1.6]",
+                          active &&
+                            "bg-emerald-600 hover:bg-emerald-700 text-white border-transparent shadow-xs"
+                        )}
+                      >
+                        {stamp}
+                      </Button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Shop Brand Logo Watermark (Persisted in localStorage) */}
+              <div className="rounded-xl border border-border/70 bg-muted/25 p-3.5 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-xs font-semibold leading-[1.6] font-myanmar">
+                    {t(language, "photoStudio.brandLogoTitle")}
+                  </Label>
+                  {brandLogoDataUrl && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={showBrandLogo ? "default" : "outline"}
+                      onClick={handleToggleShowLogo}
+                      className={cn(
+                        "h-7 px-2.5 text-xs",
+                        showBrandLogo &&
+                          "bg-blue-600 hover:bg-blue-700 text-white border-transparent"
+                      )}
+                    >
+                      {showBrandLogo ? (
+                        <Eye className="h-3 w-3 mr-1" aria-hidden="true" />
+                      ) : (
+                        <EyeOff className="h-3 w-3 mr-1" aria-hidden="true" />
+                      )}
+                      {t(language, "photoStudio.brandLogoToggle")}
+                    </Button>
+                  )}
+                </div>
+
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/svg+xml"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) void handleLogoUpload(file)
+                    e.target.value = ""
+                  }}
+                />
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {brandLogoDataUrl && (
+                    <div className="h-9 w-9 rounded-lg border border-border bg-white p-1 flex items-center justify-center shrink-0 overflow-hidden">
+                      <img
+                        src={brandLogoDataUrl}
+                        alt="Brand Logo"
+                        className="max-h-full max-w-full object-contain"
+                      />
+                    </div>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => logoInputRef.current?.click()}
+                    className="h-8 text-xs font-myanmar"
+                  >
+                    <Upload className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                    {brandLogoDataUrl
+                      ? t(language, "photoStudio.brandLogoChange")
+                      : t(language, "photoStudio.brandLogoUpload")}
+                  </Button>
+                  {brandLogoDataUrl && (
+                    <>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={handleRemoveLogo}
+                        className="h-8 px-2 text-xs text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
+                        {t(language, "photoStudio.brandLogoRemove")}
+                      </Button>
+                      <div className="flex items-center gap-1 ml-auto">
+                        {(["top-left", "top-right"] as LogoPositionKey[]).map((pos) => (
+                          <Button
+                            key={pos}
+                            type="button"
+                            size="sm"
+                            variant={logoPosition === pos ? "default" : "outline"}
+                            onClick={() => handleChangeLogoPosition(pos)}
+                            className={cn(
+                              "h-7 px-2 text-[11px] font-myanmar",
+                              logoPosition === pos &&
+                                "bg-blue-600 hover:bg-blue-700 text-white border-transparent"
+                            )}
+                          >
+                            {t(
+                              language,
+                              pos === "top-left"
+                                ? "photoStudio.brandLogoTopLeft"
+                                : "photoStudio.brandLogoTopRight"
+                            )}
+                          </Button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>

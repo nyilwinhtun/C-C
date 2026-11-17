@@ -778,3 +778,117 @@ export async function suggestFromPhoto(
   )
 }
 
+export const GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
+export const GEMINI_IMAGE_FALLBACK_MODEL = "gemini-2.0-flash-exp-image-generation"
+
+export interface GenerateProductSceneRequest {
+  imageBase64: string
+  mimeType: string
+  scenePrompt: string
+}
+
+export interface GenerateProductSceneResult {
+  imageDataUrl: string
+  mimeType: string
+}
+
+async function callGeminiImageEdit(
+  request: GenerateProductSceneRequest,
+  apiKey: string,
+  model: string
+): Promise<GenerateProductSceneResult> {
+  const base64Data = request.imageBase64.replace(/^data:[^;]+;base64,/, "")
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+
+  const prompt = `Edit this product photo by replacing the background and environment with the following scene: ${request.scenePrompt}.
+CRITICAL INSTRUCTIONS:
+- Preserve the main product(s) from the original image completely intact (exact shape, proportions, colors, text, logos, and details).
+- Only regenerate the surrounding background, surface, lighting, and natural shadows/reflections so the product blends photorealistically into the new scene.
+- Output a clean, high-resolution commercial product photograph with no added text or watermarks.`
+
+  const body = {
+    contents: [
+      {
+        parts: [
+          {
+            inlineData: {
+              mimeType: request.mimeType || "image/jpeg",
+              data: base64Data,
+            },
+          },
+          { text: prompt },
+        ],
+      },
+    ],
+    generationConfig: {
+      responseModalities: ["TEXT", "IMAGE"],
+    },
+  }
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw parseApiError("Gemini", res.status, text)
+  }
+
+  const data = await res.json()
+  const parts: Array<{
+    inlineData?: { mimeType?: string; data?: string }
+    inline_data?: { mime_type?: string; data?: string }
+    text?: string
+  }> = data.candidates?.[0]?.content?.parts ?? []
+
+  for (const part of parts) {
+    const inline = part.inlineData
+    if (inline?.data) {
+      const mimeType = inline.mimeType || "image/png"
+      return {
+        imageDataUrl: `data:${mimeType};base64,${inline.data}`,
+        mimeType,
+      }
+    }
+    const snakeInline = part.inline_data
+    if (snakeInline?.data) {
+      const mimeType = snakeInline.mime_type || "image/png"
+      return {
+        imageDataUrl: `data:${mimeType};base64,${snakeInline.data}`,
+        mimeType,
+      }
+    }
+  }
+
+  throw new ApiError(500, "Gemini did not return a generated image. Please try another prompt.")
+}
+
+export async function generateProductScene(
+  request: GenerateProductSceneRequest
+): Promise<GenerateProductSceneResult> {
+  const { provider, apiKey } = getAiConfig()
+  const envGeminiKey =
+    (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ?? ""
+  const geminiKey =
+    provider === "gemini" ? apiKey.trim() || envGeminiKey : envGeminiKey
+
+  if (!geminiKey) {
+    throw new ApiError(
+      400,
+      "Please save your Gemini API key in Settings to use AI Scene Studio."
+    )
+  }
+
+  try {
+    return await callGeminiImageEdit(request, geminiKey, GEMINI_IMAGE_MODEL)
+  } catch (err) {
+    // Do not retry on invalid API key
+    if (err instanceof ApiError && err.status === 401) {
+      throw err
+    }
+    return await callGeminiImageEdit(request, geminiKey, GEMINI_IMAGE_FALLBACK_MODEL)
+  }
+}
+

@@ -32,15 +32,25 @@ export interface ContentBackupData {
   generatedHistory?: GeneratedItem[]
 }
 
+export interface PosterDraft {
+  headline: string
+  spec1: string
+  spec2: string
+  spec3: string
+  caption: string
+}
+
 interface ContentState {
   draftInput: GeneratorFormValues
   generatedHistory: GeneratedItem[]
   savedVault: SavedVaultItem[]
   brandSignature: string
+  posterDraft: PosterDraft | null
   isSyncing: boolean
   setDraftInput: (input: Partial<GeneratorFormValues>) => void
   addGeneratedItem: (item: Omit<GeneratedItem, "id" | "createdAt">) => void
   setBrandSignature: (signature: string) => void
+  setPosterDraft: (draft: PosterDraft | null) => void
   saveToVault: (
     item: Omit<SavedVaultItem, "id" | "status"> & {
       status?: SavedVaultItem["status"]
@@ -70,6 +80,7 @@ export const useContentStore = create<ContentState>()(
       generatedHistory: [],
       savedVault: [],
       brandSignature: "",
+      posterDraft: null,
       isSyncing: false,
 
       setDraftInput: (input) =>
@@ -92,6 +103,7 @@ export const useContentStore = create<ContentState>()(
         }),
 
       setBrandSignature: (brandSignature) => set({ brandSignature }),
+      setPosterDraft: (posterDraft) => set({ posterDraft }),
 
       saveToVault: (item) =>
         set((state) => {

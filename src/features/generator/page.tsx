@@ -28,6 +28,7 @@ import {
   Store,
   Check,
   AlertTriangle,
+  ImagePlus,
 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
@@ -37,7 +38,11 @@ import {
   type GeneratorFormInput,
 } from "@/features/generator/schema"
 import { useGenerateContent } from "@/features/generator/useGenerateContent"
-import { useContentStore, type GeneratedItem } from "@/store/useContentStore"
+import {
+  useContentStore,
+  type GeneratedItem,
+  type PosterDraft,
+} from "@/store/useContentStore"
 import type { GeneratedContent } from "@/api/aiService"
 import { useUIStore } from "@/store/useUIStore"
 import { t } from "@/locales/translations"
@@ -68,6 +73,61 @@ import {
 
 function extractHashtags(text: string): string[] {
   return [...text.matchAll(/#[^\s#]+/g)].map((match) => match[0].slice(1))
+}
+
+function cleanPosterLine(line: string): string {
+  return line
+    .replace(/^\s*(?:[•\-\*▪▸►✅✔🔥⚡📌👉🎯💎✨📱🛍️]+|\d+[.)])\s*/u, "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function truncateCleanly(text: string, maxLen: number): string {
+  const trimmed = text.trim()
+  if (trimmed.length <= maxLen) return trimmed
+  const sliced = trimmed.slice(0, maxLen)
+  const lastSpace = sliced.lastIndexOf(" ")
+  return (lastSpace > maxLen * 0.55 ? sliced.slice(0, lastSpace) : sliced).trim()
+}
+
+function extractPosterDraftFromPost(postText: string, fallbackTopic?: string): PosterDraft {
+  const rawLines = postText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith("#"))
+
+  const firstLine = cleanPosterLine(rawLines[0] ?? fallbackTopic ?? "")
+  const headline = truncateCleanly(firstLine, 60)
+
+  const bulletPattern = /^(?:[•\-\*▪▸►✅✔🔥⚡📌👉🎯💎✨]+|\d+[.)])\s*/u
+  const remaining = rawLines.slice(1)
+
+  const explicitBullets = remaining
+    .filter((l) => bulletPattern.test(l))
+    .map(cleanPosterLine)
+    .filter((l) => l.length >= 2 && l !== headline)
+
+  const fallbackCandidates = remaining
+    .filter((l) => !bulletPattern.test(l))
+    .map(cleanPosterLine)
+    .filter((l) => l.length >= 2 && l.length <= 48 && l !== headline)
+
+  const specs: string[] = []
+  for (const item of [...explicitBullets, ...fallbackCandidates]) {
+    if (specs.length >= 3) break
+    const pill = truncateCleanly(item, 28)
+    if (pill && !specs.includes(pill)) {
+      specs.push(pill)
+    }
+  }
+
+  return {
+    headline,
+    spec1: specs[0] ?? "",
+    spec2: specs[1] ?? "",
+    spec3: specs[2] ?? "",
+    caption: postText.trim(),
+  }
 }
 
 const FB_FOLD_LIMIT = 140
@@ -200,8 +260,12 @@ const MYANMAR_HASHTAG_PACKS = [
 ] as const
 
 export function GeneratorPage() {
-  const { language } = useUIStore(
-    useShallow((state) => ({ language: state.language, setLanguage: state.setLanguage }))
+  const { language, setActivePageKey } = useUIStore(
+    useShallow((state) => ({
+      language: state.language,
+      setLanguage: state.setLanguage,
+      setActivePageKey: state.setActivePageKey,
+    }))
   )
 
   const PLATFORMS = [
@@ -270,12 +334,13 @@ export function GeneratorPage() {
     useShallow((state) => state.setDraftInput)
   )
   const draftInput = useContentStore(useShallow((state) => state.draftInput))
-  const { addGeneratedItem, saveToVault, generatedHistory, brandSignature } = useContentStore(
+  const { addGeneratedItem, saveToVault, generatedHistory, brandSignature, setPosterDraft } = useContentStore(
     useShallow((state) => ({
       addGeneratedItem: state.addGeneratedItem,
       saveToVault: state.saveToVault,
       generatedHistory: state.generatedHistory,
       brandSignature: state.brandSignature,
+      setPosterDraft: state.setPosterDraft,
     }))
   )
 
@@ -462,6 +527,17 @@ export function GeneratorPage() {
     })
     toast.success(t(language, "generator.saveSuccess"))
   }, [result, saveToVault, language])
+
+  const handleCreatePoster = useCallback(() => {
+    const activeText = (displayedText || result?.content || "").trim()
+    if (!activeText) return
+    const draft = extractPosterDraftFromPost(
+      activeText,
+      result?.topic || form.getValues("topic")
+    )
+    setPosterDraft(draft)
+    setActivePageKey("photo-studio")
+  }, [displayedText, result, form, setPosterDraft, setActivePageKey])
 
   const handleRegenerate = useCallback(() => {
     if (!result) return
@@ -998,7 +1074,7 @@ export function GeneratorPage() {
                 </div>
               )}
             </CardContent>
-            <CardFooter className="border-t border-border/60 bg-muted/10 pt-4">
+            <CardFooter className="border-t border-border/60 bg-muted/10 pt-4 flex-col gap-2.5">
               <div className="flex gap-2 w-full">
                 <Button
                   variant="outline"
@@ -1040,6 +1116,16 @@ export function GeneratorPage() {
                   {t(language, "generator.saveToVault")}
                 </Button>
               </div>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleCreatePoster}
+                disabled={!contentToShow || isGeneratingFlag}
+                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-0 shadow-xs font-myanmar"
+              >
+                <ImagePlus className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                {t(language, "generator.createPoster")}
+              </Button>
             </CardFooter>
           </Card>
 
