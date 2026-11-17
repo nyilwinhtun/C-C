@@ -38,6 +38,7 @@ import {
   type GeneratorFormInput,
 } from "@/features/generator/schema"
 import { useGenerateContent } from "@/features/generator/useGenerateContent"
+import { VideoToContentSection } from "@/features/generator/VideoToContentSection"
 import {
   useContentStore,
   type GeneratedItem,
@@ -344,6 +345,7 @@ export function GeneratorPage() {
     }))
   )
 
+  const [generatorMode, setGeneratorMode] = useState<"text" | "video">("text")
   const [activeAction, setActiveAction] = useState<ActiveAction | null>(null)
   const pendingActionRef = useRef<ActiveAction | null>(null)
   const previewRef = useRef<HTMLDivElement | null>(null)
@@ -683,7 +685,48 @@ export function GeneratorPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div
+          role="tablist"
+          aria-label="Generator Mode"
+          className="inline-flex w-full sm:w-auto items-center rounded-xl border border-border/60 bg-muted/40 p-1"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={generatorMode === "text"}
+            onClick={() => setGeneratorMode("text")}
+            className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs sm:text-sm font-medium transition-all cursor-pointer ${
+              generatorMode === "text"
+                ? "bg-background text-foreground shadow-sm border border-border/60"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{t(language, "generator.modeText")}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={generatorMode === "video"}
+            onClick={() => setGeneratorMode("video")}
+            className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs sm:text-sm font-medium transition-all cursor-pointer ${
+              generatorMode === "video"
+                ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Video className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{t(language, "generator.modeVideo")}</span>
+          </button>
+        </div>
+      </div>
+
+      {generatorMode === "video" ? (
+        <VideoToContentSection />
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider leading-relaxed mr-1">
           {t(language, "generator.templates")}
         </span>
@@ -1266,6 +1309,8 @@ export function GeneratorPage() {
           )}
         </div>
       </div>
+        </>
+      )}
     </div>
   )
 }

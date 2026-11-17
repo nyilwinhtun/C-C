@@ -779,3 +779,437 @@ export async function suggestFromPhoto(
   )
 }
 
+export type VideoPlatformOption = "TikTok / Reels" | "Facebook Video" | "YouTube Shorts"
+
+export interface GenerateVideoContentParams {
+  file: File
+  productNote?: string
+  platform: VideoPlatformOption | string
+  language: "en" | "my"
+  onProgress?: (stage: "extracting" | "analyzing") => void
+}
+
+export interface VideoContentResult {
+  hooks: string[]
+  voiceoverScript: string
+  caption: string
+  coverTitle: string
+  analysisMode: "direct" | "keyframes"
+  frameCount?: number
+}
+
+const VIDEO_DIRECT_MAX_BYTES = 15 * 1024 * 1024
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error("Failed to read video file as base64."))
+        return
+      }
+      const base64 = reader.result.replace(/^data:[^;]+;base64,/, "")
+      resolve(base64)
+    }
+    reader.onerror = () => reject(new Error("Failed to read video file."))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function extractKeyframesFromVideo(
+  file: File,
+  frameCount = 5,
+  maxWidth = 720,
+  quality = 0.75
+): Promise<string[]> {
+  const objectUrl = URL.createObjectURL(file)
+  const video = document.createElement("video")
+  video.muted = true
+  video.playsInline = true
+  video.preload = "auto"
+  video.crossOrigin = "anonymous"
+  video.src = objectUrl
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        reject(new Error("Timed out loading video metadata."))
+      }, 15000)
+
+      const onLoaded = () => {
+        window.clearTimeout(timer)
+        cleanup()
+        resolve()
+      }
+      const onError = () => {
+        window.clearTimeout(timer)
+        cleanup()
+        reject(new Error("Could not decode video file in browser."))
+      }
+      const cleanup = () => {
+        video.removeEventListener("loadedmetadata", onLoaded)
+        video.removeEventListener("error", onError)
+      }
+
+      if (video.readyState >= 1) {
+        window.clearTimeout(timer)
+        cleanup()
+        resolve()
+        return
+      }
+      video.addEventListener("loadedmetadata", onLoaded)
+      video.addEventListener("error", onError)
+    })
+
+    const duration =
+      Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0
+    const timestamps =
+      duration > 0
+        ? Array.from({ length: frameCount }, (_, i) => ((i + 0.5) / frameCount) * duration)
+        : [0]
+
+    const canvas = document.createElement("canvas")
+    const ctx = canvas.getContext("2d")
+    if (!ctx) {
+      throw new Error("Canvas 2D context is not available.")
+    }
+
+    const frames: string[] = []
+    for (const time of timestamps) {
+      await new Promise<void>((resolve) => {
+        const seekTimer = window.setTimeout(() => {
+          video.removeEventListener("seeked", onSeeked)
+          resolve()
+        }, 5000)
+
+        const onSeeked = () => {
+          window.clearTimeout(seekTimer)
+          video.removeEventListener("seeked", onSeeked)
+          resolve()
+        }
+
+        video.addEventListener("seeked", onSeeked)
+        video.currentTime = Math.min(Math.max(0, time), duration || 0)
+      })
+
+      const srcWidth = video.videoWidth || 720
+      const srcHeight = video.videoHeight || 1280
+      const scale = Math.min(1, maxWidth / srcWidth)
+      canvas.width = Math.max(1, Math.round(srcWidth * scale))
+      canvas.height = Math.max(1, Math.round(srcHeight * scale))
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+
+      const dataUrl = canvas.toDataURL("image/jpeg", quality)
+      const base64 = dataUrl.replace(/^data:[^;]+;base64,/, "")
+      if (base64) {
+        frames.push(base64)
+      }
+    }
+
+    if (frames.length === 0) {
+      throw new Error("Failed to extract keyframes from video.")
+    }
+
+    return frames
+  } finally {
+    video.pause()
+    video.removeAttribute("src")
+    video.load()
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+function buildVideoPrompt(params: {
+  platform: string
+  language: "en" | "my"
+  productNote?: string
+  analysisMode: "direct" | "keyframes"
+}): string {
+  const noteBlock = params.productNote?.trim()
+    ? `Additional Product Name / Price / Promo Note from seller: "${params.productNote.trim()}"`
+    : "No extra product note provided; infer product details from the visuals."
+  const mediaContext =
+    params.analysisMode === "direct"
+      ? "Watch this short product video carefully from start to finish."
+      : "Review these 5 evenly spaced keyframes from a short product video in chronological order."
+
+  if (params.language === "my") {
+    return `You are a top Myanmar short-form video strategist and copywriter.
+${mediaContext}
+Target Platform: ${params.platform}
+${noteBlock}
+
+Analyze the visual scenes, product details, and pacing, then return ONLY a valid JSON object with these exact 4 keys:
+1. "hooks": An array of 3 scroll-stopping hook strings (for on-screen text in the first 3 seconds) in natural Myanmar (Burmese) Unicode script.
+2. "voiceoverScript": A natural spoken Burmese voiceover script timed to the video flow (e.g. using short time cues like [0-3s], [3-10s], [10-15s] with spoken lines).
+3. "caption": A ready-to-copy-paste ${params.platform} caption in natural Myanmar (Burmese) Unicode script with relevant emojis and 4-6 hashtags at the end.
+4. "coverTitle": A short, punchy 4 to 6 word Cover / Thumbnail Title in natural Myanmar (Burmese) Unicode script.
+
+CRITICAL RULES:
+- Write in natural, engaging spoken Myanmar (Burmese) Unicode script.
+- Keep international brand, product, and platform names (e.g., iPhone, Redmi, Samsung, TikTok, Reels, Facebook, YouTube) in their original English spelling.
+- Do NOT use raw Markdown symbols (*, **, # headings) in hooks, voiceoverScript, or coverTitle. Only normal #hashtags are allowed at the end of caption.
+- Return ONLY valid JSON.`
+  }
+
+  return `You are a top short-form video strategist and social media copywriter.
+${mediaContext}
+Target Platform: ${params.platform}
+${noteBlock}
+
+Analyze the visual scenes, product details, and pacing, then return ONLY a valid JSON object with these exact 4 keys:
+1. "hooks": An array of 3 scroll-stopping hook strings (for on-screen text in the first 3 seconds) in natural English.
+2. "voiceoverScript": A natural spoken English voiceover script timed to the video flow (e.g. using short time cues like [0-3s], [3-10s], [10-15s] with spoken lines).
+3. "caption": A ready-to-copy-paste ${params.platform} caption in English with relevant emojis and 4-6 hashtags at the end.
+4. "coverTitle": A short, punchy 4 to 6 word Cover / Thumbnail Title in English.
+
+CRITICAL RULES:
+- Do NOT use raw Markdown symbols (*, **, # headings) in hooks, voiceoverScript, or coverTitle. Only normal #hashtags are allowed at the end of caption.
+- Return ONLY valid JSON.`
+}
+
+function parseVideoContentResponse(
+  raw: string,
+  analysisMode: "direct" | "keyframes",
+  frameCount?: number
+): VideoContentResult {
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim()
+
+  try {
+    const parsed = JSON.parse(cleaned) as {
+      hooks?: unknown
+      voiceoverScript?: unknown
+      caption?: unknown
+      coverTitle?: unknown
+    }
+
+    const hooks = Array.isArray(parsed.hooks)
+      ? parsed.hooks
+          .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+          .map((item) => stripMarkdownArtifacts(item))
+          .slice(0, 3)
+      : []
+
+    const voiceoverScript =
+      typeof parsed.voiceoverScript === "string"
+        ? stripMarkdownArtifacts(parsed.voiceoverScript)
+        : ""
+    const caption =
+      typeof parsed.caption === "string"
+        ? stripMarkdownArtifacts(parsed.caption, true)
+        : ""
+    const coverTitle =
+      typeof parsed.coverTitle === "string"
+        ? stripMarkdownArtifacts(parsed.coverTitle)
+        : ""
+
+    if (hooks.length > 0 || voiceoverScript || caption || coverTitle) {
+      return {
+        hooks,
+        voiceoverScript,
+        caption,
+        coverTitle,
+        analysisMode,
+        frameCount,
+      }
+    }
+  } catch {
+    // Fallback if model returned plain text
+  }
+
+  return {
+    hooks: [],
+    voiceoverScript: sanitizePlainText(cleaned),
+    caption: "",
+    coverTitle: "",
+    analysisMode,
+    frameCount,
+  }
+}
+
+async function generateVideoWithGemini(
+  mediaParts: Array<{ inlineData: { mimeType: string; data: string } }>,
+  prompt: string,
+  apiKey: string,
+  model: string,
+  analysisMode: "direct" | "keyframes",
+  frameCount?: number
+): Promise<VideoContentResult> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+  const body = {
+    contents: [
+      {
+        parts: [...mediaParts, { text: prompt }],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.7,
+      topP: 0.95,
+      maxOutputTokens: 2048,
+      responseMimeType: "application/json",
+    },
+  }
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw parseApiError("Gemini", res.status, text)
+  }
+
+  const data = await res.json()
+  const parts: Array<{ text?: string; thought?: boolean }> =
+    data.candidates?.[0]?.content?.parts ?? []
+  const content = parts
+    .filter((part) => !part.thought && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("")
+    .trim()
+
+  if (!content) {
+    const finishReason = data.candidates?.[0]?.finishReason
+    throw new Error(
+      finishReason
+        ? `No content returned from Gemini Video API (finishReason: ${finishReason}).`
+        : "No content returned from Gemini Video API."
+    )
+  }
+
+  return parseVideoContentResponse(content, analysisMode, frameCount)
+}
+
+function mockGenerateVideoContent(
+  params: GenerateVideoContentParams,
+  analysisMode: "direct" | "keyframes",
+  frameCount?: number
+): VideoContentResult {
+  const note = params.productNote?.trim()
+  if (params.language === "my") {
+    return {
+      hooks: [
+        note ? `ဒါလေးကတော့ ${note} ပဲဖြစ်ပါတယ်!` : "ဒီပစ္စည်းလေးကို မဝယ်ခင် ဒါကိုအရင်ကြည့်!",
+        "နေ့တိုင်းသုံးဖို့ အတန်ဆုံးရွေးချယ်မှု 🔥",
+        "စက္ကန့် ၁၅ အတွင်း ဘာကြောင့်လူကြိုက်များလဲကြည့်ရအောင်",
+      ],
+      voiceoverScript:
+        "[0-3s] မင်္ဂလာပါ! ဒီနေ့မှာတော့ လူကြိုက်များနေတဲ့ ပစ္စည်းလေးကို လက်တွေ့ပြသပေးသွားပါမယ်။\n\n[3-10s] ဒီဇိုင်းပိုင်းက သပ်ရပ်လှပပြီး နေ့စဉ်အသုံးပြုရတာ အရမ်းအဆင်ပြေပါတယ်။" +
+        (note ? ` (${note})` : "") +
+        "\n\n[10-15s] ပစ္စည်းအရေအတွက် ကန့်သတ်ထားတာမို့ အခုပဲ Inbox မှာ မှာယူလိုက်ပါနော်!",
+      caption: `✨ ${note ? note + " — " : ""}နေ့စဉ်အသုံးပြုဖို့ အရည်အသွေးကောင်းပြီး စိတ်ချရတဲ့ ရွေးချယ်မှု!\n\n📩 မှာယူလိုပါက Inbox မှတစ်ဆင့် ဆက်သွယ်မေးမြန်းနိုင်ပါတယ်ခင်ဗျာ။\n\n#ProductShowcase #MyanmarOnlineShop #ReelsMyanmar #Trending`,
+      coverTitle: "မဖြစ်မနေကြည့်သင့်တဲ့ ပစ္စည်းသစ်",
+      analysisMode,
+      frameCount,
+    }
+  }
+
+  return {
+    hooks: [
+      note ? `Stop scrolling — check out ${note}!` : "Wait until you see this detail!",
+      "3 reasons everyone is switching to this 🔥",
+      "The everyday upgrade you didn't know you needed",
+    ],
+    voiceoverScript:
+      "[0-3s] If you've been looking for an everyday upgrade, take a quick look at this.\n\n[3-10s] Notice the clean finish and practical design built for daily use." +
+      (note ? ` Plus: ${note}.` : "") +
+      "\n\n[10-15s] Stock is limited — tap the link or message us to grab yours today!",
+    caption: `✨ ${note ? note + " — " : ""}Clean design, everyday performance, ready to order today!\n\n📩 DM us or check the link in bio to get yours.\n\n#ProductShowcase #ShortVideo #MustHave #ShopNow`,
+    coverTitle: "Must-See Everyday Product Upgrade",
+    analysisMode,
+    frameCount,
+  }
+}
+
+export async function generateVideoContent(
+  params: GenerateVideoContentParams
+): Promise<VideoContentResult> {
+  const { provider, apiKey } = getAiConfig()
+  const envGeminiKey =
+    (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ?? ""
+  const geminiKey =
+    provider === "gemini" ? apiKey.trim() : (envGeminiKey || apiKey.trim())
+
+  const isDirectMode = params.file.size <= VIDEO_DIRECT_MAX_BYTES
+  const analysisMode: "direct" | "keyframes" = isDirectMode ? "direct" : "keyframes"
+
+  let mediaParts: Array<{ inlineData: { mimeType: string; data: string } }> = []
+  let frameCount: number | undefined
+
+  if (isDirectMode) {
+    params.onProgress?.("analyzing")
+    const base64 = await fileToBase64(params.file)
+    mediaParts = [
+      {
+        inlineData: {
+          mimeType: params.file.type || "video/mp4",
+          data: base64,
+        },
+      },
+    ]
+  } else {
+    params.onProgress?.("extracting")
+    const frames = await extractKeyframesFromVideo(params.file, 5, 720, 0.75)
+    frameCount = frames.length
+    params.onProgress?.("analyzing")
+    mediaParts = frames.map((data) => ({
+      inlineData: {
+        mimeType: "image/jpeg",
+        data,
+      },
+    }))
+  }
+
+  if (!geminiKey) {
+    await delay(900)
+    return mockGenerateVideoContent(params, analysisMode, frameCount)
+  }
+
+  const prompt = buildVideoPrompt({
+    platform: params.platform,
+    language: params.language,
+    productNote: params.productNote,
+    analysisMode,
+  })
+
+  try {
+    return await generateVideoWithGemini(
+      mediaParts,
+      prompt,
+      geminiKey,
+      GEMINI_VISION_MODEL,
+      analysisMode,
+      frameCount
+    )
+  } catch (err) {
+    const isQuota =
+      (err instanceof ApiError && err.isQuotaExceeded) ||
+      (err instanceof Error &&
+        (err.message === QUOTA_EXCEEDED_MESSAGE ||
+          err.message.includes("429") ||
+          err.message.includes("RESOURCE_EXHAUSTED") ||
+          err.message.toLowerCase().includes("quota")))
+
+    if (isQuota || (err instanceof ApiError && err.status === 404)) {
+      console.warn(
+        `Gemini quota/model fallback for "${GEMINI_VISION_MODEL}". Retrying with "${GEMINI_FALLBACK_MODEL}"...`
+      )
+      return await generateVideoWithGemini(
+        mediaParts,
+        prompt,
+        geminiKey,
+        GEMINI_FALLBACK_MODEL,
+        analysisMode,
+        frameCount
+      )
+    }
+    throw err
+  }
+}
+
