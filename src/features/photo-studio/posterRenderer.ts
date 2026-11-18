@@ -351,14 +351,14 @@ function renderSpotlight(
       imgH,
       28,
       theme,
-      "Upload Product Photo"
+      "Upload Cover / Feature Photo"
     )
   }
 
   if (state.showNewArrivalPill) {
     drawPill(
       ctx,
-      "NEW ARRIVAL",
+      state.pillBadgeText.trim() || "FEATURED",
       pad + 22,
       pad + 22,
       theme.accent,
@@ -371,6 +371,7 @@ function renderSpotlight(
   drawCodBadge(ctx, state, theme, w, pad + 22)
 
   // Bottom Spotlight Info Card
+  const hasPrice = Boolean(state.showPriceBadge && state.priceTag.trim())
   const cardY = pad + imgH + 24
   ctx.save()
   roundRectPath(ctx, pad, cardY, imgW, infoH, 24)
@@ -380,14 +381,14 @@ function renderSpotlight(
   ctx.strokeStyle = theme.border
   ctx.stroke()
 
-  const textMaxW = state.priceTag.trim() ? imgW - 310 : imgW - 64
+  const textMaxW = hasPrice ? imgW - 310 : imgW - 64
   ctx.fillStyle = theme.text
   ctx.font = getTitleFont(state, 42)
   ctx.textAlign = "left"
   ctx.textBaseline = "top"
   const titleLines = wrapTextLines(
     ctx,
-    state.title || "Your Product Name",
+    state.title || "Your Headline / Topic",
     textMaxW,
     2
   )
@@ -406,7 +407,7 @@ function renderSpotlight(
   }
   ctx.restore()
 
-  if (state.priceTag.trim()) {
+  if (hasPrice) {
     drawPill(
       ctx,
       state.priceTag.trim(),
@@ -704,20 +705,34 @@ function renderReviewCard(
     )
   }
 
-  drawPill(
-    ctx,
-    "★★★★★  5.0",
-    pad + 22,
-    pad + 22,
-    "#FEF3C7",
-    "#B45309",
-    24,
-    20,
-    10
-  )
+  if (state.showStarRating) {
+    drawPill(
+      ctx,
+      "★★★★★  5.0",
+      pad + 22,
+      pad + 22,
+      "#FEF3C7",
+      "#B45309",
+      24,
+      20,
+      10
+    )
+  } else {
+    drawPill(
+      ctx,
+      state.pillBadgeText.trim() || "KEY TIP / QUOTE",
+      pad + 22,
+      pad + 22,
+      theme.accent,
+      theme.accentText,
+      22,
+      20,
+      10
+    )
+  }
   drawCodBadge(ctx, state, theme, w, pad + 22)
 
-  // Review Testimonial Card
+  // Review / Quote Testimonial Card
   const cardY = pad + imgH + 24
   ctx.save()
   roundRectPath(ctx, pad, cardY, imgW, cardH, 24)
@@ -727,32 +742,39 @@ function renderReviewCard(
   ctx.strokeStyle = theme.border
   ctx.stroke()
 
-  // 5-star row inside card
-  ctx.fillStyle = "#F59E0B"
-  ctx.font = `700 30px ${FONT_STACK}`
-  ctx.textAlign = "left"
-  ctx.textBaseline = "top"
-  ctx.fillText("★★★★★", pad + 32, cardY + 26)
+  if (state.showStarRating) {
+    ctx.fillStyle = "#F59E0B"
+    ctx.font = `700 30px ${FONT_STACK}`
+    ctx.textAlign = "left"
+    ctx.textBaseline = "top"
+    ctx.fillText("★★★★★", pad + 32, cardY + 26)
+  } else {
+    ctx.fillStyle = theme.accent
+    ctx.font = `800 36px ${FONT_STACK}`
+    ctx.textAlign = "left"
+    ctx.textBaseline = "top"
+    ctx.fillText("“", pad + 32, cardY + 22)
+  }
 
   // Quote
   ctx.fillStyle = theme.text
   ctx.font = `600 32px ${FONT_STACK}`
   const quoteText =
     state.reviewQuote.trim() ||
-    '"Love the quality! Fast delivery and looks even better in person."'
+    '"Consistency beats intensity. Focus on one small step every single day."'
   const quoteLines = wrapTextLines(ctx, quoteText, imgW - 64, 3)
   quoteLines.forEach((line, idx) => {
     ctx.fillText(line, pad + 32, cardY + 78 + idx * 44)
   })
 
-  // Reviewer name + optional price tag
+  // Reviewer / Author name + optional price tag
   ctx.fillStyle = theme.mutedText
   ctx.font = `600 26px ${FONT_STACK}`
-  const reviewer = state.reviewerName.trim() || "Verified Customer"
+  const reviewer = state.reviewerName.trim() || "Creator Note"
   ctx.fillText(`— ${reviewer}`, pad + 32, cardY + cardH - 64)
   ctx.restore()
 
-  if (state.priceTag.trim()) {
+  if (state.showPriceBadge && state.priceTag.trim()) {
     drawPill(
       ctx,
       state.priceTag.trim(),

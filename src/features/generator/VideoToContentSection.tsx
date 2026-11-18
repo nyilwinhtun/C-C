@@ -161,6 +161,7 @@ export function VideoToContentSection() {
   const saveToVault = useContentStore((state) => state.saveToVault)
   const brandSignature = useContentStore((state) => state.brandSignature)
   const businessCategory = useContentStore((state) => state.businessCategory)
+  const customNiche = useContentStore((state) => state.customNiche)
   const autoAppendShopCta = useContentStore((state) => state.autoAppendShopCta)
   const videoFile = useContentStore((state) => state.uploadedVideoFile)
   const previewUrl = useContentStore((state) => state.videoPreviewUrl)
@@ -283,6 +284,7 @@ export function VideoToContentSection() {
         language: outputLanguage,
         brandSignature,
         businessCategory,
+        customNiche,
         onProgress: (stage) => setProgressStage(stage),
       })
       const ctaText =
@@ -327,7 +329,7 @@ export function VideoToContentSection() {
     } finally {
       setProgressStage(null)
     }
-  }, [videoFile, progressStage, productNote, platform, outputLanguage, brandSignature, businessCategory, autoAppendShopCta, language])
+  }, [videoFile, progressStage, productNote, platform, outputLanguage, brandSignature, businessCategory, customNiche, autoAppendShopCta, language])
 
   const copyText = useCallback(
     async (key: string, text: string) => {

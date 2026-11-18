@@ -2,7 +2,11 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import type { GeneratorFormValues } from "@/features/generator/schema"
 import type { VideoContentResult } from "@/api/aiService"
-import type { BusinessCategory } from "@/types"
+import {
+  normalizeBusinessCategory,
+  normalizeSalesAngle,
+  type BusinessCategory,
+} from "@/types"
 import { supabase } from "@/lib/supabase"
 import { useUIStore } from "./useUIStore"
 
@@ -31,6 +35,7 @@ export interface ContentBackupData {
   exportedAt?: string
   brandSignature?: string
   businessCategory?: BusinessCategory
+  customNiche?: string
   autoAppendShopCta?: boolean
   savedVault?: SavedVaultItem[]
   generatedHistory?: GeneratedItem[]
@@ -50,6 +55,7 @@ interface ContentState {
   savedVault: SavedVaultItem[]
   brandSignature: string
   businessCategory: BusinessCategory
+  customNiche: string
   autoAppendShopCta: boolean
   shopLogoDataUrl: string | null
   posterDraft: PosterDraft | null
@@ -62,6 +68,7 @@ interface ContentState {
   addGeneratedItem: (item: Omit<GeneratedItem, "id" | "createdAt">) => void
   setBrandSignature: (signature: string) => void
   setBusinessCategory: (category: BusinessCategory) => void
+  setCustomNiche: (niche: string) => void
   setAutoAppendShopCta: (enabled: boolean) => void
   setShopLogoDataUrl: (dataUrl: string | null) => void
   setPosterDraft: (draft: PosterDraft | null) => void
@@ -87,7 +94,7 @@ const defaultDraft: GeneratorFormValues = {
   platform: "instagram",
   contentType: "post_caption",
   tone: "engaging",
-  salesAngle: "new_arrival",
+  salesAngle: "viral_story",
   language: "english",
   includeHashtags: true,
 }
@@ -100,7 +107,8 @@ export const useContentStore = create<ContentState>()(
       savedVault: [],
       brandSignature: "",
       businessCategory: "general",
-      autoAppendShopCta: true,
+      customNiche: "",
+      autoAppendShopCta: false,
       shopLogoDataUrl: null,
       posterDraft: null,
       uploadedVideoFile: null,
@@ -130,6 +138,7 @@ export const useContentStore = create<ContentState>()(
 
       setBrandSignature: (brandSignature) => set({ brandSignature }),
       setBusinessCategory: (businessCategory) => set({ businessCategory }),
+      setCustomNiche: (customNiche) => set({ customNiche }),
       setAutoAppendShopCta: (autoAppendShopCta) => set({ autoAppendShopCta }),
       setShopLogoDataUrl: (shopLogoDataUrl) => set({ shopLogoDataUrl }),
       setPosterDraft: (posterDraft) => set({ posterDraft }),
@@ -198,7 +207,13 @@ export const useContentStore = create<ContentState>()(
               ? data.brandSignature
               : state.brandSignature,
           businessCategory:
-            data.businessCategory ?? state.businessCategory,
+            data.businessCategory
+              ? normalizeBusinessCategory(data.businessCategory)
+              : state.businessCategory,
+          customNiche:
+            typeof data.customNiche === "string"
+              ? data.customNiche
+              : state.customNiche,
           autoAppendShopCta:
             typeof data.autoAppendShopCta === "boolean"
               ? data.autoAppendShopCta
@@ -270,9 +285,32 @@ export const useContentStore = create<ContentState>()(
         savedVault: state.savedVault ?? [],
         brandSignature: state.brandSignature ?? "",
         businessCategory: state.businessCategory ?? "general",
-        autoAppendShopCta: state.autoAppendShopCta ?? true,
+        customNiche: state.customNiche ?? "",
+        autoAppendShopCta: state.autoAppendShopCta ?? false,
         shopLogoDataUrl: state.shopLogoDataUrl ?? null,
       }),
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState as Partial<ContentState> | undefined) ?? {}
+        const normalizedCat = normalizeBusinessCategory(persisted.businessCategory)
+        const normalizedDraft: GeneratorFormValues = {
+          ...defaultDraft,
+          ...(persisted.draftInput ?? {}),
+          salesAngle: normalizeSalesAngle(persisted.draftInput?.salesAngle),
+        }
+        return {
+          ...currentState,
+          ...persisted,
+          businessCategory: normalizedCat,
+          customNiche: typeof persisted.customNiche === "string" ? persisted.customNiche : "",
+          autoAppendShopCta:
+            typeof persisted.autoAppendShopCta === "boolean"
+              ? normalizedCat === "online_shop"
+                ? persisted.autoAppendShopCta
+                : false
+              : normalizedCat === "online_shop",
+          draftInput: normalizedDraft,
+        }
+      },
     }
   )
 )

@@ -16,11 +16,12 @@ export interface ContentPage {
 
 export type BusinessCategory =
   | 'general'
-  | 'fashion'
-  | 'beauty'
-  | 'food'
-  | 'electronics'
-  | 'home'
+  | 'education'
+  | 'vlog'
+  | 'tech_review'
+  | 'motivation'
+  | 'online_shop'
+  | 'custom'
 
 export interface BusinessCategoryOption {
   value: BusinessCategory
@@ -29,19 +30,48 @@ export interface BusinessCategoryOption {
 }
 
 export const BUSINESS_CATEGORIES: readonly BusinessCategoryOption[] = [
-  { value: 'general', label: 'General Online Shop', labelMy: 'အထွေထွေ အွန်လိုင်းဆိုင်' },
-  { value: 'fashion', label: 'Fashion & Apparel', labelMy: 'ဖက်ရှင်နှင့် အဝတ်အထည်' },
-  { value: 'beauty', label: 'Beauty & Skincare', labelMy: 'အလှကုန်နှင့် အသားအရေထိန်းသိမ်းမှု' },
-  { value: 'food', label: 'Food & Beverage', labelMy: 'အစားအသောက်နှင့် အဖျော်ယမကာ' },
-  { value: 'electronics', label: 'Electronics & Gadgets', labelMy: 'အီလက်ထရောနစ်နှင့် Gadget' },
-  { value: 'home', label: 'Home & Lifestyle', labelMy: 'အိမ်သုံးပစ္စည်းနှင့် လူနေမှုပုံစံ' },
+  { value: 'general', label: 'General Creator / All-Purpose', labelMy: 'အထွေထွေ ကွန်တင့်ဖန်တီးသူ' },
+  { value: 'education', label: 'Education & How-To Tips', labelMy: 'ပညာပေးနှင့် နည်းလမ်းများ' },
+  { value: 'vlog', label: 'Vlog, Travel & Lifestyle', labelMy: 'Vlog၊ ခရီးသွားနှင့် လူနေမှုပုံစံ' },
+  { value: 'tech_review', label: 'Tech & Product Review', labelMy: 'နည်းပညာနှင့် ပစ္စည်းသုံးသပ်ချက်' },
+  { value: 'motivation', label: 'Motivation & Storytelling', labelMy: 'စိတ်ဓာတ်ခွန်အားနှင့် ပုံပြင်ပြောခြင်း' },
+  { value: 'online_shop', label: 'Online Shop & E-Commerce', labelMy: 'အွန်လိုင်းဆိုင်နှင့် အရောင်း' },
+  { value: 'custom', label: 'Custom Niche...', labelMy: 'ကိုယ်ပိုင် Niche ထည့်မည်...' },
 ] as const
 
+export function isShoppingCategory(category?: BusinessCategory | string | null): boolean {
+  return category === 'online_shop'
+}
+
+export function normalizeBusinessCategory(value?: string | null): BusinessCategory {
+  switch (value) {
+    case 'general':
+    case 'education':
+    case 'vlog':
+    case 'tech_review':
+    case 'motivation':
+    case 'online_shop':
+    case 'custom':
+      return value
+    case 'fashion':
+    case 'beauty':
+    case 'food':
+    case 'electronics':
+    case 'home':
+      return 'online_shop'
+    default:
+      return 'general'
+  }
+}
+
 export type SalesAngle =
-  | 'new_arrival'
-  | 'flash_sale'
-  | 'problem_solution'
+  | 'viral_story'
+  | 'quick_tips'
+  | 'honest_review'
+  | 'promo_showcase'
   | 'short_reel'
+
+export type ContentAngle = SalesAngle
 
 export interface SalesAngleOption {
   value: SalesAngle
@@ -50,11 +80,30 @@ export interface SalesAngleOption {
 }
 
 export const SALES_ANGLES: readonly SalesAngleOption[] = [
-  { value: 'new_arrival', label: 'New Arrival', labelMy: 'ပစ္စည်းသစ်' },
-  { value: 'flash_sale', label: 'Flash Sale / Promo', labelMy: 'အထူးလျှော့ဈေး' },
-  { value: 'problem_solution', label: 'Problem-Solution', labelMy: 'ပြဿနာဖြေရှင်း' },
-  { value: 'short_reel', label: 'Short Punchy Reel', labelMy: 'Reel / TikTok အတို' },
+  { value: 'viral_story', label: 'Viral Hook & Story (Vlog / General)', labelMy: 'Viral Hook နှင့် ပုံပြင် (Vlog / အထွေထွေ)' },
+  { value: 'quick_tips', label: '3 Quick Tips / Educational', labelMy: 'အကြံပြုချက် ၃ ချက် / ပညာပေး' },
+  { value: 'honest_review', label: 'Honest Review / Comparison', labelMy: 'ရိုးသားသော သုံးသပ်ချက် / နှိုင်းယှဉ်ချက်' },
+  { value: 'promo_showcase', label: 'Promo / Product Showcase', labelMy: 'ပရိုမိုးရှင်း / ပစ္စည်းမိတ်ဆက်' },
+  { value: 'short_reel', label: 'Short Punchy Reel (10–15s)', labelMy: 'Reel / TikTok အတို (၁၀-၁၅ စက္ကန့်)' },
 ] as const
+
+export function normalizeSalesAngle(value?: string | null): SalesAngle {
+  switch (value) {
+    case 'viral_story':
+    case 'quick_tips':
+    case 'honest_review':
+    case 'promo_showcase':
+    case 'short_reel':
+      return value
+    case 'flash_sale':
+      return 'promo_showcase'
+    case 'problem_solution':
+      return 'quick_tips'
+    case 'new_arrival':
+    default:
+      return 'viral_story'
+  }
+}
 
 export const DEFAULT_ONLINE_SHOP_CTA_MY =
   '📦 အိမ်အရောက် ငွေချေစနစ် (COD) ဖြင့် မှာယူနိုင်ပါပြီ • Inbox မှတစ်ဆင့် ဆက်သွယ်ပါ'

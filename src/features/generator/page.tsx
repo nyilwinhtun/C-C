@@ -48,9 +48,12 @@ import {
   type PosterDraft,
 } from "@/store/useContentStore"
 import {
+  BUSINESS_CATEGORIES,
   DEFAULT_ONLINE_SHOP_CTA_EN,
   DEFAULT_ONLINE_SHOP_CTA_MY,
   SALES_ANGLES,
+  isShoppingCategory,
+  type BusinessCategory,
 } from "@/types"
 import type { GeneratedContent } from "@/api/aiService"
 import { useUIStore } from "@/store/useUIStore"
@@ -103,7 +106,7 @@ function buildGeneratorVaultTags(
   } else if (contentType === "post_caption" && !tags.includes("caption")) {
     tags.push("caption")
   }
-  if (salesAngle === "flash_sale" && !tags.includes("promo")) {
+  if (salesAngle === "promo_showcase" && !tags.includes("promo")) {
     tags.push("promo")
   }
   return Array.from(new Set(tags))
@@ -401,7 +404,11 @@ export function GeneratorPage() {
     generatedHistory,
     brandSignature,
     businessCategory,
+    customNiche,
     autoAppendShopCta,
+    setBusinessCategory,
+    setCustomNiche,
+    setAutoAppendShopCta,
     setPosterDraft,
   } = useContentStore(
     useShallow((state) => ({
@@ -410,7 +417,11 @@ export function GeneratorPage() {
       generatedHistory: state.generatedHistory,
       brandSignature: state.brandSignature,
       businessCategory: state.businessCategory,
+      customNiche: state.customNiche,
       autoAppendShopCta: state.autoAppendShopCta,
+      setBusinessCategory: state.setBusinessCategory,
+      setCustomNiche: state.setCustomNiche,
+      setAutoAppendShopCta: state.setAutoAppendShopCta,
       setPosterDraft: state.setPosterDraft,
     }))
   )
@@ -530,8 +541,9 @@ export function GeneratorPage() {
     setIsTypewriting(false)
     generate({
       ...data,
-      salesAngle: data.salesAngle ?? "new_arrival",
+      salesAngle: data.salesAngle ?? "viral_story",
       businessCategory,
+      customNiche: customNiche.trim() || undefined,
       includeHashtags: data.includeHashtags ?? true,
     })
   }
@@ -688,12 +700,13 @@ export function GeneratorPage() {
       platform: result.platform,
       contentType: result.contentType,
       tone: result.tone,
-      salesAngle: values.salesAngle ?? "new_arrival",
+      salesAngle: values.salesAngle ?? "viral_story",
       businessCategory,
+      customNiche: customNiche.trim() || undefined,
       language: values.language,
       includeHashtags: values.includeHashtags ?? true,
     })
-  }, [result, form, generate, businessCategory])
+  }, [result, form, generate, businessCategory, customNiche])
 
   const isGeneratingFlag = isPending || isGenerating
 
@@ -731,15 +744,16 @@ export function GeneratorPage() {
         platform: params.platform ?? result?.platform ?? values.platform,
         contentType: params.contentType ?? result?.contentType ?? values.contentType,
         tone: result?.tone ?? values.tone,
-        salesAngle: values.salesAngle ?? "new_arrival",
+        salesAngle: values.salesAngle ?? "viral_story",
         businessCategory,
+        customNiche: customNiche.trim() || undefined,
         language: selectedLang,
         includeHashtags: values.includeHashtags ?? true,
         instruction: `${params.instruction}\n${languageDirective}`,
         currentContent: currentText,
       })
     },
-    [result, displayedText, isGeneratingFlag, form, generate, businessCategory]
+    [result, displayedText, isGeneratingFlag, form, generate, businessCategory, customNiche]
   )
 
   const handleLoadTemplate = useCallback((template: any) => {
@@ -768,7 +782,7 @@ export function GeneratorPage() {
   const platformMeta = getPlatformMeta(activePlatform)
   const PlatformIcon = platformMeta.icon
   const selectedTone = formValues.tone
-  const selectedSalesAngle = formValues.salesAngle ?? "new_arrival"
+  const selectedSalesAngle = formValues.salesAngle ?? "viral_story"
   const copySections = extractCopySections(contentToShow)
 
   const hookLength = getOpeningHookLength(contentToShow)
@@ -923,6 +937,38 @@ export function GeneratorPage() {
                 }}
                 className="grid gap-3 p-3.5 sm:p-5"
               >
+                <div className="grid gap-1.5">
+                  <Label htmlFor="creatorNiche" className="leading-relaxed font-myanmar">
+                    {t(language, "settings.businessCategory")}
+                  </Label>
+                  <Select
+                    id="creatorNiche"
+                    value={businessCategory}
+                    onChange={(e) => {
+                      const nextCat = (e.target as HTMLSelectElement).value as BusinessCategory
+                      setBusinessCategory(nextCat)
+                      setAutoAppendShopCta(isShoppingCategory(nextCat))
+                    }}
+                    className="border-border/60 font-myanmar"
+                  >
+                    {BUSINESS_CATEGORIES.map((cat) => (
+                      <option key={cat.value} value={cat.value}>
+                        {language === "my" ? `${cat.labelMy} (${cat.label})` : cat.label}
+                      </option>
+                    ))}
+                  </Select>
+                  {businessCategory === "custom" && (
+                    <Input
+                      id="generatorCustomNiche"
+                      type="text"
+                      value={customNiche}
+                      onChange={(e) => setCustomNiche(e.target.value)}
+                      placeholder={t(language, "settings.customNichePlaceholder")}
+                      className="border-border/60 font-myanmar text-sm"
+                    />
+                  )}
+                </div>
+
                 <div className="grid gap-1.5">
                   <Label htmlFor="topic" className="leading-relaxed">{t(language, "generator.topic")}</Label>
                   <Input

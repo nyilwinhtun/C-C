@@ -122,15 +122,18 @@ export interface PosterState {
   theme: BrandThemeId
   title: string
   subtitle: string
+  showPriceBadge: boolean
   priceTag: string
   originalPrice: string
   showNewArrivalPill: boolean
+  pillBadgeText: string
   promoBadgeText: string
   splitDirection: SplitDirection
   beforeLabel: string
   afterLabel: string
   reviewQuote: string
   reviewerName: string
+  showStarRating: boolean
   showShopFooter: boolean
   shopFooterText: string
   showShopLogo: boolean

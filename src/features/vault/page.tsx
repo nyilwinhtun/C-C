@@ -239,7 +239,7 @@ export function VaultPage() {
         topic: topicText,
         platform: validPlatform,
         contentType: isVideo ? "video_script" : "post_caption",
-        salesAngle: isPromo ? "flash_sale" : undefined,
+        salesAngle: isPromo ? "promo_showcase" : undefined,
       })
       setActivePageKey("generator")
       toast.success(

@@ -28,6 +28,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
+import { isShoppingCategory } from "@/types"
 import { renderPosterCanvas } from "./posterRenderer"
 import {
   BRAND_THEMES,
@@ -47,8 +48,8 @@ const TEMPLATE_OPTIONS: {
 }[] = [
   {
     id: "spotlight",
-    label: "Product Spotlight",
-    labelMy: "ပစ္စည်းအထူးပြ",
+    label: "Spotlight / Topic Cover",
+    labelMy: "အထူးပြ / ခေါင်းစဉ်ကတ်",
     icon: Sparkles,
   },
   {
@@ -65,8 +66,8 @@ const TEMPLATE_OPTIONS: {
   },
   {
     id: "review",
-    label: "Customer Review",
-    labelMy: "ဝယ်သူမှတ်ချက်",
+    label: "Review / Quote Card",
+    labelMy: "မှတ်ချက် / Quote ကတ်",
     icon: MessageSquareQuote,
   },
 ]
@@ -78,9 +79,9 @@ const CONTROL_TABS: {
   icon: typeof LayoutTemplate
 }[] = [
   { id: "template", label: "Template", labelMy: "ဒီဇိုင်း", icon: LayoutTemplate },
-  { id: "text_price", label: "Text & Price", labelMy: "စာသားနှင့်ဈေး", icon: Type },
+  { id: "text_price", label: "Text & Badge", labelMy: "စာသားနှင့်တံဆိပ်", icon: Type },
   { id: "theme_color", label: "Theme Color", labelMy: "အရောင်", icon: Palette },
-  { id: "shop_footer", label: "Shop Footer", labelMy: "ဆိုင်အောက်ခြေ", icon: Store },
+  { id: "shop_footer", label: "Footer & Logo", labelMy: "အောက်ခြေနှင့် Logo", icon: Store },
 ]
 
 function loadImageElement(src: string): Promise<HTMLImageElement> {
@@ -115,17 +116,25 @@ export function PhotoStudioPage() {
   const language = useUIStore(useShallow((state) => state.language))
   const isMy = language === "my"
 
-  const { brandSignature, posterDraft, setPosterDraft, shopLogoDataUrl, setShopLogoDataUrl } =
-    useContentStore(
-      useShallow((state) => ({
-        brandSignature: state.brandSignature,
-        posterDraft: state.posterDraft,
-        setPosterDraft: state.setPosterDraft,
-        shopLogoDataUrl: state.shopLogoDataUrl,
-        setShopLogoDataUrl: state.setShopLogoDataUrl,
-      }))
-    )
+  const {
+    brandSignature,
+    businessCategory,
+    posterDraft,
+    setPosterDraft,
+    shopLogoDataUrl,
+    setShopLogoDataUrl,
+  } = useContentStore(
+    useShallow((state) => ({
+      brandSignature: state.brandSignature,
+      businessCategory: state.businessCategory,
+      posterDraft: state.posterDraft,
+      setPosterDraft: state.setPosterDraft,
+      shopLogoDataUrl: state.shopLogoDataUrl,
+      setShopLogoDataUrl: state.setShopLogoDataUrl,
+    }))
+  )
 
+  const isShop = isShoppingCategory(businessCategory)
   const [activeTab, setActiveTab] = useState<ControlTabId>("template")
   const [hasCustomFooter, setHasCustomFooter] = useState(false)
 
@@ -133,24 +142,49 @@ export function PhotoStudioPage() {
     template: "spotlight",
     aspectRatio: "1:1",
     theme: "clean_white",
-    title: isMy ? "Premium Daily Essential" : "Premium Daily Essential",
-    subtitle: isMy ? "အရည်အသွေးမြင့် • နေ့စဉ်သုံး" : "High quality • Ready to ship",
-    priceTag: "35,000 Ks",
+    title: isShop
+      ? "Premium Daily Essential"
+      : isMy
+        ? "နေ့စဉ်တိုးတက်စေမယ့် နည်းလမ်း ၃ ချက်"
+        : "3 Daily Habits That Changed Everything",
+    subtitle: isShop
+      ? isMy
+        ? "အရည်အသွေးမြင့် • နေ့စဉ်သုံး"
+        : "High quality • Ready to ship"
+      : isMy
+        ? "သိမ်းထားပြီး လက်တွေ့သုံးကြည့်ပါ • Creator Notes"
+        : "Save for later • Episode / Topic Notes",
+    showPriceBadge: isShop,
+    priceTag: isShop ? "35,000 Ks" : "",
     originalPrice: "48,000 Ks",
     showNewArrivalPill: true,
+    pillBadgeText: isShop ? "NEW ARRIVAL" : "EPISODE / TIP",
     promoBadgeText: isMy ? "အထူးလျှော့ဈေး" : "FLASH SALE",
     splitDirection: "side-by-side",
     beforeLabel: "BEFORE",
     afterLabel: "AFTER",
-    reviewQuote: isMy
-      ? "ပစ္စည်းအရမ်းကောင်းပြီး ပို့ဆောင်မှုလည်း မြန်ဆန်ပါတယ်။ ထပ်မှာဦးမယ်!"
-      : "Amazing quality and super fast delivery! Will definitely order again.",
-    reviewerName: isMy ? "Su Myat • Yangon" : "Verified Buyer",
+    reviewQuote: isShop
+      ? isMy
+        ? "ပစ္စည်းအရမ်းကောင်းပြီး ပို့ဆောင်မှုလည်း မြန်ဆန်ပါတယ်။ ထပ်မှာဦးမယ်!"
+        : "Amazing quality and super fast delivery! Will definitely order again."
+      : isMy
+        ? "တစ်နေ့ကို နည်းနည်းချင်း ပုံမှန်လုပ်သွားရင် ရလဒ်ကောင်းတွေ သေချာပေါက် ရလာမှာပါ။"
+        : "Consistency beats intensity. Focus on one small step every single day.",
+    reviewerName: isShop
+      ? isMy
+        ? "Su Myat • Yangon"
+        : "Verified Buyer"
+      : isMy
+        ? "Creator Note"
+        : "Creator Note",
+    showStarRating: isShop,
     showShopFooter: true,
-    shopFooterText: brandSignature.trim() || "My Online Shop • Inbox to Order",
+    shopFooterText:
+      brandSignature.trim() ||
+      (isShop ? "My Online Shop • Inbox to Order" : "Creator Studio • Follow for More"),
     showShopLogo: true,
     fontStyle: "modern_clean",
-    showCodBadge: true,
+    showCodBadge: isShop,
     codBadgeText: "COD Available / အိမ်အရောက်ငွေချေ",
   }))
 
@@ -679,13 +713,13 @@ export function PhotoStudioPage() {
                 {poster.template !== "review" && (
                   <div className="space-y-1">
                     <Label htmlFor="poster-title" className="text-xs">
-                      {isMy ? "ခေါင်းစဉ် / ပစ္စည်းအမည်" : "Product Title"}
+                      {isMy ? "ခေါင်းစဉ် / ပစ္စည်းအမည်" : "Headline / Topic Title"}
                     </Label>
                     <Input
                       id="poster-title"
                       value={poster.title}
                       onChange={(e) => updatePoster("title", e.target.value)}
-                      placeholder="e.g. Glow Serum 30ml"
+                      placeholder="e.g. Ep 05: Morning Routine or Glow Serum"
                       className="h-9 text-sm"
                     />
                   </div>
@@ -704,44 +738,80 @@ export function PhotoStudioPage() {
                           onChange={(e) =>
                             updatePoster("subtitle", e.target.value)
                           }
-                          placeholder="Free gift with every order"
+                          placeholder="Save for later • Key takeaway"
                           className="h-9 text-sm"
                         />
                       </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="poster-price" className="text-xs">
-                          {isMy ? "ဈေးနှုန်း" : "Price Tag"}
-                        </Label>
-                        <Input
-                          id="poster-price"
-                          value={poster.priceTag}
-                          onChange={(e) =>
-                            updatePoster("priceTag", e.target.value)
-                          }
-                          placeholder="35,000 Ks"
-                          className="h-9 text-sm"
-                        />
-                      </div>
+                      {poster.showPriceBadge && (
+                        <div className="space-y-1">
+                          <Label htmlFor="poster-price" className="text-xs">
+                            {isMy ? "ဈေးနှုန်း (Optional)" : "Price Tag (Optional)"}
+                          </Label>
+                          <Input
+                            id="poster-price"
+                            value={poster.priceTag}
+                            onChange={(e) =>
+                              updatePoster("priceTag", e.target.value)
+                            }
+                            placeholder="35,000 Ks"
+                            className="h-9 text-sm"
+                          />
+                        </div>
+                      )}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updatePoster(
-                          "showNewArrivalPill",
-                          !poster.showNewArrivalPill
-                        )
-                      }
-                      className={cn(
-                        "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
-                        poster.showNewArrivalPill
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-border text-muted-foreground"
-                      )}
-                    >
-                      <Tag className="h-3.5 w-3.5" />
-                      {isMy ? "New Arrival တံဆိပ်ပြမည်" : "Show 'New Arrival' Pill"}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updatePoster(
+                            "showNewArrivalPill",
+                            !poster.showNewArrivalPill
+                          )
+                        }
+                        className={cn(
+                          "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+                          poster.showNewArrivalPill
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground"
+                        )}
+                      >
+                        <Tag className="h-3.5 w-3.5" />
+                        {isMy ? "ထိပ်တန်းတံဆိပ်ပြမည်" : "Show Top Badge Pill"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updatePoster("showPriceBadge", !poster.showPriceBadge)
+                        }
+                        className={cn(
+                          "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+                          poster.showPriceBadge
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground"
+                        )}
+                      >
+                        <Tag className="h-3.5 w-3.5" />
+                        {isMy ? "ဈေးနှုန်းတံဆိပ်ပြမည်" : "Show Price Badge"}
+                      </button>
+                    </div>
+
+                    {poster.showNewArrivalPill && (
+                      <div className="space-y-1">
+                        <Label htmlFor="poster-pill-text" className="text-xs">
+                          {isMy ? "တံဆိပ်စာသား (ဥပမာ - EPISODE 01 / KEY TIP / NEW ARRIVAL)" : "Badge Pill Text"}
+                        </Label>
+                        <Input
+                          id="poster-pill-text"
+                          value={poster.pillBadgeText}
+                          onChange={(e) =>
+                            updatePoster("pillBadgeText", e.target.value)
+                          }
+                          placeholder="EPISODE 01 / KEY TIP / NEW ARRIVAL"
+                          className="h-9 text-sm"
+                        />
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -825,9 +895,41 @@ export function PhotoStudioPage() {
 
                 {poster.template === "review" && (
                   <div className="space-y-2.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updatePoster("showStarRating", !poster.showStarRating)
+                        }
+                        className={cn(
+                          "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+                          poster.showStarRating
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground"
+                        )}
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                        {isMy ? "ကြယ် ၅ ပွင့်ပြမည် (Review Mode)" : "Show 5-Star Rating (Review Mode)"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updatePoster("showPriceBadge", !poster.showPriceBadge)
+                        }
+                        className={cn(
+                          "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+                          poster.showPriceBadge
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground"
+                        )}
+                      >
+                        <Tag className="h-3.5 w-3.5" />
+                        {isMy ? "ဈေးနှုန်းတံဆိပ်ပြမည်" : "Show Price Badge"}
+                      </button>
+                    </div>
                     <div className="space-y-1">
                       <Label htmlFor="review-quote" className="text-xs">
-                        {isMy ? "ဝယ်သူမှတ်ချက် (★★★★★)" : "Customer Testimonial"}
+                        {isMy ? "မှတ်ချက် / Quote / Tip စာသား" : "Quote / Review / Tip Text"}
                       </Label>
                       <Textarea
                         id="review-quote"
@@ -842,7 +944,7 @@ export function PhotoStudioPage() {
                     <div className="grid grid-cols-2 gap-2.5">
                       <div className="space-y-1">
                         <Label htmlFor="reviewer-name" className="text-xs">
-                          {isMy ? "ဝယ်သူအမည်" : "Reviewer Name"}
+                          {isMy ? "အမည် / Source" : "Author / Reviewer"}
                         </Label>
                         <Input
                           id="reviewer-name"
@@ -853,19 +955,36 @@ export function PhotoStudioPage() {
                           className="h-9 text-sm"
                         />
                       </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="review-price" className="text-xs">
-                          {isMy ? "ဈေးနှုန်း (Optional)" : "Price Tag (Optional)"}
-                        </Label>
-                        <Input
-                          id="review-price"
-                          value={poster.priceTag}
-                          onChange={(e) =>
-                            updatePoster("priceTag", e.target.value)
-                          }
-                          className="h-9 text-sm"
-                        />
-                      </div>
+                      {poster.showPriceBadge ? (
+                        <div className="space-y-1">
+                          <Label htmlFor="review-price" className="text-xs">
+                            {isMy ? "ဈေးနှုန်း (Optional)" : "Price Tag (Optional)"}
+                          </Label>
+                          <Input
+                            id="review-price"
+                            value={poster.priceTag}
+                            onChange={(e) =>
+                              updatePoster("priceTag", e.target.value)
+                            }
+                            className="h-9 text-sm"
+                          />
+                        </div>
+                      ) : !poster.showStarRating ? (
+                        <div className="space-y-1">
+                          <Label htmlFor="quote-badge" className="text-xs">
+                            {isMy ? "တံဆိပ်စာသား" : "Badge Pill Text"}
+                          </Label>
+                          <Input
+                            id="quote-badge"
+                            value={poster.pillBadgeText}
+                            onChange={(e) =>
+                              updatePoster("pillBadgeText", e.target.value)
+                            }
+                            placeholder="KEY TIP / QUOTE"
+                            className="h-9 text-sm"
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 )}

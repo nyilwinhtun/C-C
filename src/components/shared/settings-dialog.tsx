@@ -7,6 +7,8 @@ import { useContentStore, type ContentBackupData } from "@/store/useContentStore
 import {
   BUSINESS_CATEGORIES,
   DEFAULT_ONLINE_SHOP_CTA_MY,
+  isShoppingCategory,
+  normalizeBusinessCategory,
   type BusinessCategory,
 } from "@/types"
 import { useShallow } from "zustand/react/shallow"
@@ -111,22 +113,26 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const {
     brandSignature,
     businessCategory,
+    customNiche,
     autoAppendShopCta,
     savedVault,
     generatedHistory,
     setBrandSignature,
     setBusinessCategory,
+    setCustomNiche,
     setAutoAppendShopCta,
     importBackup,
   } = useContentStore(
     useShallow((state) => ({
       brandSignature: state.brandSignature,
       businessCategory: state.businessCategory,
+      customNiche: state.customNiche,
       autoAppendShopCta: state.autoAppendShopCta,
       savedVault: state.savedVault,
       generatedHistory: state.generatedHistory,
       setBrandSignature: state.setBrandSignature,
       setBusinessCategory: state.setBusinessCategory,
+      setCustomNiche: state.setCustomNiche,
       setAutoAppendShopCta: state.setAutoAppendShopCta,
       importBackup: state.importBackup,
     }))
@@ -137,6 +143,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [modelInput, setModelInput] = useState(models[aiProvider] || DEFAULT_MODELS[aiProvider])
   const [signature, setSignature] = useState(brandSignature)
   const [categoryInput, setCategoryInput] = useState<BusinessCategory>(businessCategory)
+  const [customNicheInput, setCustomNicheInput] = useState(customNiche)
   const [autoCtaInput, setAutoCtaInput] = useState<boolean>(autoAppendShopCta)
   const [showKey, setShowKey] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -155,6 +162,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       setModelInput(initialModel)
       setSignature(brandSignature)
       setCategoryInput(businessCategory)
+      setCustomNicheInput(customNiche)
       setAutoCtaInput(autoAppendShopCta)
       setShowKey(false)
       setIsCustomMode(!PRESET_MODELS[aiProvider].includes(initialModel) && Boolean(initialModel))
@@ -190,6 +198,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       exportedAt: new Date().toISOString(),
       brandSignature: signature,
       businessCategory: categoryInput,
+      customNiche: customNicheInput.trim(),
       autoAppendShopCta: autoCtaInput,
       savedVault,
       generatedHistory,
@@ -232,7 +241,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         setSignature(parsed.brandSignature)
       }
       if (parsed.businessCategory) {
-        setCategoryInput(parsed.businessCategory)
+        setCategoryInput(normalizeBusinessCategory(parsed.businessCategory))
+      }
+      if (typeof parsed.customNiche === "string") {
+        setCustomNicheInput(parsed.customNiche)
       }
       if (typeof parsed.autoAppendShopCta === "boolean") {
         setAutoCtaInput(parsed.autoAppendShopCta)
@@ -379,7 +391,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <Select
               id="business-category"
               value={categoryInput}
-              onChange={(e) => setCategoryInput((e.target as HTMLSelectElement).value as BusinessCategory)}
+              onChange={(e) => {
+                const nextCat = (e.target as HTMLSelectElement).value as BusinessCategory
+                setCategoryInput(nextCat)
+                setAutoCtaInput(isShoppingCategory(nextCat))
+              }}
               disabled={loading}
             >
               {BUSINESS_CATEGORIES.map((cat) => (
@@ -388,6 +404,17 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 </option>
               ))}
             </Select>
+            {categoryInput === "custom" && (
+              <Input
+                id="custom-niche"
+                type="text"
+                value={customNicheInput}
+                onChange={(e) => setCustomNicheInput(e.target.value)}
+                placeholder={t(language, "settings.customNichePlaceholder")}
+                className="mt-2 font-myanmar text-sm"
+                disabled={loading}
+              />
+            )}
             <p className="text-xs text-muted-foreground font-myanmar">
               {t(language, "settings.businessCategoryHint")}
             </p>
@@ -497,6 +524,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 setProviderModel(selectedProvider, normalizedModel)
                 setBrandSignature(signature)
                 setBusinessCategory(categoryInput)
+                setCustomNiche(customNicheInput.trim())
                 setAutoAppendShopCta(autoCtaInput)
                 setLoading(true)
                 setTimeout(() => {
@@ -513,6 +541,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     (models[selectedProvider] || DEFAULT_MODELS[selectedProvider]) &&
                   signature === brandSignature &&
                   categoryInput === businessCategory &&
+                  customNicheInput.trim() === customNiche &&
                   autoCtaInput === autoAppendShopCta)
               }
             >

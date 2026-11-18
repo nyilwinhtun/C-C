@@ -1,5 +1,10 @@
 import { DEFAULT_MODELS, useUIStore } from "@/store/useUIStore"
-import type { BusinessCategory, SalesAngle } from "@/types"
+import {
+  normalizeBusinessCategory,
+  normalizeSalesAngle,
+  type BusinessCategory,
+  type SalesAngle,
+} from "@/types"
 
 export const GEMINI_MODEL = "gemini-3.5-flash-lite"
 export const GEMINI_VISION_MODEL = "gemini-2.5-flash"
@@ -108,6 +113,7 @@ export interface GenerateContentRequest {
   tone: string
   salesAngle?: SalesAngle
   businessCategory?: BusinessCategory
+  customNiche?: string
   language: string
   includeHashtags: boolean
   instruction?: string
@@ -128,42 +134,58 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const CATEGORY_PERSONA_GUIDANCE: Record<BusinessCategory, string> = {
   general:
-    "General Online Shop — warm, trustworthy everyday retail tone. Highlight practical value, real-life convenience, fast delivery, and reliable quality.",
-  fashion:
-    "Fashion & Apparel — stylish, trend-savvy, and flattering. Highlight fabric feel, fit, styling versatility, color options, and confidence.",
-  beauty:
-    "Beauty & Skincare — caring, knowledgeable, glow-focused. Highlight skin feel, gentle/effective ingredients, visible results, and daily routine ease.",
-  food:
-    "Food & Beverage — appetizing, sensory, and craving-inducing. Highlight fresh taste, aroma, quality ingredients, and quick delivery.",
-  electronics:
-    "Electronics & Gadgets — smart, clear, benefit-driven without dry jargon. Highlight everyday performance, battery/convenience, build quality, and warranty peace of mind.",
-  home:
-    "Home & Lifestyle — cozy, organized, and uplifting. Highlight how it upgrades daily living, saves space/time, and brings comfort to the home.",
+    "General Creator / All-Purpose — relatable, engaging, and versatile creator voice. Focus on clear storytelling, audience connection, and valuable takeaways without forcing sales pitches.",
+  education:
+    "Education & How-To Tips — clear, helpful, and structured mentor/educator voice. Break down concepts into actionable steps, memorable analogies, and practical value.",
+  vlog:
+    "Vlog, Travel & Lifestyle — authentic, warm, diary-like storyteller voice. Capture mood, sensory details, behind-the-scenes moments, and genuine personal reflections.",
+  tech_review:
+    "Tech & Product Review — sharp, honest, and insightful reviewer voice. Highlight real-world pros and cons, practical user experience, and clear comparisons without dry jargon or pushy sales hype.",
+  motivation:
+    "Motivation & Storytelling — inspiring, empathetic, and thought-provoking voice. Open with an emotional hook, share a meaningful perspective or lesson, and end with an uplifting reflection.",
+  online_shop:
+    "Online Shop & E-Commerce — warm, trustworthy retail copywriter voice. Highlight practical product benefits, real-life value, quality assurance, and a clear order/inbox CTA.",
+  custom:
+    "Custom Creator Niche — adapt vocabulary, examples, and audience tone authentically to the creator's specific niche.",
+}
+
+function getCategoryPersonaGuidance(
+  category?: BusinessCategory,
+  customNiche?: string
+): string {
+  const normalized = normalizeBusinessCategory(category)
+  if (normalized === "custom" && customNiche?.trim()) {
+    return `Custom Niche (${customNiche.trim()}) — speak authentically as an experienced creator in "${customNiche.trim()}". Use natural domain-relevant insights and vocabulary tailored to this audience without forcing unrelated sales language.`
+  }
+  return CATEGORY_PERSONA_GUIDANCE[normalized]
 }
 
 const SALES_ANGLE_GUIDANCE: Record<SalesAngle, string> = {
-  new_arrival:
-    "New Arrival — build fresh excitement, highlight what makes this new drop special, key standout benefits, and invite early orders before stock sells out.",
-  flash_sale:
-    "Flash Sale / Promo — lead with urgency, clear savings/discount value, limited-time deadline, and a strong action-driving CTA.",
-  problem_solution:
-    "Problem-Solution — open with a relatable everyday frustration the customer recognizes, then present the product as the effortless fix.",
+  viral_story:
+    "Viral Hook & Story (Vlog / General) — open with an irresistible curiosity or relatable story hook, keep pacing conversational and human, and end with an engaging question for comments.",
+  quick_tips:
+    "3 Quick Tips / Educational — deliver 3 crisp, high-value actionable tips or takeaways that viewers can save, share, and apply immediately.",
+  honest_review:
+    "Honest Review / Comparison — give a balanced, trustworthy breakdown (what stands out, who it's best for, and honest pros/cons) like a trusted friend sharing real experience.",
+  promo_showcase:
+    "Promo / Product Showcase — spotlight standout features, real-life value, limited-time offer or key highlight, and a clear action-driving CTA.",
   short_reel:
-    "Short Punchy Reel — ultra-snappy 15-30s pacing, immediate 2-second scroll-stopper hook, crisp visual/spoken beats, and a fast memorable CTA.",
+    "Short Punchy Reel (10–15s) — ultra-snappy 10–15s pacing, immediate 2-second scroll-stopper hook, crisp visual/spoken beats, and a fast memorable closer.",
 }
 
-const SYSTEM_PROMPT = `You are Myanmar's #1 high-converting social media copywriter and e-commerce content strategist for online businesses of every niche.
+const SYSTEM_PROMPT = `You are Myanmar's #1 social media content strategist and creative copywriter for creators of every niche—including educators, vloggers, tech reviewers, lifestyle creators, motivational storytellers, and online shops.
 You create engaging, platform-native content in English, Myanmar (Burmese), or bilingual (Myanmar + English).
 
 Rules:
 - Write naturally for the selected platform (Facebook, TikTok, YouTube, Instagram, Telegram).
-- Match the requested tone, Business Category, and Sales Angle.
+- Match the requested tone, Creator / Business Category, and Content Angle.
+- IMPORTANT: Adapt your persona to the niche and angle. NEVER force sales pitch language, pricing, or shopping CTAs onto educational, vlog, review, or storytelling content unless the user's topic or chosen Online Shop / Promo angle explicitly calls for it.
 - If the language is "myanmar" or "my":
   - Write 100% in natural spoken Myanmar (Burmese) Unicode script (မြန်မာစကားပြော), even if the Topic is written in English.
-  - Keep the Burmese tone warm, energetic, and conversational using natural everyday particles like "ဗျာ", "နော်", "တကယ်တမ်း", "လက်လွတ်မခံနဲ့နော်", "အခုပဲ", "မိုက်တယ်နော်".
-  - STRICTLY AVOID stiff, formal textbook/literary endings such as "ဖြစ်ပါသည်", "ပြုလုပ်နိုင်ပါသည်", "ဝယ်ယူရရှိနိုင်ပါသည်", "ဖော်ပြပေးလိုက်ပါတယ်", "ပါဝင်ပါသည်", or "ရှိပါသည်". Always use natural spoken endings like "ပါတယ်ဗျာ", "လုပ်လို့ရတယ်နော်", "မှာလို့ရပြီနော်".
+  - Keep the Burmese tone warm, engaging, and conversational using natural everyday particles tailored to the niche (e.g., "ဗျာ", "နော်", "တကယ်တမ်း", "မိုက်တယ်နော်", "သိထားသင့်တယ်နော်", "အားလုံးပဲ").
+  - STRICTLY AVOID stiff, formal textbook/literary endings such as "ဖြစ်ပါသည်", "ပြုလုပ်နိုင်ပါသည်", "ဝယ်ယူရရှိနိုင်ပါသည်", "ဖော်ပြပေးလိုက်ပါတယ်", "ပါဝင်ပါသည်", or "ရှိပါသည်". Always use natural spoken endings like "ပါတယ်ဗျာ", "လုပ်လို့ရတယ်နော်", "ကြည့်ကြည့်ရအောင်နော်".
   - Write ALL video script labels and stage directions in Burmese (use "မြင်ကွင်း:", "အသံ:", "ဖန်သားပြင်စာသား:", "ပြောစကား:" instead of English "(Visual - ...)", "(Sound - ...)", "(Audio - ...)", or "[Visual Cue]").
-  - Keep international brand, product, and platform names (e.g., Zara, Laneige, Sony, Dyson, Nike, TikTok, Facebook, Instagram, YouTube, Telegram) in their original English spelling rather than phonetic Burmese transliteration.
+  - Keep international brand, product, and platform names (e.g., Zara, Laneige, Sony, Dyson, Nike, Apple, TikTok, Facebook, Instagram, YouTube, Telegram) in their original English spelling rather than phonetic Burmese transliteration.
 - If the language is "bilingual", blend natural spoken Myanmar and English seamlessly while keeping international brand names in English.
 - When includeHashtags is true, append relevant hashtags at the end.
 - NEVER use raw Markdown formatting symbols such as *, **, ***, # headings, or backticks. Output clean plain text ready to copy-paste directly onto Facebook or TikTok.
@@ -188,19 +210,21 @@ function buildUserPrompt(request: GenerateContentRequest): string {
   const hashtagInstruction = request.includeHashtags
     ? "Include relevant hashtags at the end."
     : "Do not include hashtags."
-  const categoryGuide =
-    CATEGORY_PERSONA_GUIDANCE[request.businessCategory ?? "general"]
+  const categoryGuide = getCategoryPersonaGuidance(
+    request.businessCategory,
+    request.customNiche
+  )
   const angleGuide =
-    SALES_ANGLE_GUIDANCE[request.salesAngle ?? "new_arrival"]
+    SALES_ANGLE_GUIDANCE[normalizeSalesAngle(request.salesAngle)]
   const isMyanmarOnly = request.language === "myanmar" || request.language === "my"
   const myanmarRules = isMyanmarOnly
-    ? '\nStrict Myanmar Rules: Write 100% in natural conversational spoken Burmese (မြန်မာစကားပြော) using warm particles like "ဗျာ", "နော်", "တကယ်တမ်း", "လက်လွတ်မခံနဲ့နော်". NEVER use stiff textbook endings like "ဖြစ်ပါသည်" or "ပါဝင်ပါသည်". Use Burmese script labels like မြင်ကွင်း:, အသံ:, ဖန်သားပြင်စာသား:, ပြောစကား: instead of English stage directions. Keep international brand names (e.g., Zara, Laneige, Sony, TikTok, Facebook) in English spelling. Do NOT use Markdown symbols (*, **, # headings).'
+    ? '\nStrict Myanmar Rules: Write 100% in natural conversational spoken Burmese (မြန်မာစကားပြော) using warm particles like "ဗျာ", "နော်", "တကယ်တမ်း". NEVER use stiff textbook endings like "ဖြစ်ပါသည်" or "ပါဝင်ပါသည်". Use Burmese script labels like မြင်ကွင်း:, အသံ:, ဖန်သားပြင်စာသား:, ပြောစကား: instead of English stage directions. Keep international brand names (e.g., Apple, Sony, Zara, TikTok, Facebook) in English spelling. Do NOT use Markdown symbols (*, **, # headings).'
     : "\nFormatting Rule: Output clean plain text with no Markdown symbols (*, **, # headings)."
 
   if (request.instruction && request.currentContent) {
     return `Task: ${request.instruction}
-Business Category: ${categoryGuide}
-Sales Angle: ${angleGuide}
+Creator / Business Category: ${categoryGuide}
+Content Format / Angle: ${angleGuide}
 Target Platform: ${request.platform}
 Target Content Type: ${request.contentType}
 Tone: ${request.tone}
@@ -215,8 +239,8 @@ ${request.currentContent}
 Output only the final transformed content now.`
   }
 
-  return `Business Category: ${categoryGuide}
-Sales Angle: ${angleGuide}
+  return `Creator / Business Category: ${categoryGuide}
+Content Format / Angle: ${angleGuide}
 Platform: ${request.platform}
 Content type: ${request.contentType}
 Tone: ${request.tone}
@@ -227,31 +251,37 @@ Write the content now.`
 }
 
 function mockGenerate(request: GenerateContentRequest): GeneratedContent {
-  const category = request.businessCategory ?? "general"
-  const angle = request.salesAngle ?? "new_arrival"
+  const category = normalizeBusinessCategory(request.businessCategory)
+  const angle = normalizeSalesAngle(request.salesAngle)
   const isMyanmar = request.language === "myanmar" || request.language === "bilingual"
 
   const angleLeadMy: Record<SalesAngle, string> = {
-    new_arrival: "✨ ပစ္စည်းသစ်လေး ရောက်ရှိလာပြီနော်!",
-    flash_sale: "⚡ Flash Sale! ဒီနေ့အတွက် အထူးလျှော့ဈေးနဲ့ လက်လွတ်မခံနဲ့နော်!",
-    problem_solution: "💡 နေ့တိုင်း ကြုံနေရတဲ့ အခက်အခဲလေးကို ဒါလေးနဲ့ အလွယ်တကူ ဖြေရှင်းလိုက်ဗျာ!",
-    short_reel: "🎬 ၁၅ စက္ကန့်အတွင်း ကြည့်လိုက် — တကယ်တမ်း အရမ်းမိုက်တဲ့ Item လေးပါ!",
+    viral_story: "✨ ဒီနေ့တော့ တကယ်တမ်း ရင်ဖွင့်ပြောပြချင်တဲ့ အကြောင်းအရာလေးတစ်ခု ရှိတယ်ဗျာ!",
+    quick_tips: "💡 ဒီနေ့အတွက် အသုံးဝင်မယ့် အကြံပြုချက် ၃ ချက်ကို မျှဝေပေးလိုက်တယ်နော်!",
+    honest_review: "🔍 တကယ်သုံးကြည့်ပြီးမှ ရိုးရိုးသားသား ပြန်လည်သုံးသပ်ပေးလိုက်ပါတယ်ဗျာ!",
+    promo_showcase: "⚡ အထူးမိတ်ဆက် & ပရိုမိုးရှင်း — ဒီတစ်ခုက တကယ်တမ်း တန်တယ်နော်!",
+    short_reel: "🎬 ၁၀-၁၅ စက္ကန့်အတွင်း ကြည့်လိုက် — အနှစ်ချုပ်လေးပါ!",
   }
 
   const categoryTagMy: Record<BusinessCategory, string> = {
-    general: "#OnlineShopMyanmar #QualityProduct #ShopNow",
-    fashion: "#FashionMyanmar #OOTDMyanmar #StyleDaily",
-    beauty: "#BeautyMyanmar #SkincareMyanmar #GlowUp",
-    food: "#FoodieMyanmar #FreshFood #Delicious",
-    electronics: "#GadgetMyanmar #TechDeals #SmartLiving",
-    home: "#HomeLivingMyanmar #Lifestyle #CozyHome",
+    general: "#ContentCreatorMyanmar #DailyShare #CreatorLife",
+    education: "#LearnMyanmar #TipsAndTricks #KnowledgeSharing",
+    vlog: "#MyanmarVlog #LifestyleMyanmar #DailyVlog",
+    tech_review: "#TechMyanmar #HonestReview #GadgetReview",
+    motivation: "#MotivationMyanmar #Storytelling #Mindset",
+    online_shop: "#OnlineShopMyanmar #QualityProduct #ShopNow",
+    custom: `#${(request.customNiche || "Creator").replace(/[^a-zA-Z0-9]/g, "")} #MyanmarCreator`,
   }
 
   if (isMyanmar) {
+    const closingMy =
+      category === "online_shop" || angle === "promo_showcase"
+        ? "👉 စိတ်ဝင်စားရင် အခုပဲ Inbox မှာ လာမေးမြန်းနိုင်ပါတယ်ဗျာ!"
+        : "👉 ဒီအကြောင်းအရာနဲ့ ပတ်သက်ပြီး ဘယ်လိုမြင်လဲ? Comment မှာ ဝင်ဆွေးနွေးသွားကြပါဦးနော်!"
     const content =
       `${angleLeadMy[angle]}\n\n` +
-      `တကယ်တမ်း "${request.topic}" ကို ရှာနေတယ်ဆိုရင် ဒီတစ်ခုက အရမ်းတန်ပြီး စိတ်ချရတယ်ဗျာ။ နေ့စဉ်သုံးဖို့ အဆင်ပြေသလို အရည်အသွေးလည်း အပြည့်အဝ အာမခံပေးထားတယ်နော်။\n\n` +
-      `👉 စိတ်ဝင်စားရင် အခုပဲ Inbox မှာ လာမေးမြန်း မှာယူနိုင်ပါပြီဗျာ! (Mock Mode — Settings မှာ API Key ထည့်ပြီး AI အစစ်နဲ့ သုံးနိုင်ပါတယ်)` +
+      `တကယ်တမ်း "${request.topic}" အကြောင်းကို ပြောရမယ်ဆိုရင် လက်တွေ့မှာ အရမ်းအသုံးဝင်ပြီး သတိထားမိသင့်တဲ့ အချက်လေးတွေ အများကြီးရှိတယ်ဗျာ။\n\n` +
+      `${closingMy} (Mock Mode — Settings မှာ API Key ထည့်ပြီး AI အစစ်နဲ့ သုံးနိုင်ပါတယ်)` +
       (request.includeHashtags ? `\n\n${categoryTagMy[category]}` : "")
     return {
       id: crypto.randomUUID(),
@@ -264,11 +294,16 @@ function mockGenerate(request: GenerateContentRequest): GeneratedContent {
     }
   }
 
+  const nicheLabel =
+    category === "custom" && request.customNiche?.trim()
+      ? request.customNiche.trim()
+      : category.replace("_", " ")
+
   const body =
     `✨ ${request.topic}\n\n` +
-    `Designed for ${category} shoppers (${angle.replace("_", " ")} angle): clean benefits, everyday value, and ready to order today.\n\n` +
+    `Tailored for ${nicheLabel} creators (${angle.replace("_", " ")} angle): engaging hook, authentic voice, and clear takeaways.\n\n` +
     `This is a mock AI response. Add your API key in Settings to connect to a real AI provider.` +
-    (request.includeHashtags ? `\n\n#${request.platform} #OnlineShop #ContentStudio` : "")
+    (request.includeHashtags ? `\n\n#${request.platform} #CreatorStudio #ContentCreator` : "")
 
   return {
     id: crypto.randomUUID(),
@@ -1101,6 +1136,7 @@ export interface GenerateVideoContentParams {
   language: "en" | "my"
   brandSignature?: string
   businessCategory?: BusinessCategory
+  customNiche?: string
   onProgress?: (stage: "extracting" | "analyzing") => void
 }
 
@@ -1289,40 +1325,47 @@ function buildVideoPrompt(params: {
   productNote?: string
   analysisMode: "direct" | "keyframes"
   businessCategory?: BusinessCategory
+  customNiche?: string
 }): string {
-  const categoryGuide =
-    CATEGORY_PERSONA_GUIDANCE[params.businessCategory ?? "general"]
+  const categoryGuide = getCategoryPersonaGuidance(
+    params.businessCategory,
+    params.customNiche
+  )
+  const isShop = normalizeBusinessCategory(params.businessCategory) === "online_shop"
   const noteBlock = params.productNote?.trim()
-    ? `Additional Product Name / Price / Promo Note from seller: "${params.productNote.trim()}"`
-    : "No extra product note provided; infer product details from the visuals."
+    ? `Additional Topic / Context / Note from creator: "${params.productNote.trim()}"`
+    : "No extra note provided; infer context and key moments from the visuals."
   const mediaContext =
     params.analysisMode === "direct"
-      ? "Watch this short product video carefully from start to finish."
-      : "Review these 5 evenly spaced keyframes from a short product video in chronological order."
+      ? "Watch this short video carefully from start to finish."
+      : "Review these 5 evenly spaced keyframes from a short video in chronological order."
 
   if (params.language === "my") {
-    return `You are Myanmar's #1 high-converting short-form video sales strategist and spoken Burmese copywriter (TikTok, Facebook Reels, YouTube Shorts).
+    const endingInstruction = isShop
+      ? `   [10-15s Price & Call-to-Action]\n   (State the price/promo and CTA using natural spoken Burmese phrasing for all numbers, prices, percentages, and tricky English words—e.g. "လေးသောင်းငါးထောင် ကျပ်", "နှစ်ဆယ် ရာခိုင်နှုန်း", "ဖရီး ဒယ်လီဗာရီ", "စီအိုဒီ", "အခုပဲ အင်ဘောက်စ် မှာ လာမှာလိုက်နော်!"—for effortless reading)`
+      : `   [10-15s Key Takeaway & Call-to-Action]\n   (Deliver the punchy takeaway, lesson, or engaging question for viewers—e.g. Follow/Save/Comment CTA—in natural spoken Burmese without forcing a sales pitch)`
+
+    return `You are Myanmar's #1 short-form video strategist and spoken Burmese copywriter (TikTok, Facebook Reels, YouTube Shorts) for creators of all niches.
 ${mediaContext}
-Business Category: ${categoryGuide}
+Creator / Business Category: ${categoryGuide}
 Target Platform: ${params.platform}
 ${noteBlock}
 
-Analyze the visual scenes, product details, and pacing, then return ONLY a valid JSON object with these exact 4 keys:
+Analyze the visual scenes, details, and pacing, then return ONLY a valid JSON object with these exact 4 keys:
 
 1. "hooks": An array of 3 scroll-stopping spoken Burmese hook strings for the first 3 seconds, covering these 3 distinct angles:
    - Hook 1 (Curiosity / သိချင်စိတ်နှိုးဆွ): Makes viewers stop and wonder what happens next.
-   - Hook 2 (Price / Value / တန်ဖိုးပေါ်လွင်): Highlights unbeatable value, deal, or price-to-quality ratio.
-   - Hook 3 (Problem-Solution / ပြဿနာဖြေရှင်း): Calls out a relatable daily pain point and shows the product as the instant fix.
+   - Hook 2 (Value / Key Insight / တန်ဖိုးပေါ်လွင်): Highlights the main takeaway, surprising fact, or standout value.
+   - Hook 3 (Relatable Problem / Story / ပြဿနာနှင့် ဇာတ်လမ်း): Calls out a relatable everyday moment or pain point.
 
 2. "voiceoverScript": A high-energy, natural spoken Burmese voiceover script strictly broken down into these 3 timed sections:
    [0-3s Hook]
    (Punchy opening line that grabs attention immediately)
 
-   [3-10s Demo & Key Benefit]
-   (Describe what is happening on screen and the #1 benefit in natural conversational Burmese)
+   [3-10s Story, Demo & Core Point]
+   (Describe what is happening on screen and the #1 insight or benefit in natural conversational Burmese)
 
-   [10-15s Price & Call-to-Action]
-   (State the price/promo and CTA using natural spoken Burmese phrasing for all numbers, prices, percentages, and tricky English e-commerce/tech words—e.g. "လေးသောင်းငါးထောင် ကျပ်", "နှစ်ဆယ် ရာခိုင်နှုန်း", "ဖရီး ဒယ်လီဗာရီ", "စီအိုဒီ", "အော်ဂျင်နယ်", "အခုပဲ အင်ဘောက်စ် မှာ လာမှာလိုက်နော်!"—for effortless reading)
+${endingInstruction}
 
 3. "coverTitles": An array of 2 short, punchy 3 to 5 word On-Screen Cover Text headlines in Burmese (ready to paste straight into CapCut).
 
@@ -1692,6 +1735,7 @@ export async function generateVideoContent(
       productNote: params.productNote,
       analysisMode,
       businessCategory: params.businessCategory,
+      customNiche: params.customNiche,
     })
     return await generateVideoWithOpenAICompatible(
       mediaParts,
@@ -1712,6 +1756,7 @@ export async function generateVideoContent(
       productNote: params.productNote,
       analysisMode,
       businessCategory: params.businessCategory,
+      customNiche: params.customNiche,
     })
     try {
       return await generateVideoWithGemini(
