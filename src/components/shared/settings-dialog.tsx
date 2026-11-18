@@ -35,8 +35,10 @@ const PRESET_MODELS: Record<AIProvider, string[]> = {
   ],
   openrouter: [
     "google/gemma-3-27b-it:free",
+    "google/gemma-3-12b-it:free",
     "qwen/qwen2.5-vl-72b-instruct:free",
-    "meta-llama/llama-3.2-11b-vision-instruct:free",
+    "mistralai/mistral-small-3.1-24b-instruct:free",
+    "openrouter/free",
     "google/gemini-2.5-flash",
     "anthropic/claude-3.5-sonnet",
     "meta-llama/llama-3.1-405b-instruct",

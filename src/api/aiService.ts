@@ -5,6 +5,8 @@ export const GEMINI_VISION_MODEL = "gemini-2.5-flash"
 export const GEMINI_FALLBACK_MODEL = "gemini-3.5-flash-lite"
 export const QUOTA_EXCEEDED_MESSAGE =
   "Daily/minute API quota exceeded. Please switch model in Settings or wait a moment."
+export const OPENROUTER_BUSY_MESSAGE =
+  "OpenRouter free models are busy right now. Please try again in 30 seconds or switch to Gemini with VPN."
 
 export class ApiError extends Error {
   status: number
@@ -216,11 +218,101 @@ function mockGenerate(request: GenerateContentRequest): GeneratedContent {
   }
 }
 
-const OPENROUTER_FREE_VISION_MODELS = [
+const PREFERRED_OPENROUTER_FREE_VISION_MODELS = [
   "google/gemma-3-27b-it:free",
+  "google/gemma-3-12b-it:free",
   "qwen/qwen2.5-vl-72b-instruct:free",
-  "meta-llama/llama-3.2-11b-vision-instruct:free",
+  "mistralai/mistral-small-3.1-24b-instruct:free",
 ] as const
+
+const OPENROUTER_MODELS_CACHE_TTL_MS = 10 * 60 * 1000
+let openRouterFreeVisionCache: {
+  models: string[]
+  fetchedAt: number
+} | null = null
+let openRouterFreeVisionInFlight: Promise<string[]> | null = null
+
+interface OpenRouterModelEntry {
+  id?: unknown
+  architecture?: {
+    modality?: unknown
+    input_modalities?: unknown
+  }
+}
+
+function isFreeVisionModel(entry: OpenRouterModelEntry): entry is OpenRouterModelEntry & { id: string } {
+  if (typeof entry.id !== "string" || !entry.id.endsWith(":free")) {
+    return false
+  }
+  const inputModalities = entry.architecture?.input_modalities
+  if (
+    Array.isArray(inputModalities) &&
+    inputModalities.some((m) => typeof m === "string" && m.toLowerCase() === "image")
+  ) {
+    return true
+  }
+  const modality = entry.architecture?.modality
+  return typeof modality === "string" && modality.toLowerCase().includes("image")
+}
+
+function prioritizeOpenRouterVisionModels(models: string[]): string[] {
+  const unique = Array.from(new Set(models))
+  const preferredOrder = new Map<string, number>(
+    PREFERRED_OPENROUTER_FREE_VISION_MODELS.map((id, idx) => [id, idx])
+  )
+  return unique.sort((a, b) => {
+    const aRank = preferredOrder.get(a)
+    const bRank = preferredOrder.get(b)
+    if (aRank !== undefined && bRank !== undefined) return aRank - bRank
+    if (aRank !== undefined) return -1
+    if (bRank !== undefined) return 1
+    return 0
+  })
+}
+
+async function getActiveOpenRouterFreeVisionModels(): Promise<string[]> {
+  const now = Date.now()
+  if (
+    openRouterFreeVisionCache &&
+    now - openRouterFreeVisionCache.fetchedAt < OPENROUTER_MODELS_CACHE_TTL_MS
+  ) {
+    return openRouterFreeVisionCache.models
+  }
+
+  if (openRouterFreeVisionInFlight) {
+    return openRouterFreeVisionInFlight
+  }
+
+  openRouterFreeVisionInFlight = (async () => {
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/models", {
+        method: "GET",
+      })
+      if (!res.ok) {
+        throw new Error(`OpenRouter models fetch failed (${res.status})`)
+      }
+      const payload = (await res.json()) as { data?: OpenRouterModelEntry[] }
+      const discovered = Array.isArray(payload.data)
+        ? payload.data.filter(isFreeVisionModel).map((entry) => entry.id)
+        : []
+      const prioritized = prioritizeOpenRouterVisionModels(discovered)
+      if (prioritized.length > 0) {
+        openRouterFreeVisionCache = {
+          models: prioritized,
+          fetchedAt: Date.now(),
+        }
+        return prioritized
+      }
+    } catch (err) {
+      console.warn("Failed to discover live OpenRouter free vision models; using defaults.", err)
+    } finally {
+      openRouterFreeVisionInFlight = null
+    }
+    return [...PREFERRED_OPENROUTER_FREE_VISION_MODELS]
+  })()
+
+  return openRouterFreeVisionInFlight
+}
 
 function shouldFallbackOpenRouterModel(err: unknown): boolean {
   if (err instanceof ApiError) {
@@ -262,24 +354,44 @@ function resolveGroqVisionModel(model: string): string {
   return trimmed
 }
 
+function isRateLimitError(err: unknown): boolean {
+  if (err instanceof ApiError) {
+    return err.status === 429 || err.isQuotaExceeded
+  }
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase()
+    return msg.includes("429") || msg.includes("rate limit") || msg.includes("quota")
+  }
+  return false
+}
+
 async function callOpenRouterWithFallback<T>(
   primaryModel: string,
-  callFn: (model: string) => Promise<T>
+  callFn: (model: string) => Promise<T>,
+  options?: { isTextOnly?: boolean }
 ): Promise<T> {
   const normalizedPrimary = primaryModel.trim()
-  const modelsToTry =
+  const liveVisionModels = await getActiveOpenRouterFreeVisionModels()
+  const fallbackPool = options?.isTextOnly
+    ? [...liveVisionModels, "openrouter/free"]
+    : liveVisionModels
+
+  const rawCandidates =
     !normalizedPrimary || normalizedPrimary === "openrouter/auto"
-      ? [...OPENROUTER_FREE_VISION_MODELS]
-      : [
-          normalizedPrimary,
-          ...OPENROUTER_FREE_VISION_MODELS.filter((m) => m !== normalizedPrimary),
-        ]
+      ? fallbackPool
+      : [normalizedPrimary, ...fallbackPool]
+  const modelsToTry = Array.from(new Set(rawCandidates))
+
   let lastError: unknown
+  let sawRateLimit = false
   for (const candidateModel of modelsToTry) {
     try {
       return await callFn(candidateModel)
     } catch (err) {
       lastError = err
+      if (isRateLimitError(err)) {
+        sawRateLimit = true
+      }
       if (!shouldFallbackOpenRouterModel(err)) {
         throw err
       }
@@ -287,6 +399,9 @@ async function callOpenRouterWithFallback<T>(
         `OpenRouter model "${candidateModel}" failed (${err instanceof ApiError ? err.status : "error"}). Retrying with next free fallback model...`
       )
     }
+  }
+  if (sawRateLimit) {
+    throw new ApiError(429, OPENROUTER_BUSY_MESSAGE, true)
   }
   throw lastError
 }
@@ -469,7 +584,8 @@ export async function generateContent(
           return await callOpenRouterWithFallback(
             models.openrouter || DEFAULT_MODELS.openrouter,
             (candidateModel) =>
-              generateWithOpenAICompatible(request, "openrouter", apiKeys.openrouter, candidateModel)
+              generateWithOpenAICompatible(request, "openrouter", apiKeys.openrouter, candidateModel),
+            { isTextOnly: true }
           )
         }
         const isQuota =
@@ -494,7 +610,8 @@ export async function generateContent(
       return await callOpenRouterWithFallback(
         model || DEFAULT_MODELS.openrouter,
         (candidateModel) =>
-          generateWithOpenAICompatible(request, "openrouter", trimmedKey, candidateModel)
+          generateWithOpenAICompatible(request, "openrouter", trimmedKey, candidateModel),
+        { isTextOnly: true }
       )
     }
 
