@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   AlertCircle,
+  Calendar,
   Check,
   Copy,
   Film,
@@ -137,6 +138,14 @@ type VideoOutputTab = "hooks" | "voiceover" | "caption" | "cover"
 
 function extractHashtags(text: string): string[] {
   return [...text.matchAll(/#[^\s#]+/g)].map((match) => match[0].slice(1))
+}
+
+function getTodayIsoDate(): string {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, "0")
+  const day = String(now.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
 }
 
 function mapVideoPlatformToVaultPlatform(platform: string): string {
@@ -361,13 +370,34 @@ export function VideoToContentSection() {
   const handleSaveToVault = useCallback(() => {
     if (!result) return
     const combined = formatAllContent(result)
+    const tags = Array.from(new Set([...extractHashtags(result.caption), "video-script"]))
     saveToVault({
       title: result.coverTitle || productNote.trim() || videoFile?.name || "Video Script",
       content: combined,
       platform: mapVideoPlatformToVaultPlatform(platform),
-      tags: extractHashtags(result.caption),
+      tags,
     })
     toast.success(t(language, "generator.videoSavedVault"))
+  }, [result, formatAllContent, saveToVault, productNote, videoFile, platform, language])
+
+  const handleScheduleToCalendar = useCallback(() => {
+    if (!result) return
+    const combined = formatAllContent(result)
+    const todayIso = getTodayIsoDate()
+    const tags = Array.from(new Set([...extractHashtags(result.caption), "video-script"]))
+    saveToVault({
+      title: result.coverTitle || productNote.trim() || videoFile?.name || "Video Script",
+      content: combined,
+      platform: mapVideoPlatformToVaultPlatform(platform),
+      tags,
+      status: "scheduled",
+      scheduledDate: todayIso,
+    })
+    toast.success(
+      language === "my"
+        ? `ယနေ့ (${todayIso}) ပြက္ခဒိန်တွင် စီစဉ်ပြီးပါပြီ`
+        : `Scheduled to Calendar for Today (${todayIso})`
+    )
   }, [result, formatAllContent, saveToVault, productNote, videoFile, platform, language])
 
   const isGenerating = progressStage !== null
@@ -1038,15 +1068,27 @@ export function VideoToContentSection() {
                   </Button>
                 ))}
               </div>
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleSaveToVault}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border-0 h-8 text-xs font-myanmar"
-              >
-                <Save className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                {t(language, "generator.videoSaveVault")}
-              </Button>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleSaveToVault}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border-0 h-8 text-xs font-myanmar"
+                >
+                  <Save className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                  {t(language, "generator.videoSaveVault")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleScheduleToCalendar}
+                  className="w-full h-8 text-xs font-myanmar border-border/60"
+                >
+                  <Calendar className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                  {t(language, "vault.schedule")}
+                </Button>
+              </div>
             </div>
           </div>
         )}

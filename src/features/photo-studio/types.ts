@@ -14,6 +14,8 @@ export type BrandThemeId =
 
 export type SplitDirection = "side-by-side" | "top-bottom"
 
+export type PosterFontStyle = "modern_clean" | "bold_promo"
+
 export type ControlTabId =
   | "template"
   | "text_price"
@@ -131,6 +133,8 @@ export interface PosterState {
   reviewerName: string
   showShopFooter: boolean
   shopFooterText: string
+  showShopLogo: boolean
+  fontStyle: PosterFontStyle
   showCodBadge: boolean
   codBadgeText: string
 }

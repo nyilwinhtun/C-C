@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import {
+  Calendar,
   Camera,
   Copy,
   FileText,
@@ -81,6 +82,31 @@ import {
 
 function extractHashtags(text: string): string[] {
   return [...text.matchAll(/#[^\s#]+/g)].map((match) => match[0].slice(1))
+}
+
+function getTodayIsoDate(): string {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, "0")
+  const day = String(now.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function buildGeneratorVaultTags(
+  text: string,
+  contentType?: string,
+  salesAngle?: string
+): string[] {
+  const tags = extractHashtags(text)
+  if (contentType === "video_script" && !tags.includes("video-script")) {
+    tags.push("video-script")
+  } else if (contentType === "post_caption" && !tags.includes("caption")) {
+    tags.push("caption")
+  }
+  if (salesAngle === "flash_sale" && !tags.includes("promo")) {
+    tags.push("promo")
+  }
+  return Array.from(new Set(tags))
 }
 
 function cleanPosterLine(line: string): string {
@@ -606,14 +632,34 @@ export function GeneratorPage() {
 
   const handleSaveToVault = useCallback(() => {
     if (!result) return
+    const text = (displayedText || result.content).trim()
     saveToVault({
       title: result.topic,
-      content: result.content,
+      content: text,
       platform: result.platform,
-      tags: extractHashtags(result.content),
+      tags: buildGeneratorVaultTags(text, result.contentType, form.getValues("salesAngle")),
     })
     toast.success(t(language, "generator.saveSuccess"))
-  }, [result, saveToVault, language])
+  }, [result, displayedText, saveToVault, form, language])
+
+  const handleScheduleToCalendar = useCallback(() => {
+    if (!result) return
+    const text = (displayedText || result.content).trim()
+    const todayIso = getTodayIsoDate()
+    saveToVault({
+      title: result.topic,
+      content: text,
+      platform: result.platform,
+      tags: buildGeneratorVaultTags(text, result.contentType, form.getValues("salesAngle")),
+      status: "scheduled",
+      scheduledDate: todayIso,
+    })
+    toast.success(
+      language === "my"
+        ? `ယနေ့ (${todayIso}) ပြက္ခဒိန်တွင် စီစဉ်ပြီးပါပြီ`
+        : `Scheduled to Calendar for Today (${todayIso})`
+    )
+  }, [result, displayedText, saveToVault, form, language])
 
   const handleCreatePoster = useCallback(() => {
     const activeText = (displayedText || result?.content || "").trim()
@@ -1402,6 +1448,16 @@ export function GeneratorPage() {
                 >
                   <Save className="h-3 w-3 mr-1.5" aria-hidden="true" />
                   {t(language, "generator.saveToVault")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleScheduleToCalendar}
+                  disabled={!result || !contentToShow}
+                  className="border-border/60"
+                >
+                  <Calendar className="h-3 w-3 mr-1.5" aria-hidden="true" />
+                  {t(language, "vault.schedule")}
                 </Button>
               </div>
               <Button

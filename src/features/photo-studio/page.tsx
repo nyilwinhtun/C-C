@@ -34,6 +34,7 @@ import {
   type AspectRatioId,
   type BrandThemeId,
   type ControlTabId,
+  type PosterFontStyle,
   type PosterState,
   type PosterTemplateId,
 } from "./types"
@@ -91,17 +92,39 @@ function loadImageElement(src: string): Promise<HTMLImageElement> {
   })
 }
 
+async function compressLogoToDataUrl(file: File, maxDim = 240): Promise<string> {
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    const img = await loadImageElement(objectUrl)
+    const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight, 1))
+    const w = Math.max(1, Math.round(img.naturalWidth * scale))
+    const h = Math.max(1, Math.round(img.naturalHeight * scale))
+    const canvas = document.createElement("canvas")
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext("2d")
+    if (!ctx) throw new Error("Canvas context unavailable")
+    ctx.drawImage(img, 0, 0, w, h)
+    return canvas.toDataURL("image/png")
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
 export function PhotoStudioPage() {
   const language = useUIStore(useShallow((state) => state.language))
   const isMy = language === "my"
 
-  const { brandSignature, posterDraft, setPosterDraft } = useContentStore(
-    useShallow((state) => ({
-      brandSignature: state.brandSignature,
-      posterDraft: state.posterDraft,
-      setPosterDraft: state.setPosterDraft,
-    }))
-  )
+  const { brandSignature, posterDraft, setPosterDraft, shopLogoDataUrl, setShopLogoDataUrl } =
+    useContentStore(
+      useShallow((state) => ({
+        brandSignature: state.brandSignature,
+        posterDraft: state.posterDraft,
+        setPosterDraft: state.setPosterDraft,
+        shopLogoDataUrl: state.shopLogoDataUrl,
+        setShopLogoDataUrl: state.setShopLogoDataUrl,
+      }))
+    )
 
   const [activeTab, setActiveTab] = useState<ControlTabId>("template")
   const [hasCustomFooter, setHasCustomFooter] = useState(false)
@@ -125,6 +148,8 @@ export function PhotoStudioPage() {
     reviewerName: isMy ? "Su Myat • Yangon" : "Verified Buyer",
     showShopFooter: true,
     shopFooterText: brandSignature.trim() || "My Online Shop • Inbox to Order",
+    showShopLogo: true,
+    fontStyle: "modern_clean",
     showCodBadge: true,
     codBadgeText: "COD Available / အိမ်အရောက်ငွေချေ",
   }))
@@ -133,10 +158,12 @@ export function PhotoStudioPage() {
   const [secondaryDataUrl, setSecondaryDataUrl] = useState<string | null>(null)
   const [primaryImg, setPrimaryImg] = useState<HTMLImageElement | null>(null)
   const [secondaryImg, setSecondaryImg] = useState<HTMLImageElement | null>(null)
+  const [logoImg, setLogoImg] = useState<HTMLImageElement | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const primaryInputRef = useRef<HTMLInputElement | null>(null)
   const secondaryInputRef = useRef<HTMLInputElement | null>(null)
+  const logoInputRef = useRef<HTMLInputElement | null>(null)
 
   // Auto-sync saved brandSignature from Settings unless manually overridden
   useEffect(() => {
@@ -201,12 +228,31 @@ export function PhotoStudioPage() {
     }
   }, [secondaryDataUrl, isMy])
 
+  // Load persisted Shop Logo image
+  useEffect(() => {
+    if (!shopLogoDataUrl) {
+      setLogoImg(null)
+      return
+    }
+    let cancelled = false
+    loadImageElement(shopLogoDataUrl)
+      .then((img) => {
+        if (!cancelled) setLogoImg(img)
+      })
+      .catch(() => {
+        if (!cancelled) setLogoImg(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [shopLogoDataUrl])
+
   // Re-render HTML5 Canvas whenever poster state or images change
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    renderPosterCanvas(canvas, poster, primaryImg, secondaryImg)
-  }, [poster, primaryImg, secondaryImg])
+    renderPosterCanvas(canvas, poster, primaryImg, secondaryImg, logoImg)
+  }, [poster, primaryImg, secondaryImg, logoImg])
 
   const updatePoster = useCallback(
     <K extends keyof PosterState>(key: K, value: PosterState[K]) => {
@@ -234,12 +280,31 @@ export function PhotoStudioPage() {
     [isMy]
   )
 
+  const handleLogoFile = useCallback(
+    async (file: File | undefined) => {
+      if (!file) return
+      if (!file.type.startsWith("image/")) {
+        toast.error(isMy ? "ပုံဖိုင် (PNG/JPG/WEBP) သာ ရွေးချယ်ပါ" : "Please select a valid image file")
+        return
+      }
+      try {
+        const compressed = await compressLogoToDataUrl(file)
+        setShopLogoDataUrl(compressed)
+        updatePoster("showShopLogo", true)
+        toast.success(isMy ? "ဆိုင်လိုဂို ထည့်သွင်းပြီးပါပြီ" : "Shop logo saved")
+      } catch {
+        toast.error(isMy ? "လိုဂိုဖတ်၍မရပါ" : "Could not process logo image")
+      }
+    },
+    [isMy, setShopLogoDataUrl, updatePoster]
+  )
+
   const handleDownloadPng = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
     // Ensure canvas is freshly rendered at full resolution before export
-    renderPosterCanvas(canvas, poster, primaryImg, secondaryImg)
+    renderPosterCanvas(canvas, poster, primaryImg, secondaryImg, logoImg)
 
     const filename = `poster-${poster.template}-${poster.aspectRatio.replace(":", "x")}-${Date.now()}.png`
 
@@ -274,13 +339,13 @@ export function PhotoStudioPage() {
     }
 
     triggerLink(canvas.toDataURL("image/png"))
-  }, [poster, primaryImg, secondaryImg, isMy])
+  }, [poster, primaryImg, secondaryImg, logoImg, isMy])
 
   const handleSharePoster = useCallback(async () => {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    renderPosterCanvas(canvas, poster, primaryImg, secondaryImg)
+    renderPosterCanvas(canvas, poster, primaryImg, secondaryImg, logoImg)
     const filename = `poster-${poster.template}-${poster.aspectRatio.replace(":", "x")}-${Date.now()}.png`
 
     const blob = await new Promise<Blob | null>((resolve) => {
@@ -808,35 +873,70 @@ export function PhotoStudioPage() {
             )}
 
             {activeTab === "theme_color" && (
-              <div className="grid grid-cols-2 gap-2">
-                {(Object.keys(BRAND_THEMES) as BrandThemeId[]).map((themeId) => {
-                  const cfg = BRAND_THEMES[themeId]
-                  const selected = poster.theme === themeId
-                  return (
-                    <button
-                      key={themeId}
-                      type="button"
-                      onClick={() => updatePoster("theme", themeId)}
-                      className={cn(
-                        "flex items-center justify-between rounded-xl border p-2.5 text-left transition-all",
-                        selected
-                          ? "border-primary bg-primary/10 ring-1 ring-primary"
-                          : "border-border bg-background hover:bg-muted/60"
-                      )}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <span
-                          className="h-5 w-5 shrink-0 rounded-full border border-border shadow-sm"
-                          style={{ backgroundColor: cfg.swatch }}
-                        />
-                        <span className="text-xs font-semibold">
-                          {isMy ? cfg.nameMy : cfg.name}
-                        </span>
-                      </div>
-                      {selected && <Check className="h-3.5 w-3.5 text-primary" />}
-                    </button>
-                  )
-                })}
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  {(Object.keys(BRAND_THEMES) as BrandThemeId[]).map((themeId) => {
+                    const cfg = BRAND_THEMES[themeId]
+                    const selected = poster.theme === themeId
+                    return (
+                      <button
+                        key={themeId}
+                        type="button"
+                        onClick={() => updatePoster("theme", themeId)}
+                        className={cn(
+                          "flex items-center justify-between rounded-xl border p-2.5 text-left transition-all",
+                          selected
+                            ? "border-primary bg-primary/10 ring-1 ring-primary"
+                            : "border-border bg-background hover:bg-muted/60"
+                        )}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span
+                            className="h-5 w-5 shrink-0 rounded-full border border-border shadow-sm"
+                            style={{ backgroundColor: cfg.swatch }}
+                          />
+                          <span className="text-xs font-semibold">
+                            {isMy ? cfg.nameMy : cfg.name}
+                          </span>
+                        </div>
+                        {selected && <Check className="h-3.5 w-3.5 text-primary" />}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <div className="border-t border-border pt-3 space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">
+                    {isMy ? "စာလုံးဒီဇိုင်း" : "Typography Style"}
+                  </Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(
+                      [
+                        { id: "modern_clean", label: "Modern Clean", labelMy: "Modern Clean" },
+                        { id: "bold_promo", label: "Bold Promo", labelMy: "Bold Promo" },
+                      ] as { id: PosterFontStyle; label: string; labelMy: string }[]
+                    ).map((style) => {
+                      const active = poster.fontStyle === style.id
+                      return (
+                        <button
+                          key={style.id}
+                          type="button"
+                          onClick={() => updatePoster("fontStyle", style.id)}
+                          className={cn(
+                            "flex items-center justify-between rounded-xl border px-3 py-2 text-xs transition-all",
+                            style.id === "bold_promo" ? "font-black tracking-tight" : "font-semibold",
+                            active
+                              ? "border-primary bg-primary/10 text-primary ring-1 ring-primary"
+                              : "border-border bg-background hover:bg-muted/60"
+                          )}
+                        >
+                          <span>{isMy ? style.labelMy : style.label}</span>
+                          {active && <Check className="h-3.5 w-3.5 shrink-0" />}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -919,6 +1019,84 @@ export function PhotoStudioPage() {
                       className="h-9 text-sm"
                       aria-label="COD Badge Text"
                     />
+                  )}
+                </div>
+
+                <div className="border-t border-border pt-2.5 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => updatePoster("showShopLogo", !poster.showShopLogo)}
+                      disabled={!shopLogoDataUrl}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50",
+                        poster.showShopLogo && shopLogoDataUrl
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border text-muted-foreground"
+                      )}
+                    >
+                      <ImagePlus className="h-3.5 w-3.5" />
+                      {isMy ? "ဆိုင်လိုဂို Watermark" : "Shop Logo Watermark"}
+                    </button>
+
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        ref={logoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          void handleLogoFile(e.target.files?.[0])
+                          e.target.value = ""
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1.5 text-xs"
+                        onClick={() => logoInputRef.current?.click()}
+                      >
+                        <ImagePlus className="h-3.5 w-3.5" />
+                        {shopLogoDataUrl
+                          ? isMy
+                            ? "ပြောင်းမည်"
+                            : "Change"
+                          : isMy
+                            ? "လိုဂိုတင်မည်"
+                            : "Upload Logo"}
+                      </Button>
+                      {shopLogoDataUrl && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2 text-xs text-destructive hover:text-destructive"
+                          onClick={() => setShopLogoDataUrl(null)}
+                          title={isMy ? "လိုဂိုဖျက်မည်" : "Remove logo"}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  {shopLogoDataUrl && (
+                    <div className="flex items-center gap-2.5 rounded-lg border border-border/60 bg-muted/20 p-2">
+                      <img
+                        src={shopLogoDataUrl}
+                        alt="Shop Logo"
+                        className="h-9 w-9 rounded-md object-contain bg-white p-0.5 border border-border/40"
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {poster.showShopLogo
+                          ? isMy
+                            ? "Poster ထောင့်/အောက်ခြေတွင် အလိုအလျောက်ပြနေပါသည်"
+                            : "Rendered automatically on your poster"
+                          : isMy
+                            ? "လိုဂိုပိတ်ထားပါသည်"
+                            : "Logo watermark hidden"}
+                      </span>
+                    </div>
                   )}
                 </div>
               </div>

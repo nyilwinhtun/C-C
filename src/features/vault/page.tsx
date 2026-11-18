@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { Calendar, Copy, FolderKanban, Pencil, Plus, Sparkles, Trash2 } from "lucide-react"
+import { Calendar, Copy, FolderKanban, Pencil, Plus, Sparkles, Trash2, Wand2 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
 import type { SavedVaultItem } from "@/store/useContentStore"
@@ -37,6 +37,39 @@ const PLATFORMS: { value: "facebook" | "tiktok" | "youtube" | "instagram"; label
 ]
 
 type PlatformFilter = "all" | "facebook" | "tiktok" | "youtube" | "instagram"
+type TagFilter = "all" | "promo" | "video_script" | "caption"
+
+function matchesTagFilter(item: SavedVaultItem, filter: TagFilter): boolean {
+  if (filter === "all") return true
+  const tagsLower = item.tags.map((tag) => tag.toLowerCase())
+  const haystack = `${item.title} ${item.content} ${tagsLower.join(" ")}`.toLowerCase()
+
+  if (filter === "promo") {
+    return (
+      tagsLower.some((tag) =>
+        ["promo", "flashsale", "sale", "discount", "specialoffer", "offer"].includes(tag)
+      ) || /flash\s*sale|promo|discount|%\s*off|လျှော့ဈေး/i.test(haystack)
+    )
+  }
+
+  if (filter === "video_script") {
+    return (
+      tagsLower.some((tag) =>
+        ["video-script", "videoscript", "video", "reel", "reels", "script", "tiktok", "shorts"].includes(tag)
+      ) || /video\s*script|\[visual|voiceover|hook\s*:/i.test(haystack)
+    )
+  }
+
+  if (filter === "caption") {
+    return (
+      tagsLower.some((tag) =>
+        ["caption", "post_caption", "post", "newarrival", "review", "collection", "launch"].includes(tag)
+      ) || !matchesTagFilter(item, "video_script")
+    )
+  }
+
+  return true
+}
 
 function getTodayIsoDate(): string {
   const now = new Date()
@@ -47,25 +80,32 @@ function getTodayIsoDate(): string {
 }
 
 export function VaultPage() {
-  const { language } = useUIStore(useShallow((state) => ({ language: state.language })))
+  const { language, setActivePageKey } = useUIStore(
+    useShallow((state) => ({
+      language: state.language,
+      setActivePageKey: state.setActivePageKey,
+    }))
+  )
   const STATUS_LABEL: Record<string, string> = {
     idea: t(language, "vault.statusIdea"),
     draft: t(language, "vault.statusDraft"),
     scheduled: t(language, "vault.statusScheduled"),
     posted: t(language, "vault.statusPosted"),
   }
-  const { savedVault, saveToVault, updateVaultItem, deleteVaultItem } =
+  const { savedVault, saveToVault, updateVaultItem, deleteVaultItem, setDraftInput } =
     useContentStore(
       useShallow((state) => ({
         savedVault: state.savedVault,
         saveToVault: state.saveToVault,
         updateVaultItem: state.updateVaultItem,
         deleteVaultItem: state.deleteVaultItem,
+        setDraftInput: state.setDraftInput,
       }))
     )
 
   const [search, setSearch] = useState("")
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>("all")
+  const [tagFilter, setTagFilter] = useState<TagFilter>("all")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<SavedVaultItem | null>(null)
   const [scheduleDates, setScheduleDates] = useState<Record<string, string>>({})
@@ -81,7 +121,8 @@ export function VaultPage() {
     const matchesSearch = text.includes(search.toLowerCase())
     const matchesPlatform =
       platformFilter === "all" || item.platform === platformFilter
-    return matchesSearch && matchesPlatform
+    const matchesTag = matchesTagFilter(item, tagFilter)
+    return matchesSearch && matchesPlatform && matchesTag
   })
 
   const openCreateDialog = useCallback(() => {
@@ -179,6 +220,35 @@ export function VaultPage() {
       toast.success(t(language, "vault.deleteSuccess"))
     },
     [deleteVaultItem, language]
+  )
+
+  const handleUseInGenerator = useCallback(
+    (item: SavedVaultItem) => {
+      const validPlatform = PLATFORMS.some((p) => p.value === item.platform)
+        ? (item.platform as "facebook" | "tiktok" | "youtube" | "instagram")
+        : "instagram"
+      const isVideo = matchesTagFilter(item, "video_script")
+      const isPromo = matchesTagFilter(item, "promo")
+      const topicText = item.content.trim()
+        ? item.content.trim().toLowerCase().startsWith(item.title.trim().toLowerCase())
+          ? item.content.trim()
+          : `${item.title.trim()}\n\n${item.content.trim()}`
+        : item.title.trim()
+
+      setDraftInput({
+        topic: topicText,
+        platform: validPlatform,
+        contentType: isVideo ? "video_script" : "post_caption",
+        salesAngle: isPromo ? "flash_sale" : undefined,
+      })
+      setActivePageKey("generator")
+      toast.success(
+        language === "my"
+          ? "AI Generator ထဲသို့ ထည့်သွင်းပြီးပါပြီ"
+          : "Loaded into AI Generator"
+      )
+    },
+    [language, setActivePageKey, setDraftInput]
   )
 
 
@@ -361,17 +431,46 @@ export function VaultPage() {
         </div>
       </div>
 
-      <Tabs
-        value={platformFilter}
-        onValueChange={(value) => setPlatformFilter(value as PlatformFilter)}
-      >
-        <TabsList className="flex-wrap h-auto max-w-full justify-start">
-          <TabsTrigger value="all">{t(language, "vault.filterPlatform")}</TabsTrigger>
-          {PLATFORMS.map((p) => (
-            <TabsTrigger key={p.value} value={p.value}>{p.label}</TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <Tabs
+          value={platformFilter}
+          onValueChange={(value) => setPlatformFilter(value as PlatformFilter)}
+        >
+          <TabsList className="flex-wrap h-auto max-w-full justify-start">
+            <TabsTrigger value="all">{t(language, "vault.filterPlatform")}</TabsTrigger>
+            {PLATFORMS.map((p) => (
+              <TabsTrigger key={p.value} value={p.value}>{p.label}</TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(
+            [
+              { id: "all", label: language === "my" ? "အားလုံး" : "All" },
+              { id: "promo", label: language === "my" ? "ပရိုမိုးရှင်း" : "Promo" },
+              { id: "video_script", label: language === "my" ? "ဗီဒီယို Script" : "Video Script" },
+              { id: "caption", label: language === "my" ? "Caption" : "Caption" },
+            ] as { id: TagFilter; label: string }[]
+          ).map((pill) => {
+            const active = tagFilter === pill.id
+            return (
+              <button
+                key={pill.id}
+                type="button"
+                onClick={() => setTagFilter(pill.id)}
+                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                  active
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border/70 bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+                }`}
+              >
+                {pill.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
 
       {filteredItems.length === 0 ? (
         <Card className="max-w-2xl">
@@ -451,6 +550,14 @@ export function VaultPage() {
                 )}
               </CardContent>
               <CardFooter className="flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => handleUseInGenerator(item)}
+                  className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-0"
+                >
+                  <Wand2 className="h-3 w-3 mr-1.5" aria-hidden="true" />
+                  {language === "my" ? "Generator တွင်သုံးမည်" : "Use in Generator"}
+                </Button>
                 <Button variant="outline" size="sm" onClick={() => handleCopy(item.content)}>
                   <Copy className="h-3 w-3 mr-1.5" aria-hidden="true" />
                   {t(language, "vault.copy")}

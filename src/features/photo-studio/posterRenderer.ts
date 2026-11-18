@@ -2,6 +2,22 @@ import { BRAND_THEMES, type BrandThemeConfig, type PosterState } from "./types"
 
 const FONT_STACK =
   '"Pyidaungsu", "Padauk", "Noto Sans Myanmar", "Inter", system-ui, -apple-system, sans-serif'
+const FONT_STACK_BOLD =
+  '"Pyidaungsu", "Padauk", "Noto Sans Myanmar", "Arial Black", "Montserrat", "Inter", system-ui, sans-serif'
+
+function getTitleFont(state: PosterState, baseSize: number): string {
+  if (state.fontStyle === "bold_promo") {
+    return `900 ${baseSize + 4}px ${FONT_STACK_BOLD}`
+  }
+  return `700 ${baseSize}px ${FONT_STACK}`
+}
+
+function getBodyFont(state: PosterState, baseWeight: number, baseSize: number): string {
+  if (state.fontStyle === "bold_promo") {
+    return `${Math.min(900, baseWeight + 100)} ${baseSize}px ${FONT_STACK_BOLD}`
+  }
+  return `${baseWeight} ${baseSize}px ${FONT_STACK}`
+}
 
 function roundRectPath(
   ctx: CanvasRenderingContext2D,
@@ -200,7 +216,8 @@ function drawShopFooter(
   state: PosterState,
   theme: BrandThemeConfig,
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  hasLogo = false
 ): number {
   if (!state.showShopFooter) return 0
   const footerText = state.shopFooterText.trim()
@@ -214,14 +231,76 @@ function drawShopFooter(
   ctx.fillRect(0, y, canvasWidth, footerH)
 
   ctx.fillStyle = theme.footerText
-  ctx.font = `600 25px ${FONT_STACK}`
+  ctx.font = getBodyFont(state, 600, 25)
   ctx.textAlign = "center"
   ctx.textBaseline = "middle"
-  const lines = wrapTextLines(ctx, footerText, canvasWidth - 80, 1)
+  const lines = wrapTextLines(ctx, footerText, canvasWidth - (hasLogo ? 220 : 80), 1)
   ctx.fillText(lines[0] || footerText, canvasWidth / 2, y + footerH / 2)
   ctx.restore()
 
   return footerH
+}
+
+function drawShopLogoWatermark(
+  ctx: CanvasRenderingContext2D,
+  logoImg: HTMLImageElement,
+  canvasWidth: number,
+  canvasHeight: number,
+  footerH: number
+) {
+  const padding = 6
+  ctx.save()
+
+  if (footerH > 0) {
+    const size = 56
+    const x = 36
+    const y = canvasHeight - footerH + (footerH - size) / 2
+    roundRectPath(ctx, x, y, size, size, 12)
+    ctx.fillStyle = "rgba(255,255,255,0.92)"
+    ctx.fill()
+    drawImageContain(ctx, logoImg, x + padding, y + padding, size - padding * 2, size - padding * 2)
+  } else {
+    const size = 76
+    const margin = 36
+    const x = canvasWidth - margin - size
+    const y = canvasHeight - margin - size
+    ctx.shadowColor = "rgba(0,0,0,0.18)"
+    ctx.shadowBlur = 14
+    ctx.shadowOffsetY = 4
+    roundRectPath(ctx, x, y, size, size, 16)
+    ctx.fillStyle = "rgba(255,255,255,0.9)"
+    ctx.fill()
+    ctx.shadowColor = "transparent"
+    drawImageContain(ctx, logoImg, x + padding, y + padding, size - padding * 2, size - padding * 2)
+  }
+
+  ctx.restore()
+}
+
+function drawImageContain(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+) {
+  const imgRatio = img.naturalWidth / Math.max(1, img.naturalHeight)
+  const boxRatio = w / Math.max(1, h)
+  let drawW = w
+  let drawH = h
+  let drawX = x
+  let drawY = y
+  if (imgRatio > boxRatio) {
+    drawW = w
+    drawH = w / imgRatio
+    drawY = y + (h - drawH) / 2
+  } else {
+    drawH = h
+    drawW = h * imgRatio
+    drawX = x + (w - drawW) / 2
+  }
+  ctx.drawImage(img, drawX, drawY, drawW, drawH)
 }
 
 function drawBackground(
@@ -303,7 +382,7 @@ function renderSpotlight(
 
   const textMaxW = state.priceTag.trim() ? imgW - 310 : imgW - 64
   ctx.fillStyle = theme.text
-  ctx.font = `800 42px ${FONT_STACK}`
+  ctx.font = getTitleFont(state, 42)
   ctx.textAlign = "left"
   ctx.textBaseline = "top"
   const titleLines = wrapTextLines(
@@ -318,7 +397,7 @@ function renderSpotlight(
 
   if (state.subtitle.trim()) {
     ctx.fillStyle = theme.mutedText
-    ctx.font = `500 26px ${FONT_STACK}`
+    ctx.font = getBodyFont(state, 500, 26)
     const subY = cardY + 30 + Math.max(1, titleLines.length) * 50 + 8
     const subLines = wrapTextLines(ctx, state.subtitle, textMaxW, 1)
     if (subLines[0]) {
@@ -398,7 +477,7 @@ function renderFlashSale(
   ctx.stroke()
 
   ctx.fillStyle = theme.text
-  ctx.font = `800 40px ${FONT_STACK}`
+  ctx.font = getTitleFont(state, 40)
   ctx.textAlign = "left"
   ctx.textBaseline = "top"
   const titleLines = wrapTextLines(
@@ -693,7 +772,8 @@ export function renderPosterCanvas(
   canvas: HTMLCanvasElement,
   state: PosterState,
   primaryImg: HTMLImageElement | null,
-  secondaryImg: HTMLImageElement | null
+  secondaryImg: HTMLImageElement | null,
+  logoImg: HTMLImageElement | null = null
 ) {
   const width = 1080
   const height = state.aspectRatio === "4:5" ? 1350 : 1080
@@ -709,7 +789,8 @@ export function renderPosterCanvas(
   const theme = BRAND_THEMES[state.theme]
   drawBackground(ctx, theme, width, height)
 
-  const footerH = drawShopFooter(ctx, state, theme, width, height)
+  const shouldDrawLogo = Boolean(state.showShopLogo && logoImg)
+  const footerH = drawShopFooter(ctx, state, theme, width, height, shouldDrawLogo)
 
   switch (state.template) {
     case "spotlight":
@@ -733,6 +814,10 @@ export function renderPosterCanvas(
     case "review":
       renderReviewCard(ctx, state, theme, primaryImg, width, height, footerH)
       break
+  }
+
+  if (shouldDrawLogo && logoImg) {
+    drawShopLogoWatermark(ctx, logoImg, width, height, footerH)
   }
 }
 

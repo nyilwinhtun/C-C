@@ -24,6 +24,14 @@ import { Select, SelectItem } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 
 const PLATFORMS = [
   { value: "facebook", label: "Facebook" },
@@ -76,6 +84,7 @@ export function PlannerPage() {
   const [scheduleDates, setScheduleDates] = useState<Record<string, string>>({})
   const [dateFilter, setDateFilter] = useState("")
   const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [previewItemId, setPreviewItemId] = useState<string | null>(null)
   const [newPostDate, setNewPostDate] = useState(todayIso)
   const [newPostTitle, setNewPostTitle] = useState("")
   const [newPostPlatform, setNewPostPlatform] = useState("facebook")
@@ -84,6 +93,7 @@ export function PlannerPage() {
 
   const scheduledItems = savedVault.filter((item) => Boolean(item.scheduledDate))
   const unscheduledItems = savedVault.filter((item) => !item.scheduledDate)
+  const previewItem = scheduledItems.find((item) => item.id === previewItemId) ?? null
 
   const visibleScheduledItems = dateFilter
     ? scheduledItems.filter((item) => item.scheduledDate === dateFilter)
@@ -278,7 +288,8 @@ export function PlannerPage() {
                         return (
                           <Card
                             key={item.id}
-                            className="border bg-background p-3 hover:bg-accent/30 transition-colors"
+                            onClick={() => setPreviewItemId(item.id)}
+                            className="border bg-background p-3 hover:bg-accent/30 transition-colors cursor-pointer"
                           >
                             <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                               <div className="min-w-0 flex-1">
@@ -294,7 +305,10 @@ export function PlannerPage() {
                                   {item.content}
                                 </p>
                               </div>
-                              <div className="flex flex-wrap items-center gap-1.5">
+                              <div
+                                className="flex flex-wrap items-center gap-1.5"
+                                onClick={(e) => e.stopPropagation()}
+                              >
                                 <button
                                   type="button"
                                   onClick={() => handleTogglePosted(item)}
@@ -486,6 +500,94 @@ export function PlannerPage() {
           </form>
         </DialogContent>
       </Dialog>
+      <Sheet
+        open={Boolean(previewItem)}
+        onOpenChange={(open) => {
+          if (!open) setPreviewItemId(null)
+        }}
+        side="right"
+        className="w-full sm:max-w-md"
+      >
+        {previewItem && (
+          <SheetContent className="border-b-0 gap-4 overflow-y-auto">
+            <SheetHeader className="items-start gap-3 border-b border-border/60 pb-3">
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge variant="outline" className="capitalize text-xs">
+                    {previewItem.platform}
+                  </Badge>
+                  {previewItem.scheduledDate && (
+                    <span className="text-xs text-muted-foreground">
+                      {formatDateLabel(previewItem.scheduledDate, language)} ({previewItem.scheduledDate})
+                    </span>
+                  )}
+                </div>
+                <SheetTitle className="text-base leading-snug break-words">
+                  {previewItem.title}
+                </SheetTitle>
+                <SheetDescription className="sr-only">
+                  {t(language, "planner.desc")}
+                </SheetDescription>
+              </div>
+              <SheetClose onClick={() => setPreviewItemId(null)} aria-label="Close" />
+            </SheetHeader>
+
+            <div className="flex-1 overflow-y-auto space-y-4">
+              <div className="rounded-xl border border-border/60 bg-muted/20 p-3.5 text-sm leading-relaxed whitespace-pre-wrap break-words">
+                {previewItem.content}
+              </div>
+
+              {previewItem.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {previewItem.tags.map((tag) => (
+                    <Badge key={tag} variant="secondary" className="text-xs">
+                      #{tag}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-border/60 pt-3 flex flex-col gap-2">
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={previewItem.status === "posted" ? "outline" : "default"}
+                  size="sm"
+                  onClick={() => handleTogglePosted(previewItem)}
+                  className={
+                    previewItem.status === "posted"
+                      ? "border-emerald-600/40 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-600/20"
+                      : ""
+                  }
+                >
+                  {previewItem.status === "posted" ? (
+                    <>
+                      <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                      {language === "my" ? "တင်ပြီး (Posted)" : "Posted"}
+                    </>
+                  ) : (
+                    <>
+                      <Circle className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                      {language === "my" ? "စီစဉ်ထား (Planned)" : "Planned"}
+                    </>
+                  )}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleCopy(previewItem.content)}
+                >
+                  <Copy className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                  {language === "my" ? "Copy Post" : "Copy Post"}
+                </Button>
+              </div>
+            </div>
+          </SheetContent>
+        )}
+      </Sheet>
     </div>
   )
 }

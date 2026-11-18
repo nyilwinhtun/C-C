@@ -51,6 +51,7 @@ interface ContentState {
   brandSignature: string
   businessCategory: BusinessCategory
   autoAppendShopCta: boolean
+  shopLogoDataUrl: string | null
   posterDraft: PosterDraft | null
   uploadedVideoFile: File | null
   videoPreviewUrl: string | null
@@ -62,6 +63,7 @@ interface ContentState {
   setBrandSignature: (signature: string) => void
   setBusinessCategory: (category: BusinessCategory) => void
   setAutoAppendShopCta: (enabled: boolean) => void
+  setShopLogoDataUrl: (dataUrl: string | null) => void
   setPosterDraft: (draft: PosterDraft | null) => void
   setUploadedVideo: (file: File | null, previewUrl: string | null) => void
   setVideoProductNote: (note: string) => void
@@ -99,6 +101,7 @@ export const useContentStore = create<ContentState>()(
       brandSignature: "",
       businessCategory: "general",
       autoAppendShopCta: true,
+      shopLogoDataUrl: null,
       posterDraft: null,
       uploadedVideoFile: null,
       videoPreviewUrl: null,
@@ -128,6 +131,7 @@ export const useContentStore = create<ContentState>()(
       setBrandSignature: (brandSignature) => set({ brandSignature }),
       setBusinessCategory: (businessCategory) => set({ businessCategory }),
       setAutoAppendShopCta: (autoAppendShopCta) => set({ autoAppendShopCta }),
+      setShopLogoDataUrl: (shopLogoDataUrl) => set({ shopLogoDataUrl }),
       setPosterDraft: (posterDraft) => set({ posterDraft }),
       setUploadedVideo: (file, previewUrl) =>
         set((state) => {
@@ -267,6 +271,7 @@ export const useContentStore = create<ContentState>()(
         brandSignature: state.brandSignature ?? "",
         businessCategory: state.businessCategory ?? "general",
         autoAppendShopCta: state.autoAppendShopCta ?? true,
+        shopLogoDataUrl: state.shopLogoDataUrl ?? null,
       }),
     }
   )
