@@ -1,4 +1,4 @@
-import { useUIStore } from "@/store/useUIStore"
+import { DEFAULT_MODELS, useUIStore } from "@/store/useUIStore"
 
 export const GEMINI_MODEL = "gemini-3.5-flash-lite"
 export const GEMINI_VISION_MODEL = "gemini-2.5-flash"
@@ -263,37 +263,42 @@ async function callOpenRouterWithFallback<T>(
   throw lastError
 }
 
+function isLocationUnsupportedError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    err.message.toLowerCase().includes("user location is not supported") &&
+    (err instanceof ApiError ? err.status === 400 : true)
+  )
+}
+
 function getAiConfig() {
-  const {
-    aiProvider,
-    aiModel,
-    geminiApiKey,
-    openrouterApiKey,
-    groqApiKey,
-  } = useUIStore.getState()
+  const { aiProvider, apiKeys, models } = useUIStore.getState()
   const envGeminiKey =
     (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ?? ""
   const envOpenRouterKey =
     (import.meta.env.VITE_OPENROUTER_API_KEY as string | undefined)?.trim() ?? ""
 
-  const resolvedGeminiKey = geminiApiKey.trim() || envGeminiKey
-  const resolvedOpenRouterKey = openrouterApiKey.trim() || envOpenRouterKey
-  const resolvedGroqKey = groqApiKey.trim()
+  const resolvedApiKeys = {
+    gemini: apiKeys.gemini.trim() || envGeminiKey,
+    openrouter: apiKeys.openrouter.trim() || envOpenRouterKey,
+    groq: apiKeys.groq.trim(),
+  }
 
-  const apiKey =
-    aiProvider === "gemini"
-      ? resolvedGeminiKey
-      : aiProvider === "openrouter"
-        ? resolvedOpenRouterKey
-        : resolvedGroqKey
+  const rawModel = models[aiProvider]?.trim() || ""
+  const resolvedModel =
+    aiProvider === "gemini" && rawModel === "gemini-2.5-flash-lite"
+      ? GEMINI_FALLBACK_MODEL
+      : rawModel || DEFAULT_MODELS[aiProvider]
 
   return {
     provider: aiProvider,
-    apiKey,
-    geminiApiKey: resolvedGeminiKey,
-    openrouterApiKey: resolvedOpenRouterKey,
-    groqApiKey: resolvedGroqKey,
-    model: aiModel === "gemini-2.5-flash-lite" ? GEMINI_FALLBACK_MODEL : aiModel,
+    apiKey: resolvedApiKeys[aiProvider],
+    apiKeys: resolvedApiKeys,
+    model: resolvedModel,
+    models: {
+      ...models,
+      [aiProvider]: resolvedModel,
+    },
   }
 }
 
@@ -417,7 +422,7 @@ async function generateWithOpenAICompatible(
 export async function generateContent(
   request: GenerateContentRequest
 ): Promise<GeneratedContent> {
-  const { provider, apiKey, geminiApiKey, model } = getAiConfig()
+  const { provider, apiKey, apiKeys, model, models } = getAiConfig()
   const trimmedKey = apiKey.trim()
 
   if (!trimmedKey) {
@@ -431,6 +436,14 @@ export async function generateContent(
       try {
         return await generateWithGemini(request, trimmedKey, primaryModel)
       } catch (err) {
+        if (isLocationUnsupportedError(err) && apiKeys.openrouter) {
+          console.warn("Gemini location unsupported. Falling back to OpenRouter...")
+          return await callOpenRouterWithFallback(
+            models.openrouter || "openrouter/auto",
+            (candidateModel) =>
+              generateWithOpenAICompatible(request, "openrouter", apiKeys.openrouter, candidateModel)
+          )
+        }
         const isQuota =
           (err instanceof ApiError && err.isQuotaExceeded) ||
           (err instanceof Error &&
@@ -455,16 +468,16 @@ export async function generateContent(
           generateWithOpenAICompatible(request, "openrouter", trimmedKey, candidateModel)
         )
       } catch (err) {
-        if (geminiApiKey) {
+        if (apiKeys.gemini) {
           console.warn("OpenRouter failed. Falling back to direct Google Gemini API...")
           try {
-            return await generateWithGemini(request, geminiApiKey, GEMINI_MODEL)
+            return await generateWithGemini(request, apiKeys.gemini, GEMINI_MODEL)
           } catch (geminiErr) {
             const isQuota =
               (geminiErr instanceof ApiError && geminiErr.isQuotaExceeded) ||
               (geminiErr instanceof Error && geminiErr.message.includes("429"))
             if (isQuota && GEMINI_MODEL !== GEMINI_FALLBACK_MODEL) {
-              return await generateWithGemini(request, geminiApiKey, GEMINI_FALLBACK_MODEL)
+              return await generateWithGemini(request, apiKeys.gemini, GEMINI_FALLBACK_MODEL)
             }
             throw geminiErr
           }
@@ -733,7 +746,7 @@ async function suggestPhotoWithOpenAICompatible(
 export async function suggestFromPhoto(
   request: PhotoSuggestionRequest
 ): Promise<PhotoSuggestionResult> {
-  const { provider, apiKey, geminiApiKey, model } = getAiConfig()
+  const { provider, apiKey, apiKeys, model, models } = getAiConfig()
   const trimmedKey = apiKey.trim()
 
   if (!trimmedKey) {
@@ -845,6 +858,14 @@ export async function suggestFromPhoto(
     try {
       return await suggestPhotoWithGemini(request, trimmedKey, primaryModel)
     } catch (err) {
+      if (isLocationUnsupportedError(err) && apiKeys.openrouter) {
+        console.warn("Gemini location unsupported for vision. Falling back to OpenRouter...")
+        return await callOpenRouterWithFallback(
+          models.openrouter || "openrouter/auto",
+          (candidateModel) =>
+            suggestPhotoWithOpenAICompatible(request, "openrouter", apiKeys.openrouter, candidateModel)
+        )
+      }
       const isQuota =
         (err instanceof ApiError && err.isQuotaExceeded) ||
         (err instanceof Error &&
@@ -866,16 +887,16 @@ export async function suggestFromPhoto(
         suggestPhotoWithOpenAICompatible(request, "openrouter", trimmedKey, candidateModel)
       )
     } catch (err) {
-      if (geminiApiKey) {
+      if (apiKeys.gemini) {
         console.warn("OpenRouter vision failed. Falling back to direct Google Gemini API...")
         try {
-          return await suggestPhotoWithGemini(request, geminiApiKey, GEMINI_VISION_MODEL)
+          return await suggestPhotoWithGemini(request, apiKeys.gemini, GEMINI_VISION_MODEL)
         } catch (geminiErr) {
           const isQuota =
             (geminiErr instanceof ApiError && geminiErr.isQuotaExceeded) ||
             (geminiErr instanceof Error && geminiErr.message.includes("429"))
           if (isQuota || (geminiErr instanceof ApiError && geminiErr.status === 404)) {
-            return await suggestPhotoWithGemini(request, geminiApiKey, GEMINI_FALLBACK_MODEL)
+            return await suggestPhotoWithGemini(request, apiKeys.gemini, GEMINI_FALLBACK_MODEL)
           }
           throw geminiErr
         }
@@ -1355,9 +1376,9 @@ async function extractKeyframeMedia(params: GenerateVideoContentParams): Promise
 export async function generateVideoContent(
   params: GenerateVideoContentParams
 ): Promise<VideoContentResult> {
-  const { provider, geminiApiKey, openrouterApiKey } = getAiConfig()
-  const openRouterKey = openrouterApiKey.trim()
-  const geminiKey = geminiApiKey.trim()
+  const { provider, apiKeys } = getAiConfig()
+  const openRouterKey = apiKeys.openrouter.trim()
+  const geminiKey = apiKeys.gemini.trim()
   const useOpenRouterDirectly = provider === "openrouter"
 
   const isDirectMode =
@@ -1479,12 +1500,7 @@ export async function generateVideoContent(
   try {
     return await runDirectGemini()
   } catch (err) {
-    const isLocationUnsupported =
-      err instanceof Error &&
-      err.message.toLowerCase().includes("user location is not supported") &&
-      (err instanceof ApiError ? err.status === 400 : true)
-
-    if (isLocationUnsupported && openRouterKey) {
+    if (isLocationUnsupportedError(err) && openRouterKey) {
       console.warn(
         "Gemini location unsupported (400). Routing video analysis through OpenRouter..."
       )

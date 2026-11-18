@@ -4,6 +4,7 @@ import { persist } from "zustand/middleware"
 export type Theme = "light" | "dark"
 export type Language = "en" | "my"
 export type AIProvider = "gemini" | "groq" | "openrouter"
+export type ProviderMap = Record<AIProvider, string>
 
 export interface UIState {
   theme: Theme
@@ -20,19 +21,13 @@ export interface UIState {
   session: string | null
   setAuth: (user: { id: string; email: string } | null, session: string | null) => void
   signOut: () => void
-  // BYOK (Bring Your Own Key)
+  // BYOK (Bring Your Own Key) — isolated per provider
   aiProvider: AIProvider
-  aiApiKey: string
-  geminiApiKey: string
-  openrouterApiKey: string
-  groqApiKey: string
-  aiModel: string
+  apiKeys: ProviderMap
+  models: ProviderMap
   setAIProvider: (provider: AIProvider) => void
-  setAIApiKey: (apiKey: string) => void
-  setGeminiApiKey: (apiKey: string) => void
-  setOpenrouterApiKey: (apiKey: string) => void
-  setGroqApiKey: (apiKey: string) => void
-  setAIModel: (model: string) => void
+  setProviderApiKey: (provider: AIProvider, apiKey: string) => void
+  setProviderModel: (provider: AIProvider, model: string) => void
 }
 
 const ENV_GEMINI_API_KEY =
@@ -40,10 +35,28 @@ const ENV_GEMINI_API_KEY =
 const ENV_OPENROUTER_API_KEY =
   (import.meta.env.VITE_OPENROUTER_API_KEY as string | undefined)?.trim() ?? ""
 
-const PROVIDER_STORAGE_KEYS: Record<AIProvider, string> = {
+export const API_KEY_STORAGE_KEYS: Record<AIProvider, string> = {
+  gemini: "cc_api_key_gemini",
+  openrouter: "cc_api_key_openrouter",
+  groq: "cc_api_key_groq",
+}
+
+const LEGACY_API_KEY_STORAGE_KEYS: Record<AIProvider, string> = {
   gemini: "gemini_api_key",
   openrouter: "openrouter_api_key",
   groq: "groq_api_key",
+}
+
+export const MODEL_STORAGE_KEYS: Record<AIProvider, string> = {
+  gemini: "cc_model_gemini",
+  openrouter: "cc_model_openrouter",
+  groq: "cc_model_groq",
+}
+
+export const DEFAULT_MODELS: ProviderMap = {
+  gemini: "gemini-3.5-flash-lite",
+  groq: "llama-3.3-70b-versatile",
+  openrouter: "openrouter/auto",
 }
 
 function readLocalKey(storageKey: string): string {
@@ -69,26 +82,42 @@ function writeLocalKey(storageKey: string, value: string): void {
   }
 }
 
-function getKeyForProvider(
-  provider: AIProvider,
-  keys: { geminiApiKey: string; openrouterApiKey: string; groqApiKey: string }
-): string {
-  if (provider === "gemini") return keys.geminiApiKey
-  if (provider === "openrouter") return keys.openrouterApiKey
-  return keys.groqApiKey
-}
-
-const DEFAULT_MODELS: Record<AIProvider, string> = {
-  gemini: "gemini-3.5-flash-lite",
-  groq: "llama-3.3-70b-versatile",
-  openrouter: "openrouter/auto",
-}
-
-function migrateGeminiModel(model: string | undefined, provider: AIProvider): string {
-  if (!model || model === "gemini-2.5-flash-lite") {
-    return provider === "gemini" ? "gemini-3.5-flash-lite" : DEFAULT_MODELS[provider]
+function migrateGeminiModel(model: string | undefined): string {
+  if (!model || !model.trim() || model.trim() === "gemini-2.5-flash-lite") {
+    return DEFAULT_MODELS.gemini
   }
-  return model
+  return model.trim()
+}
+
+function resolveInitialApiKey(provider: AIProvider): string {
+  const current = readLocalKey(API_KEY_STORAGE_KEYS[provider])
+  if (current) return current
+
+  const legacy = readLocalKey(LEGACY_API_KEY_STORAGE_KEYS[provider])
+  if (legacy) {
+    writeLocalKey(API_KEY_STORAGE_KEYS[provider], legacy)
+    return legacy
+  }
+
+  if (provider === "gemini") return ENV_GEMINI_API_KEY
+  if (provider === "openrouter") return ENV_OPENROUTER_API_KEY
+  return ""
+}
+
+function resolveInitialModel(provider: AIProvider): string {
+  const stored = readLocalKey(MODEL_STORAGE_KEYS[provider])
+  if (provider === "gemini") {
+    return migrateGeminiModel(stored)
+  }
+  return stored || DEFAULT_MODELS[provider]
+}
+
+interface LegacyPersistedUIState extends Partial<UIState> {
+  aiApiKey?: string
+  geminiApiKey?: string
+  openrouterApiKey?: string
+  groqApiKey?: string
+  aiModel?: string
 }
 
 export const useUIStore = create<UIState>()(
@@ -111,57 +140,39 @@ export const useUIStore = create<UIState>()(
       signOut: () => set({ user: null, session: null }),
       // BYOK
       aiProvider: "gemini",
-      aiApiKey: readLocalKey(PROVIDER_STORAGE_KEYS.gemini) || ENV_GEMINI_API_KEY,
-      geminiApiKey: readLocalKey(PROVIDER_STORAGE_KEYS.gemini) || ENV_GEMINI_API_KEY,
-      openrouterApiKey: readLocalKey(PROVIDER_STORAGE_KEYS.openrouter) || ENV_OPENROUTER_API_KEY,
-      groqApiKey: readLocalKey(PROVIDER_STORAGE_KEYS.groq),
-      aiModel: DEFAULT_MODELS.gemini,
-      setAIProvider: (provider) =>
-        set((state) => ({
-          aiProvider: provider,
-          aiModel: DEFAULT_MODELS[provider],
-          aiApiKey: getKeyForProvider(provider, state),
-        })),
-      setAIApiKey: (apiKey) =>
+      apiKeys: {
+        gemini: resolveInitialApiKey("gemini"),
+        openrouter: resolveInitialApiKey("openrouter"),
+        groq: resolveInitialApiKey("groq"),
+      },
+      models: {
+        gemini: resolveInitialModel("gemini"),
+        openrouter: resolveInitialModel("openrouter"),
+        groq: resolveInitialModel("groq"),
+      },
+      setAIProvider: (provider) => set({ aiProvider: provider }),
+      setProviderApiKey: (provider, apiKey) =>
         set((state) => {
           const trimmed = apiKey.trim()
-          writeLocalKey(PROVIDER_STORAGE_KEYS[state.aiProvider], trimmed)
-          if (state.aiProvider === "gemini") {
-            return { geminiApiKey: trimmed, aiApiKey: trimmed }
-          }
-          if (state.aiProvider === "openrouter") {
-            return { openrouterApiKey: trimmed, aiApiKey: trimmed }
-          }
-          return { groqApiKey: trimmed, aiApiKey: trimmed }
-        }),
-      setGeminiApiKey: (apiKey) =>
-        set((state) => {
-          const trimmed = apiKey.trim()
-          writeLocalKey(PROVIDER_STORAGE_KEYS.gemini, trimmed)
+          writeLocalKey(API_KEY_STORAGE_KEYS[provider], trimmed)
           return {
-            geminiApiKey: trimmed,
-            aiApiKey: state.aiProvider === "gemini" ? trimmed : state.aiApiKey,
+            apiKeys: {
+              ...state.apiKeys,
+              [provider]: trimmed,
+            },
           }
         }),
-      setOpenrouterApiKey: (apiKey) =>
+      setProviderModel: (provider, model) =>
         set((state) => {
-          const trimmed = apiKey.trim()
-          writeLocalKey(PROVIDER_STORAGE_KEYS.openrouter, trimmed)
+          const trimmed = model.trim() || DEFAULT_MODELS[provider]
+          writeLocalKey(MODEL_STORAGE_KEYS[provider], trimmed)
           return {
-            openrouterApiKey: trimmed,
-            aiApiKey: state.aiProvider === "openrouter" ? trimmed : state.aiApiKey,
+            models: {
+              ...state.models,
+              [provider]: trimmed,
+            },
           }
         }),
-      setGroqApiKey: (apiKey) =>
-        set((state) => {
-          const trimmed = apiKey.trim()
-          writeLocalKey(PROVIDER_STORAGE_KEYS.groq, trimmed)
-          return {
-            groqApiKey: trimmed,
-            aiApiKey: state.aiProvider === "groq" ? trimmed : state.aiApiKey,
-          }
-        }),
-      setAIModel: (model) => set({ aiModel: model }),
     }),
     {
       name: "content-creator-ui",
@@ -170,73 +181,96 @@ export const useUIStore = create<UIState>()(
         sidebarCollapsed: state.sidebarCollapsed ?? false,
         language: state.language ?? "en",
         aiProvider: state.aiProvider ?? "gemini",
-        aiModel: migrateGeminiModel(state.aiModel, state.aiProvider ?? "gemini"),
+        models: {
+          gemini: migrateGeminiModel(state.models?.gemini),
+          openrouter: state.models?.openrouter?.trim() || DEFAULT_MODELS.openrouter,
+          groq: state.models?.groq?.trim() || DEFAULT_MODELS.groq,
+        },
       }),
       merge: (persistedState, currentState) => {
-        const persisted = (persistedState ?? {}) as Partial<UIState>
+        const persisted = (persistedState ?? {}) as LegacyPersistedUIState
         const provider = persisted.aiProvider ?? currentState.aiProvider
 
-        let geminiApiKey =
-          readLocalKey(PROVIDER_STORAGE_KEYS.gemini) ||
-          persisted.geminiApiKey?.trim() ||
-          ""
-        let openrouterApiKey =
-          readLocalKey(PROVIDER_STORAGE_KEYS.openrouter) ||
-          persisted.openrouterApiKey?.trim() ||
-          ""
-        let groqApiKey =
-          readLocalKey(PROVIDER_STORAGE_KEYS.groq) ||
-          persisted.groqApiKey?.trim() ||
-          ""
+        const pickKey = (p: AIProvider, legacyField?: string): string => {
+          const fromNewStorage = readLocalKey(API_KEY_STORAGE_KEYS[p])
+          if (fromNewStorage) return fromNewStorage
 
-        // One-time migration from legacy single aiApiKey field if separate keys are empty
-        const legacyKey = persisted.aiApiKey?.trim() ?? ""
-        if (legacyKey) {
-          if (legacyKey.startsWith("sk-or-") && !openrouterApiKey) {
-            openrouterApiKey = legacyKey
-            writeLocalKey(PROVIDER_STORAGE_KEYS.openrouter, legacyKey)
-          } else if (legacyKey.startsWith("gsk_") && !groqApiKey) {
-            groqApiKey = legacyKey
-            writeLocalKey(PROVIDER_STORAGE_KEYS.groq, legacyKey)
-          } else if (provider === "gemini" && !geminiApiKey) {
-            geminiApiKey = legacyKey
-            writeLocalKey(PROVIDER_STORAGE_KEYS.gemini, legacyKey)
-          } else if (provider === "openrouter" && !openrouterApiKey) {
-            openrouterApiKey = legacyKey
-            writeLocalKey(PROVIDER_STORAGE_KEYS.openrouter, legacyKey)
-          } else if (provider === "groq" && !groqApiKey) {
-            groqApiKey = legacyKey
-            writeLocalKey(PROVIDER_STORAGE_KEYS.groq, legacyKey)
+          const fromLegacyStorage = readLocalKey(LEGACY_API_KEY_STORAGE_KEYS[p])
+          if (fromLegacyStorage) {
+            writeLocalKey(API_KEY_STORAGE_KEYS[p], fromLegacyStorage)
+            return fromLegacyStorage
+          }
+
+          const fromPersistedMap = persisted.apiKeys?.[p]?.trim() ?? ""
+          if (fromPersistedMap) {
+            writeLocalKey(API_KEY_STORAGE_KEYS[p], fromPersistedMap)
+            return fromPersistedMap
+          }
+
+          const fromLegacyField = legacyField?.trim() ?? ""
+          if (fromLegacyField) {
+            writeLocalKey(API_KEY_STORAGE_KEYS[p], fromLegacyField)
+            return fromLegacyField
+          }
+
+          return ""
+        }
+
+        const apiKeys: ProviderMap = {
+          gemini: pickKey("gemini", persisted.geminiApiKey),
+          openrouter: pickKey("openrouter", persisted.openrouterApiKey),
+          groq: pickKey("groq", persisted.groqApiKey),
+        }
+
+        // One-time migration from legacy single aiApiKey field if target slot is empty
+        const legacySingleKey = persisted.aiApiKey?.trim() ?? ""
+        if (legacySingleKey) {
+          if (legacySingleKey.startsWith("sk-or-") && !apiKeys.openrouter) {
+            apiKeys.openrouter = legacySingleKey
+            writeLocalKey(API_KEY_STORAGE_KEYS.openrouter, legacySingleKey)
+          } else if (legacySingleKey.startsWith("gsk_") && !apiKeys.groq) {
+            apiKeys.groq = legacySingleKey
+            writeLocalKey(API_KEY_STORAGE_KEYS.groq, legacySingleKey)
+          } else if (!apiKeys[provider]) {
+            apiKeys[provider] = legacySingleKey
+            writeLocalKey(API_KEY_STORAGE_KEYS[provider], legacySingleKey)
           }
         }
 
-        if (!geminiApiKey && ENV_GEMINI_API_KEY) {
-          geminiApiKey = ENV_GEMINI_API_KEY
+        if (!apiKeys.gemini && ENV_GEMINI_API_KEY) {
+          apiKeys.gemini = ENV_GEMINI_API_KEY
         }
-        if (!openrouterApiKey && ENV_OPENROUTER_API_KEY) {
-          openrouterApiKey = ENV_OPENROUTER_API_KEY
+        if (!apiKeys.openrouter && ENV_OPENROUTER_API_KEY) {
+          apiKeys.openrouter = ENV_OPENROUTER_API_KEY
         }
 
-        const aiApiKey = getKeyForProvider(provider, {
-          geminiApiKey,
-          openrouterApiKey,
-          groqApiKey,
-        })
+        const pickModel = (p: AIProvider): string => {
+          const fromStorage = readLocalKey(MODEL_STORAGE_KEYS[p])
+          const fromPersistedMap = persisted.models?.[p]?.trim() ?? ""
+          const fromLegacySingle = p === provider ? (persisted.aiModel?.trim() ?? "") : ""
+          const raw = fromStorage || fromPersistedMap || fromLegacySingle || DEFAULT_MODELS[p]
+          const resolved = p === "gemini" ? migrateGeminiModel(raw) : raw
+          writeLocalKey(MODEL_STORAGE_KEYS[p], resolved)
+          return resolved
+        }
+
+        const models: ProviderMap = {
+          gemini: pickModel("gemini"),
+          openrouter: pickModel("openrouter"),
+          groq: pickModel("groq"),
+        }
 
         return {
           ...currentState,
           ...persisted,
           aiProvider: provider,
-          aiApiKey,
-          geminiApiKey,
-          openrouterApiKey,
-          groqApiKey,
-          aiModel: migrateGeminiModel(persisted.aiModel, provider),
+          apiKeys,
+          models,
         }
       },
       onRehydrateStorage: () => (state) => {
-        if (state && state.aiModel === "gemini-2.5-flash-lite") {
-          state.setAIModel("gemini-3.5-flash-lite")
+        if (state && state.models?.gemini === "gemini-2.5-flash-lite") {
+          state.setProviderModel("gemini", DEFAULT_MODELS.gemini)
         }
       },
     }

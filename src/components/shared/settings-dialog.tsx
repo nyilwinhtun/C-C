@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { t } from "@/locales/translations"
-import { useUIStore } from "@/store/useUIStore"
+import { useUIStore, DEFAULT_MODELS, type AIProvider } from "@/store/useUIStore"
 import { useContentStore, type ContentBackupData } from "@/store/useContentStore"
 import { useShallow } from "zustand/react/shallow"
 import { Download, Eye, EyeOff, Link, ShieldAlert, Upload } from "lucide-react"
@@ -21,8 +21,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 
-type AIProvider = "gemini" | "groq" | "openrouter"
-
 const PRESET_MODELS: Record<AIProvider, string[]> = {
   gemini: [
     "gemini-3.5-flash-lite",
@@ -37,6 +35,8 @@ const PRESET_MODELS: Record<AIProvider, string[]> = {
   ],
   openrouter: [
     "openrouter/auto",
+    "google/gemma-3-27b-it:free",
+    "google/gemini-2.5-flash",
     "anthropic/claude-3.5-sonnet",
     "meta-llama/llama-3.1-405b-instruct",
   ],
@@ -49,22 +49,28 @@ interface SettingsDialogProps {
 
 const PROVIDER_INFO: Record<
   AIProvider,
-  { label: string; link: string; linkLabel: string }
+  { label: string; shortLabel: string; link: string; linkLabel: string; placeholder: string }
 > = {
   gemini: {
     label: "Google Gemini",
+    shortLabel: "Gemini",
     link: "https://makersuite.google.com/app/apikey",
     linkLabel: "Get free Gemini API key",
+    placeholder: "AIza...",
   },
   groq: {
     label: "Groq",
+    shortLabel: "Groq",
     link: "https://console.groq.com/keys",
     linkLabel: "Get free Groq API key",
+    placeholder: "gsk_...",
   },
   openrouter: {
     label: "OpenRouter",
+    shortLabel: "OpenRouter",
     link: "https://openrouter.ai/keys",
     linkLabel: "Get free OpenRouter API key",
+    placeholder: "sk-or-v1-...",
   },
 }
 
@@ -72,28 +78,20 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const {
     language,
     aiProvider,
-    geminiApiKey,
-    openrouterApiKey,
-    groqApiKey,
-    aiModel,
+    apiKeys,
+    models,
     setAIProvider,
-    setGeminiApiKey,
-    setOpenrouterApiKey,
-    setGroqApiKey,
-    setAIModel,
+    setProviderApiKey,
+    setProviderModel,
   } = useUIStore(
     useShallow((state) => ({
       language: state.language,
       aiProvider: state.aiProvider,
-      geminiApiKey: state.geminiApiKey,
-      openrouterApiKey: state.openrouterApiKey,
-      groqApiKey: state.groqApiKey,
-      aiModel: state.aiModel,
+      apiKeys: state.apiKeys,
+      models: state.models,
       setAIProvider: state.setAIProvider,
-      setGeminiApiKey: state.setGeminiApiKey,
-      setOpenrouterApiKey: state.setOpenrouterApiKey,
-      setGroqApiKey: state.setGroqApiKey,
-      setAIModel: state.setAIModel,
+      setProviderApiKey: state.setProviderApiKey,
+      setProviderModel: state.setProviderModel,
     }))
   )
 
@@ -108,37 +106,41 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       }))
     )
 
-  const [geminiKey, setGeminiKey] = useState(geminiApiKey)
-  const [openrouterKey, setOpenrouterKey] = useState(openrouterApiKey)
-  const [groqKey, setGroqKey] = useState(groqApiKey)
+  const [selectedProvider, setSelectedProvider] = useState<AIProvider>(aiProvider)
+  const [apiKeyInput, setApiKeyInput] = useState(apiKeys[aiProvider] ?? "")
+  const [modelInput, setModelInput] = useState(models[aiProvider] || DEFAULT_MODELS[aiProvider])
   const [signature, setSignature] = useState(brandSignature)
-  const [showKeys, setShowKeys] = useState<Record<AIProvider, boolean>>({
-    gemini: false,
-    openrouter: false,
-    groq: false,
-  })
+  const [showKey, setShowKey] = useState(false)
   const [loading, setLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
-  const currentPresets = PRESET_MODELS[aiProvider]
-  const isPreset = currentPresets.includes(aiModel)
-  const [isCustomMode, setIsCustomMode] = useState(!isPreset && Boolean(aiModel))
+  const currentPresets = PRESET_MODELS[selectedProvider]
+  const isPreset = currentPresets.includes(modelInput)
+  const [isCustomMode, setIsCustomMode] = useState(!isPreset && Boolean(modelInput))
 
   useEffect(() => {
     if (open) {
-      setGeminiKey(geminiApiKey)
-      setOpenrouterKey(openrouterApiKey)
-      setGroqKey(groqApiKey)
+      const initialKey = apiKeys[aiProvider] ?? ""
+      const initialModel = models[aiProvider] || DEFAULT_MODELS[aiProvider]
+      setSelectedProvider(aiProvider)
+      setApiKeyInput(initialKey)
+      setModelInput(initialModel)
       setSignature(brandSignature)
-      setIsCustomMode(!PRESET_MODELS[aiProvider].includes(aiModel) && Boolean(aiModel))
+      setShowKey(false)
+      setIsCustomMode(!PRESET_MODELS[aiProvider].includes(initialModel) && Boolean(initialModel))
     }
-    // Only re-sync local form state when the dialog opens or persisted keys change
+    // Only re-sync local form state when the dialog opens
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, geminiApiKey, openrouterApiKey, groqApiKey, brandSignature])
+  }, [open])
 
   const handleProviderChange = (provider: AIProvider) => {
-    setAIProvider(provider)
-    setIsCustomMode(false)
+    setSelectedProvider(provider)
+    const providerKey = apiKeys[provider] ?? ""
+    const providerModel = models[provider] || DEFAULT_MODELS[provider]
+    setApiKeyInput(providerKey)
+    setModelInput(providerModel)
+    setShowKey(false)
+    setIsCustomMode(!PRESET_MODELS[provider].includes(providerModel) && Boolean(providerModel))
   }
 
   const handleModelSelect = (val: string) => {
@@ -146,11 +148,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       setIsCustomMode(true)
     } else {
       setIsCustomMode(false)
-      setAIModel(val)
+      setModelInput(val)
     }
   }
 
-  const selectedModelValue = isCustomMode ? "custom" : isPreset ? aiModel : "custom"
+  const selectedModelValue = isCustomMode ? "custom" : isPreset ? modelInput : "custom"
 
   const handleExportBackup = () => {
     const payload: ContentBackupData = {
@@ -218,54 +220,53 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <div className="space-y-2">
             <label className="text-sm font-medium">{t(language, "settings.aiProvider")}</label>
             <Select
-              value={aiProvider}
+              value={selectedProvider}
               onChange={(e) => handleProviderChange((e.target as HTMLSelectElement).value as AIProvider)}
             >
               <option value="gemini">Google Gemini</option>
-              <option value="groq">Groq</option>
               <option value="openrouter">OpenRouter</option>
+              <option value="groq">Groq</option>
             </Select>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground pt-0.5">
+              {(["gemini", "openrouter", "groq"] as const).map((p, idx) => {
+                const isSaved = Boolean(apiKeys[p]?.trim())
+                return (
+                  <span key={p} className="inline-flex items-center gap-1">
+                    {idx > 0 && <span aria-hidden="true" className="mr-1 opacity-50">•</span>}
+                    <span className="font-medium text-foreground/80">
+                      {PROVIDER_INFO[p].shortLabel}:
+                    </span>
+                    <span
+                      className={
+                        isSaved
+                          ? "text-emerald-600 dark:text-emerald-400 font-medium"
+                          : "text-muted-foreground"
+                      }
+                    >
+                      {isSaved ? "Saved ✓" : "Empty"}
+                    </span>
+                  </span>
+                )
+              })}
+            </div>
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">{t(language, "settings.model")}</label>
             <Select value={selectedModelValue} onChange={(e) => handleModelSelect((e.target as HTMLSelectElement).value)}>
-              {aiProvider === "gemini" ? (
-                <>
-                  <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
-                  <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                  <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-                  <option value="gemini-1.5-pro">gemini-1.5-pro</option>
-                  <option value="custom">Custom model...</option>
-                </>
-              ) : aiProvider === "groq" ? (
-                <>
-                  <option value="llama-3.3-70b-versatile">
-                    llama-3.3-70b-versatile
-                  </option>
-                  <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
-                  <option value="mixtral-8x7b-32768">mixtral-8x7b-32768</option>
-                  <option value="custom">Custom model...</option>
-                </>
-              ) : (
-                <>
-                  <option value="openrouter/auto">openrouter/auto</option>
-                  <option value="anthropic/claude-3.5-sonnet">
-                    anthropic/claude-3.5-sonnet
-                  </option>
-                  <option value="meta-llama/llama-3.1-405b-instruct">
-                    meta-llama/llama-3.1-405b-instruct
-                  </option>
-                  <option value="custom">Custom model...</option>
-                </>
-              )}
+              {currentPresets.map((preset) => (
+                <option key={preset} value={preset}>
+                  {preset}
+                </option>
+              ))}
+              <option value="custom">Custom model...</option>
             </Select>
             {(isCustomMode || !isPreset) && (
               <Input
                 type="text"
-                value={aiModel}
-                onChange={(e) => setAIModel(e.target.value)}
+                value={modelInput}
+                onChange={(e) => setModelInput(e.target.value)}
                 placeholder={
-                  aiProvider === "gemini"
+                  selectedProvider === "gemini"
                     ? "Enter model (e.g. gemini-3.5-flash-lite)"
                     : "Enter custom model name"
                 }
@@ -273,44 +274,20 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               />
             )}
           </div>
-          <div className="space-y-3">
-            {(
-              [
-                {
-                  id: "gemini" as const,
-                  value: geminiKey,
-                  setter: setGeminiKey,
-                  saved: Boolean(geminiApiKey),
-                  placeholder: "AIza...",
-                },
-                {
-                  id: "openrouter" as const,
-                  value: openrouterKey,
-                  setter: setOpenrouterKey,
-                  saved: Boolean(openrouterApiKey),
-                  placeholder: "sk-or-v1-...",
-                },
-                {
-                  id: "groq" as const,
-                  value: groqKey,
-                  setter: setGroqKey,
-                  saved: Boolean(groqApiKey),
-                  placeholder: "gsk_...",
-                },
-              ] as const
-            ).map((field) => {
-              const info = PROVIDER_INFO[field.id]
-              const isShown = showKeys[field.id]
+          <div className="space-y-1.5">
+            {(() => {
+              const info = PROVIDER_INFO[selectedProvider]
+              const isSaved = Boolean(apiKeys[selectedProvider]?.trim())
               return (
-                <div key={field.id} className="space-y-1.5">
+                <>
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <label htmlFor={`api-key-${field.id}`} className="text-sm font-medium">
+                      <label htmlFor={`api-key-${selectedProvider}`} className="text-sm font-medium">
                         {info.label} {t(language, "settings.apiKey")}
                       </label>
-                      {field.saved && (
+                      {isSaved && (
                         <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                          ••••
+                          Saved ✓
                         </span>
                       )}
                     </div>
@@ -326,34 +303,30 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   </div>
                   <div className="flex items-center gap-1.5">
                     <Input
-                      id={`api-key-${field.id}`}
-                      type={isShown ? "text" : "password"}
-                      value={field.value}
-                      onChange={(e) => field.setter(e.target.value)}
-                      placeholder={
-                        field.saved ? "••••" : `${t(language, "settings.apiKeyPlaceholder")} (${field.placeholder})`
-                      }
+                      id={`api-key-${selectedProvider}`}
+                      type={showKey ? "text" : "password"}
+                      value={apiKeyInput}
+                      onChange={(e) => setApiKeyInput(e.target.value)}
+                      placeholder={`${t(language, "settings.apiKeyPlaceholder")} (${info.placeholder})`}
                       disabled={loading}
                     />
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
-                      onClick={() =>
-                        setShowKeys((prev) => ({ ...prev, [field.id]: !prev[field.id] }))
-                      }
-                      aria-label={isShown ? `Hide ${info.label} key` : `Show ${info.label} key`}
+                      onClick={() => setShowKey((prev) => !prev)}
+                      aria-label={showKey ? `Hide ${info.label} key` : `Show ${info.label} key`}
                     >
-                      {isShown ? (
+                      {showKey ? (
                         <EyeOff className="h-4 w-4" aria-hidden="true" />
                       ) : (
                         <Eye className="h-4 w-4" aria-hidden="true" />
                       )}
                     </Button>
                   </div>
-                </div>
+                </>
               )
-            })}
+            })()}
           </div>
           <div className="space-y-1 pt-2 border-t border-border">
             <div className="flex items-start gap-2 text-xs text-muted-foreground">
@@ -428,9 +401,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </Button>
             <Button
               onClick={() => {
-                setGeminiApiKey(geminiKey.trim())
-                setOpenrouterApiKey(openrouterKey.trim())
-                setGroqApiKey(groqKey.trim())
+                const normalizedModel = modelInput.trim() || DEFAULT_MODELS[selectedProvider]
+                setAIProvider(selectedProvider)
+                setProviderApiKey(selectedProvider, apiKeyInput.trim())
+                setProviderModel(selectedProvider, normalizedModel)
                 setBrandSignature(signature)
                 setLoading(true)
                 setTimeout(() => {
@@ -441,9 +415,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               }}
               disabled={
                 loading ||
-                (geminiKey.trim() === geminiApiKey &&
-                  openrouterKey.trim() === openrouterApiKey &&
-                  groqKey.trim() === groqApiKey &&
+                (selectedProvider === aiProvider &&
+                  apiKeyInput.trim() === (apiKeys[selectedProvider] ?? "") &&
+                  (modelInput.trim() || DEFAULT_MODELS[selectedProvider]) ===
+                    (models[selectedProvider] || DEFAULT_MODELS[selectedProvider]) &&
                   signature === brandSignature)
               }
             >
