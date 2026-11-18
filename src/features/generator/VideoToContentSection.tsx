@@ -30,6 +30,10 @@ import {
 } from "@/api/aiService"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
+import {
+  DEFAULT_ONLINE_SHOP_CTA_EN,
+  DEFAULT_ONLINE_SHOP_CTA_MY,
+} from "@/types"
 import { t } from "@/locales/translations"
 
 import { Badge } from "@/components/ui/badge"
@@ -146,6 +150,8 @@ export function VideoToContentSection() {
   const language = useUIStore((state) => state.language)
   const saveToVault = useContentStore((state) => state.saveToVault)
   const brandSignature = useContentStore((state) => state.brandSignature)
+  const businessCategory = useContentStore((state) => state.businessCategory)
+  const autoAppendShopCta = useContentStore((state) => state.autoAppendShopCta)
 
   const resultRef = useRef<HTMLDivElement | null>(null)
   const prevLanguageRef = useRef(language)
@@ -273,15 +279,30 @@ export function VideoToContentSection() {
         platform,
         language: outputLanguage,
         brandSignature,
+        businessCategory,
         onProgress: (stage) => setProgressStage(stage),
       })
-      setResult(generated)
+      const ctaText =
+        outputLanguage === "en"
+          ? DEFAULT_ONLINE_SHOP_CTA_EN
+          : DEFAULT_ONLINE_SHOP_CTA_MY
+      const finalCaption =
+        autoAppendShopCta &&
+        generated.caption &&
+        !generated.caption.includes(ctaText)
+          ? `${generated.caption.trimEnd()}\n\n${ctaText}`
+          : generated.caption
+      const finalResult: VideoContentResult = {
+        ...generated,
+        caption: finalCaption,
+      }
+      setResult(finalResult)
       const defaultTab: VideoOutputTab =
-        generated.hooks.length > 0
+        finalResult.hooks.length > 0
           ? "hooks"
-          : generated.voiceoverScript
+          : finalResult.voiceoverScript
             ? "voiceover"
-            : generated.caption
+            : finalResult.caption
               ? "caption"
               : "cover"
       setActiveTab(defaultTab)
@@ -303,7 +324,7 @@ export function VideoToContentSection() {
     } finally {
       setProgressStage(null)
     }
-  }, [videoFile, progressStage, productNote, platform, outputLanguage, brandSignature, language])
+  }, [videoFile, progressStage, productNote, platform, outputLanguage, brandSignature, businessCategory, autoAppendShopCta, language])
 
   const copyText = useCallback(
     async (key: string, text: string) => {
@@ -408,8 +429,8 @@ export function VideoToContentSection() {
               : "border-border/60 shadow-sm"
           }
         >
-          <CardHeader className="pb-4 border-b border-border/60 flex flex-row items-start justify-between gap-3 space-y-0">
-            <CardDescription className="leading-[1.85]">
+          <CardHeader className="py-3 px-4 sm:py-4 sm:px-5 border-b border-border/60 flex flex-row items-start justify-between gap-3 space-y-0">
+            <CardDescription className="text-xs sm:text-sm leading-relaxed">
               {t(language, "generator.videoDesc")}
             </CardDescription>
             {hasDraft && (
@@ -426,7 +447,7 @@ export function VideoToContentSection() {
               </Button>
             )}
           </CardHeader>
-          <CardContent className="grid gap-4 p-4 sm:p-6">
+          <CardContent className="grid gap-3 p-3.5 sm:p-5">
             {errorMessage && (
               <div
                 role="alert"
@@ -976,26 +997,59 @@ export function VideoToContentSection() {
               </Card>
             )}
 
-            <div className="sticky bottom-20 z-20 lg:static flex items-center gap-2 rounded-xl border border-border/60 bg-card/95 backdrop-blur-md p-2 shadow-lg lg:border-0 lg:bg-transparent lg:backdrop-blur-none lg:p-0 lg:shadow-none">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => copyText("all", formatAllContent(result))}
-                className="flex-1 border-border/60 bg-background/80 h-9"
-              >
-                {copiedKey === "all" ? (
-                  <Check className="h-3.5 w-3.5 mr-1.5 text-emerald-500" aria-hidden="true" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                )}
-                {t(language, "generator.videoCopyAll")}
-              </Button>
+            <div className="sticky bottom-16 sm:bottom-20 z-20 lg:static flex flex-col gap-1.5 rounded-xl border border-border/60 bg-card/95 backdrop-blur-md p-2 shadow-lg lg:border-0 lg:bg-transparent lg:backdrop-blur-none lg:p-0 lg:shadow-none">
+              <div className="grid grid-cols-4 gap-1.5 w-full">
+                {(
+                  [
+                    {
+                      key: "quick-hook",
+                      label: t(language, "generator.copyHook"),
+                      value: result.hooks[0] ?? "",
+                    },
+                    {
+                      key: "quick-script",
+                      label: t(language, "generator.copyScript"),
+                      value: result.voiceoverScript,
+                    },
+                    {
+                      key: "quick-caption",
+                      label: t(language, "generator.copyCaption"),
+                      value: result.caption,
+                    },
+                    {
+                      key: "all",
+                      label: t(language, "generator.copyAll"),
+                      value: formatAllContent(result),
+                    },
+                  ] as const
+                ).map((item) => (
+                  <Button
+                    key={item.key}
+                    type="button"
+                    variant={item.key === "all" ? "default" : "outline"}
+                    size="sm"
+                    disabled={!item.value}
+                    onClick={() => copyText(item.key, item.value)}
+                    className={`h-8 px-1.5 text-[11px] font-medium font-myanmar truncate ${
+                      item.key === "all"
+                        ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-0"
+                        : "border-border/60 bg-background/80"
+                    }`}
+                  >
+                    {copiedKey === item.key ? (
+                      <Check className="h-3 w-3 mr-1 shrink-0 text-emerald-400" aria-hidden="true" />
+                    ) : (
+                      <Copy className="h-3 w-3 mr-1 shrink-0" aria-hidden="true" />
+                    )}
+                    <span className="truncate">{item.label}</span>
+                  </Button>
+                ))}
+              </div>
               <Button
                 type="button"
                 size="sm"
                 onClick={handleSaveToVault}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white border-0 h-9"
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border-0 h-8 text-xs font-myanmar"
               >
                 <Save className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
                 {t(language, "generator.videoSaveVault")}

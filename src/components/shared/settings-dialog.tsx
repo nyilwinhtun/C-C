@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from "react"
 import { t } from "@/locales/translations"
 import { useUIStore, DEFAULT_MODELS, type AIProvider } from "@/store/useUIStore"
 import { useContentStore, type ContentBackupData } from "@/store/useContentStore"
+import {
+  BUSINESS_CATEGORIES,
+  DEFAULT_ONLINE_SHOP_CTA_MY,
+  type BusinessCategory,
+} from "@/types"
 import { useShallow } from "zustand/react/shallow"
 import { Download, Eye, EyeOff, Link, ShieldAlert, Upload } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
@@ -103,21 +108,36 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     }))
   )
 
-  const { brandSignature, savedVault, generatedHistory, setBrandSignature, importBackup } =
-    useContentStore(
-      useShallow((state) => ({
-        brandSignature: state.brandSignature,
-        savedVault: state.savedVault,
-        generatedHistory: state.generatedHistory,
-        setBrandSignature: state.setBrandSignature,
-        importBackup: state.importBackup,
-      }))
-    )
+  const {
+    brandSignature,
+    businessCategory,
+    autoAppendShopCta,
+    savedVault,
+    generatedHistory,
+    setBrandSignature,
+    setBusinessCategory,
+    setAutoAppendShopCta,
+    importBackup,
+  } = useContentStore(
+    useShallow((state) => ({
+      brandSignature: state.brandSignature,
+      businessCategory: state.businessCategory,
+      autoAppendShopCta: state.autoAppendShopCta,
+      savedVault: state.savedVault,
+      generatedHistory: state.generatedHistory,
+      setBrandSignature: state.setBrandSignature,
+      setBusinessCategory: state.setBusinessCategory,
+      setAutoAppendShopCta: state.setAutoAppendShopCta,
+      importBackup: state.importBackup,
+    }))
+  )
 
   const [selectedProvider, setSelectedProvider] = useState<AIProvider>(aiProvider)
   const [apiKeyInput, setApiKeyInput] = useState(apiKeys[aiProvider] ?? "")
   const [modelInput, setModelInput] = useState(models[aiProvider] || DEFAULT_MODELS[aiProvider])
   const [signature, setSignature] = useState(brandSignature)
+  const [categoryInput, setCategoryInput] = useState<BusinessCategory>(businessCategory)
+  const [autoCtaInput, setAutoCtaInput] = useState<boolean>(autoAppendShopCta)
   const [showKey, setShowKey] = useState(false)
   const [loading, setLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -134,6 +154,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       setApiKeyInput(initialKey)
       setModelInput(initialModel)
       setSignature(brandSignature)
+      setCategoryInput(businessCategory)
+      setAutoCtaInput(autoAppendShopCta)
       setShowKey(false)
       setIsCustomMode(!PRESET_MODELS[aiProvider].includes(initialModel) && Boolean(initialModel))
     }
@@ -167,6 +189,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       version: 1,
       exportedAt: new Date().toISOString(),
       brandSignature: signature,
+      businessCategory: categoryInput,
+      autoAppendShopCta: autoCtaInput,
       savedVault,
       generatedHistory,
     }
@@ -206,6 +230,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       importBackup(parsed)
       if (typeof parsed.brandSignature === "string") {
         setSignature(parsed.brandSignature)
+      }
+      if (parsed.businessCategory) {
+        setCategoryInput(parsed.businessCategory)
+      }
+      if (typeof parsed.autoAppendShopCta === "boolean") {
+        setAutoCtaInput(parsed.autoAppendShopCta)
       }
       toast.success(t(language, "settings.restoreSuccess"))
     } catch {
@@ -343,6 +373,26 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </div>
           </div>
           <div className="space-y-2">
+            <label htmlFor="business-category" className="text-sm font-medium font-myanmar">
+              {t(language, "settings.businessCategory")}
+            </label>
+            <Select
+              id="business-category"
+              value={categoryInput}
+              onChange={(e) => setCategoryInput((e.target as HTMLSelectElement).value as BusinessCategory)}
+              disabled={loading}
+            >
+              {BUSINESS_CATEGORIES.map((cat) => (
+                <option key={cat.value} value={cat.value}>
+                  {language === "my" ? `${cat.labelMy} (${cat.label})` : cat.label}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs text-muted-foreground font-myanmar">
+              {t(language, "settings.businessCategoryHint")}
+            </p>
+          </div>
+          <div className="space-y-2">
             <label htmlFor="brand-signature" className="text-sm font-medium font-myanmar">
               {t(language, "settings.brandSignature")}
             </label>
@@ -357,6 +407,38 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             />
             <p className="text-xs text-muted-foreground font-myanmar">
               {t(language, "settings.brandSignatureHint")}
+            </p>
+          </div>
+          <div className="rounded-xl border border-border/60 bg-muted/30 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium font-myanmar">
+                  {t(language, "settings.autoAppendCta")}
+                </p>
+                <p className="text-xs text-muted-foreground font-myanmar">
+                  {t(language, "settings.autoAppendCtaHint")}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoCtaInput}
+                aria-label={t(language, "settings.autoAppendCta")}
+                onClick={() => setAutoCtaInput((prev) => !prev)}
+                disabled={loading}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  autoCtaInput ? "bg-blue-600" : "bg-muted-foreground/30"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform ${
+                    autoCtaInput ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground font-myanmar rounded-lg bg-background/70 px-2.5 py-1.5 border border-border/50">
+              {DEFAULT_ONLINE_SHOP_CTA_MY}
             </p>
           </div>
           <Separator />
@@ -414,6 +496,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 setProviderApiKey(selectedProvider, apiKeyInput.trim())
                 setProviderModel(selectedProvider, normalizedModel)
                 setBrandSignature(signature)
+                setBusinessCategory(categoryInput)
+                setAutoAppendShopCta(autoCtaInput)
                 setLoading(true)
                 setTimeout(() => {
                   setLoading(false)
@@ -427,7 +511,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   apiKeyInput.trim() === (apiKeys[selectedProvider] ?? "") &&
                   (modelInput.trim() || DEFAULT_MODELS[selectedProvider]) ===
                     (models[selectedProvider] || DEFAULT_MODELS[selectedProvider]) &&
-                  signature === brandSignature)
+                  signature === brandSignature &&
+                  categoryInput === businessCategory &&
+                  autoCtaInput === autoAppendShopCta)
               }
             >
               {loading ? t(language, "settings.saveSaving") : t(language, "settings.save")}

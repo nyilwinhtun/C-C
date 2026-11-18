@@ -46,6 +46,11 @@ import {
   type GeneratedItem,
   type PosterDraft,
 } from "@/store/useContentStore"
+import {
+  DEFAULT_ONLINE_SHOP_CTA_EN,
+  DEFAULT_ONLINE_SHOP_CTA_MY,
+  SALES_ANGLES,
+} from "@/types"
 import type { GeneratedContent } from "@/api/aiService"
 import { useUIStore } from "@/store/useUIStore"
 import { t } from "@/locales/translations"
@@ -243,7 +248,7 @@ const MYANMAR_HASHTAG_PACKS = [
   {
     id: "tech",
     labelKey: "generator.hashtagTech",
-    tags: ["#TechMyanmar", "#MobileMyanmar", "#နည်းပညာ", "#ဖုန်းအရောင်းဆိုင်", "#GadgetMyanmar"],
+    tags: ["#TechMyanmar", "#GadgetMyanmar", "#နည်းပညာ", "#ElectronicsMyanmar", "#OnlineShopMyanmar"],
   },
   {
     id: "fashion",
@@ -261,6 +266,33 @@ const MYANMAR_HASHTAG_PACKS = [
     tags: ["#SpecialOffer", "#SaleMyanmar", "#အထူးလျှော့ဈေး", "#OnlineShopMyanmar", "#Promo"],
   },
 ] as const
+
+function extractCopySections(text: string) {
+  const trimmed = text.trim()
+  if (!trimmed) {
+    return { hook: "", script: "", caption: "", all: "" }
+  }
+  const paragraphs = trimmed.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean)
+  const lines = trimmed.split("\n").map((l) => l.trim()).filter(Boolean)
+
+  const hook =
+    paragraphs[0] && paragraphs[0].split("\n").length <= 3
+      ? paragraphs[0]
+      : lines.slice(0, 2).join("\n")
+
+  const nonHashtagParagraphs = paragraphs.filter((p) => !/^#[^\s#]+(\s+#[^\s#]+)*$/.test(p))
+  const script =
+    nonHashtagParagraphs.length > 1
+      ? nonHashtagParagraphs.slice(1).join("\n\n")
+      : trimmed
+
+  const captionLines = lines.filter(
+    (l) => !/^(\[\d+-\d+s[^\]]*\]|မြင်ကွင်း:|အသံ:|ဖန်သားပြင်စာသား:|ပြောစကား:)/i.test(l)
+  )
+  const caption = captionLines.join("\n").trim() || trimmed
+
+  return { hook, script, caption, all: trimmed }
+}
 
 export function GeneratorPage() {
   const { language, setActivePageKey } = useUIStore(
@@ -337,12 +369,22 @@ export function GeneratorPage() {
     useShallow((state) => state.setDraftInput)
   )
   const draftInput = useContentStore(useShallow((state) => state.draftInput))
-  const { addGeneratedItem, saveToVault, generatedHistory, brandSignature, setPosterDraft } = useContentStore(
+  const {
+    addGeneratedItem,
+    saveToVault,
+    generatedHistory,
+    brandSignature,
+    businessCategory,
+    autoAppendShopCta,
+    setPosterDraft,
+  } = useContentStore(
     useShallow((state) => ({
       addGeneratedItem: state.addGeneratedItem,
       saveToVault: state.saveToVault,
       generatedHistory: state.generatedHistory,
       brandSignature: state.brandSignature,
+      businessCategory: state.businessCategory,
+      autoAppendShopCta: state.autoAppendShopCta,
       setPosterDraft: state.setPosterDraft,
     }))
   )
@@ -360,9 +402,25 @@ export function GeneratorPage() {
       setActiveAction(null)
       setIsGenerating(false)
 
-      const normalizedData: GeneratedContent = action?.baseTopic
-        ? { ...data, topic: action.baseTopic }
-        : data
+      const rawContent = data.content
+      const selectedGenLang = form.getValues("language")
+      const ctaText =
+        selectedGenLang === "english"
+          ? DEFAULT_ONLINE_SHOP_CTA_EN
+          : DEFAULT_ONLINE_SHOP_CTA_MY
+      const shouldAppendCta =
+        autoAppendShopCta &&
+        action?.kind === "generate" &&
+        !rawContent.includes(ctaText)
+      const finalContent = shouldAppendCta
+        ? `${rawContent.trimEnd()}\n\n${ctaText}`
+        : rawContent
+
+      const normalizedData: GeneratedContent = {
+        ...data,
+        content: finalContent,
+        ...(action?.baseTopic ? { topic: action.baseTopic } : {}),
+      }
 
       setResult(normalizedData)
       setDisplayedText("")
@@ -404,6 +462,7 @@ export function GeneratorPage() {
 
   const [result, setResult] = useState<GeneratedContent | null>(null)
   const [isCopying, setIsCopying] = useState(false)
+  const [copiedStripKey, setCopiedStripKey] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<"editor" | "preview">("editor")
   const [displayedText, setDisplayedText] = useState("")
   const [typewriterIndex, setTypewriterIndex] = useState(0)
@@ -443,7 +502,12 @@ export function GeneratorPage() {
     setDisplayedText("")
     setTypewriterIndex(0)
     setIsTypewriting(false)
-    generate({ ...data, includeHashtags: data.includeHashtags ?? true })
+    generate({
+      ...data,
+      salesAngle: data.salesAngle ?? "new_arrival",
+      businessCategory,
+      includeHashtags: data.includeHashtags ?? true,
+    })
   }
 
   const updatePreviewContent = useCallback(
@@ -466,6 +530,23 @@ export function GeneratorPage() {
       })
     },
     [form]
+  )
+
+  const handleQuickCopySection = useCallback(
+    async (key: "hook" | "script" | "caption" | "all", text: string, label: string) => {
+      if (!text.trim()) return
+      try {
+        await navigator.clipboard.writeText(text)
+        setCopiedStripKey(key)
+        toast.success(t(language, "generator.copiedSection", { section: label }))
+        window.setTimeout(() => {
+          setCopiedStripKey((prev) => (prev === key ? null : prev))
+        }, 1600)
+      } catch {
+        toast.error(t(language, "generator.copyError"))
+      }
+    },
+    [language]
   )
 
   const handleCopy = useCallback(async () => {
@@ -561,10 +642,12 @@ export function GeneratorPage() {
       platform: result.platform,
       contentType: result.contentType,
       tone: result.tone,
+      salesAngle: values.salesAngle ?? "new_arrival",
+      businessCategory,
       language: values.language,
       includeHashtags: values.includeHashtags ?? true,
     })
-  }, [result, form, generate])
+  }, [result, form, generate, businessCategory])
 
   const isGeneratingFlag = isPending || isGenerating
 
@@ -602,13 +685,15 @@ export function GeneratorPage() {
         platform: params.platform ?? result?.platform ?? values.platform,
         contentType: params.contentType ?? result?.contentType ?? values.contentType,
         tone: result?.tone ?? values.tone,
+        salesAngle: values.salesAngle ?? "new_arrival",
+        businessCategory,
         language: selectedLang,
         includeHashtags: values.includeHashtags ?? true,
         instruction: `${params.instruction}\n${languageDirective}`,
         currentContent: currentText,
       })
     },
-    [result, displayedText, isGeneratingFlag, form, generate]
+    [result, displayedText, isGeneratingFlag, form, generate, businessCategory]
   )
 
   const handleLoadTemplate = useCallback((template: any) => {
@@ -637,6 +722,8 @@ export function GeneratorPage() {
   const platformMeta = getPlatformMeta(activePlatform)
   const PlatformIcon = platformMeta.icon
   const selectedTone = formValues.tone
+  const selectedSalesAngle = formValues.salesAngle ?? "new_arrival"
+  const copySections = extractCopySections(contentToShow)
 
   const hookLength = getOpeningHookLength(contentToShow)
   const fitsFbFold = hookLength <= FB_FOLD_LIMIT
@@ -688,7 +775,7 @@ export function GeneratorPage() {
   }, [contentToShow, viewMode])
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3 sm:space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div
           role="tablist"
@@ -774,8 +861,8 @@ export function GeneratorPage() {
           )}
 
           <Card className={isInputCollapsed && result ? "hidden lg:block border-border/60 shadow-sm" : "border-border/60 shadow-sm"}>
-            <CardHeader className="pb-4 border-b border-border/60">
-              <CardDescription className="leading-[1.85]">{t(language, "generator.desc")}</CardDescription>
+            <CardHeader className="py-3 px-4 sm:py-4 sm:px-5 border-b border-border/60">
+              <CardDescription className="text-xs sm:text-sm leading-relaxed">{t(language, "generator.desc")}</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
               <form
@@ -788,7 +875,7 @@ export function GeneratorPage() {
                     }
                   }
                 }}
-                className="grid gap-4 p-5 sm:p-6"
+                className="grid gap-3 p-3.5 sm:p-5"
               >
                 <div className="grid gap-1.5">
                   <Label htmlFor="topic" className="leading-relaxed">{t(language, "generator.topic")}</Label>
@@ -830,8 +917,38 @@ export function GeneratorPage() {
                   </div>
                 </div>
 
-                <div className="grid gap-2">
-                  <Label className="leading-relaxed">{t(language, "generator.tone")}</Label>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs sm:text-sm leading-relaxed">{t(language, "generator.salesAngle")}</Label>
+                  <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={t(language, "generator.salesAngle")}>
+                    {SALES_ANGLES.map((angleOption) => {
+                      const isSelected = selectedSalesAngle === angleOption.value
+                      return (
+                        <button
+                          key={angleOption.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={isSelected}
+                          onClick={() =>
+                            form.setValue("salesAngle", angleOption.value, {
+                              shouldDirty: true,
+                              shouldValidate: true,
+                            })
+                          }
+                          className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] sm:text-xs font-medium transition-all cursor-pointer font-myanmar ${
+                            isSelected
+                              ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white border-transparent shadow-xs"
+                              : "border-border/60 bg-background/80 text-muted-foreground hover:text-foreground hover:bg-accent/70"
+                          }`}
+                        >
+                          {language === "my" ? angleOption.labelMy : angleOption.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid gap-1.5">
+                  <Label className="text-xs sm:text-sm leading-relaxed">{t(language, "generator.tone")}</Label>
                   <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t(language, "generator.tone")}>
                     {TONES.map((toneOption) => {
                       const isSelected = selectedTone === toneOption.value
@@ -927,9 +1044,9 @@ export function GeneratorPage() {
           </Card>
         </div>
 
-        <div ref={previewRef} className="w-full lg:w-[420px] shrink-0 flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start scroll-mt-4">
+        <div ref={previewRef} className="w-full lg:w-[420px] shrink-0 flex flex-col gap-3 lg:sticky lg:top-6 lg:self-start scroll-mt-4">
           <Card className="border-border/60 shadow-sm overflow-hidden">
-            <CardHeader className="pb-3 border-b border-border/60 bg-muted/20">
+            <CardHeader className="py-2.5 px-3.5 sm:py-3 sm:px-5 border-b border-border/60 bg-muted/20">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${platformMeta.badgeClass}`}>
@@ -1023,14 +1140,14 @@ export function GeneratorPage() {
                   </Button>
                 </div>
               </div>
-              <CardTitle className="text-sm font-semibold pt-2 leading-relaxed">
+              <CardTitle className="hidden sm:block text-sm font-semibold pt-1.5 leading-relaxed">
                 {t(language, "generator.viewMode")}
               </CardTitle>
-              <CardDescription className="text-xs leading-relaxed">
+              <CardDescription className="hidden sm:block text-xs leading-relaxed">
                 {t(language, "generator.previewDescription")}
               </CardDescription>
             </CardHeader>
-            <CardContent className="min-h-[300px] flex flex-col gap-4 pt-5">
+            <CardContent className="min-h-[220px] sm:min-h-[280px] flex flex-col gap-3 p-3.5 sm:p-5">
               {isGeneratingFlag ? (
                 <div className="flex flex-col gap-4 py-2" aria-busy="true" aria-label={loadingLabel}>
                   <div className="flex items-center justify-between">
@@ -1134,7 +1251,7 @@ export function GeneratorPage() {
                     placeholder={t(language, "generator.editablePlaceholder")}
                     aria-label={t(language, "generator.textEditor")}
                     rows={1}
-                    className="w-full min-h-[240px] max-h-[420px] overflow-y-auto resize-none border-0 bg-transparent p-0 font-myanmar leading-[1.85] text-sm sm:text-[15px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0"
+                    className="w-full min-h-[180px] sm:min-h-[220px] max-h-[340px] sm:max-h-[420px] overflow-y-auto resize-none border-0 bg-transparent p-0 font-myanmar leading-[1.8] text-sm sm:text-[15px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0"
                   />
                   {isTypewriting && (
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -1203,8 +1320,44 @@ export function GeneratorPage() {
                 </div>
               )}
             </CardContent>
-            <CardFooter className="sticky bottom-20 z-20 lg:static border-t border-border/60 bg-card/95 lg:bg-muted/10 backdrop-blur-md lg:backdrop-blur-none pt-3 pb-3 lg:pt-4 flex-col gap-2.5 shadow-lg lg:shadow-none">
-              <div className="flex flex-wrap items-center gap-2 w-full">
+            <CardFooter className="sticky bottom-16 sm:bottom-20 z-20 lg:static border-t border-border/60 bg-card/95 lg:bg-muted/10 backdrop-blur-md lg:backdrop-blur-none px-3 py-2.5 sm:px-5 sm:py-3 flex-col gap-2 shadow-lg lg:shadow-none">
+              {contentToShow && (
+                <div className="grid grid-cols-4 gap-1.5 w-full">
+                  {(
+                    [
+                      { key: "hook", label: t(language, "generator.copyHook"), value: copySections.hook },
+                      { key: "script", label: t(language, "generator.copyScript"), value: copySections.script },
+                      { key: "caption", label: t(language, "generator.copyCaption"), value: copySections.caption },
+                      { key: "all", label: t(language, "generator.copyAll"), value: copySections.all },
+                    ] as const
+                  ).map((item) => {
+                    const isCopied = copiedStripKey === item.key
+                    return (
+                      <Button
+                        key={item.key}
+                        type="button"
+                        variant={item.key === "all" ? "default" : "outline"}
+                        size="sm"
+                        disabled={!item.value || isGeneratingFlag}
+                        onClick={() => handleQuickCopySection(item.key, item.value, item.label)}
+                        className={`h-8 px-1.5 text-[11px] font-medium font-myanmar truncate ${
+                          item.key === "all"
+                            ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-0"
+                            : "border-border/60 bg-background/80"
+                        }`}
+                      >
+                        {isCopied ? (
+                          <Check className="h-3 w-3 mr-1 shrink-0 text-emerald-400" aria-hidden="true" />
+                        ) : (
+                          <Copy className="h-3 w-3 mr-1 shrink-0" aria-hidden="true" />
+                        )}
+                        <span className="truncate">{item.label}</span>
+                      </Button>
+                    )
+                  })}
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-1.5 w-full">
                 <ReadAloudButton
                   text={contentToShow}
                   language={form.watch("language")}

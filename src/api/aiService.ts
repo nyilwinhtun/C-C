@@ -1,4 +1,5 @@
 import { DEFAULT_MODELS, useUIStore } from "@/store/useUIStore"
+import type { BusinessCategory, SalesAngle } from "@/types"
 
 export const GEMINI_MODEL = "gemini-3.5-flash-lite"
 export const GEMINI_VISION_MODEL = "gemini-2.5-flash"
@@ -105,6 +106,8 @@ export interface GenerateContentRequest {
   platform: string
   contentType: string
   tone: string
+  salesAngle?: SalesAngle
+  businessCategory?: BusinessCategory
   language: string
   includeHashtags: boolean
   instruction?: string
@@ -123,17 +126,45 @@ export interface GeneratedContent {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-const SYSTEM_PROMPT = `You are an expert social media copywriter and content strategist.
+const CATEGORY_PERSONA_GUIDANCE: Record<BusinessCategory, string> = {
+  general:
+    "General Online Shop — warm, trustworthy everyday retail tone. Highlight practical value, real-life convenience, fast delivery, and reliable quality.",
+  fashion:
+    "Fashion & Apparel — stylish, trend-savvy, and flattering. Highlight fabric feel, fit, styling versatility, color options, and confidence.",
+  beauty:
+    "Beauty & Skincare — caring, knowledgeable, glow-focused. Highlight skin feel, gentle/effective ingredients, visible results, and daily routine ease.",
+  food:
+    "Food & Beverage — appetizing, sensory, and craving-inducing. Highlight fresh taste, aroma, quality ingredients, and quick delivery.",
+  electronics:
+    "Electronics & Gadgets — smart, clear, benefit-driven without dry jargon. Highlight everyday performance, battery/convenience, build quality, and warranty peace of mind.",
+  home:
+    "Home & Lifestyle — cozy, organized, and uplifting. Highlight how it upgrades daily living, saves space/time, and brings comfort to the home.",
+}
+
+const SALES_ANGLE_GUIDANCE: Record<SalesAngle, string> = {
+  new_arrival:
+    "New Arrival — build fresh excitement, highlight what makes this new drop special, key standout benefits, and invite early orders before stock sells out.",
+  flash_sale:
+    "Flash Sale / Promo — lead with urgency, clear savings/discount value, limited-time deadline, and a strong action-driving CTA.",
+  problem_solution:
+    "Problem-Solution — open with a relatable everyday frustration the customer recognizes, then present the product as the effortless fix.",
+  short_reel:
+    "Short Punchy Reel — ultra-snappy 15-30s pacing, immediate 2-second scroll-stopper hook, crisp visual/spoken beats, and a fast memorable CTA.",
+}
+
+const SYSTEM_PROMPT = `You are Myanmar's #1 high-converting social media copywriter and e-commerce content strategist for online businesses of every niche.
 You create engaging, platform-native content in English, Myanmar (Burmese), or bilingual (Myanmar + English).
 
 Rules:
 - Write naturally for the selected platform (Facebook, TikTok, YouTube, Instagram, Telegram).
-- Match the requested tone exactly.
+- Match the requested tone, Business Category, and Sales Angle.
 - If the language is "myanmar" or "my":
-  - Write 100% in natural Myanmar (Burmese) Unicode script, even if the Topic is written in English.
+  - Write 100% in natural spoken Myanmar (Burmese) Unicode script (မြန်မာစကားပြော), even if the Topic is written in English.
+  - Keep the Burmese tone warm, energetic, and conversational using natural everyday particles like "ဗျာ", "နော်", "တကယ်တမ်း", "လက်လွတ်မခံနဲ့နော်", "အခုပဲ", "မိုက်တယ်နော်".
+  - STRICTLY AVOID stiff, formal textbook/literary endings such as "ဖြစ်ပါသည်", "ပြုလုပ်နိုင်ပါသည်", "ဝယ်ယူရရှိနိုင်ပါသည်", "ဖော်ပြပေးလိုက်ပါတယ်", "ပါဝင်ပါသည်", or "ရှိပါသည်". Always use natural spoken endings like "ပါတယ်ဗျာ", "လုပ်လို့ရတယ်နော်", "မှာလို့ရပြီနော်".
   - Write ALL video script labels and stage directions in Burmese (use "မြင်ကွင်း:", "အသံ:", "ဖန်သားပြင်စာသား:", "ပြောစကား:" instead of English "(Visual - ...)", "(Sound - ...)", "(Audio - ...)", or "[Visual Cue]").
-  - Keep international tech, product, and platform brand names (e.g., Redmi, iPhone, Samsung, TikTok, Facebook, Instagram, YouTube, Telegram) in their original English spelling rather than phonetic Burmese transliteration.
-- If the language is "bilingual", blend Myanmar and English naturally while keeping international brand names in English.
+  - Keep international brand, product, and platform names (e.g., Zara, Laneige, Sony, Dyson, Nike, TikTok, Facebook, Instagram, YouTube, Telegram) in their original English spelling rather than phonetic Burmese transliteration.
+- If the language is "bilingual", blend natural spoken Myanmar and English seamlessly while keeping international brand names in English.
 - When includeHashtags is true, append relevant hashtags at the end.
 - NEVER use raw Markdown formatting symbols such as *, **, ***, # headings, or backticks. Output clean plain text ready to copy-paste directly onto Facebook or TikTok.
 - Keep formatting clean with short paragraphs, line breaks, and emoji where appropriate.
@@ -157,13 +188,19 @@ function buildUserPrompt(request: GenerateContentRequest): string {
   const hashtagInstruction = request.includeHashtags
     ? "Include relevant hashtags at the end."
     : "Do not include hashtags."
+  const categoryGuide =
+    CATEGORY_PERSONA_GUIDANCE[request.businessCategory ?? "general"]
+  const angleGuide =
+    SALES_ANGLE_GUIDANCE[request.salesAngle ?? "new_arrival"]
   const isMyanmarOnly = request.language === "myanmar" || request.language === "my"
   const myanmarRules = isMyanmarOnly
-    ? "\nStrict Myanmar Rules: Write 100% in natural Burmese script (even if the topic is in English). Use Burmese script labels like မြင်ကွင်း:, အသံ:, ဖန်သားပြင်စာသား:, ပြောစကား: instead of English stage directions. Keep international brand names (e.g., Redmi, iPhone, Samsung, TikTok, Facebook) in English spelling. Do NOT use Markdown symbols (*, **, # headings)."
+    ? '\nStrict Myanmar Rules: Write 100% in natural conversational spoken Burmese (မြန်မာစကားပြော) using warm particles like "ဗျာ", "နော်", "တကယ်တမ်း", "လက်လွတ်မခံနဲ့နော်". NEVER use stiff textbook endings like "ဖြစ်ပါသည်" or "ပါဝင်ပါသည်". Use Burmese script labels like မြင်ကွင်း:, အသံ:, ဖန်သားပြင်စာသား:, ပြောစကား: instead of English stage directions. Keep international brand names (e.g., Zara, Laneige, Sony, TikTok, Facebook) in English spelling. Do NOT use Markdown symbols (*, **, # headings).'
     : "\nFormatting Rule: Output clean plain text with no Markdown symbols (*, **, # headings)."
 
   if (request.instruction && request.currentContent) {
     return `Task: ${request.instruction}
+Business Category: ${categoryGuide}
+Sales Angle: ${angleGuide}
 Target Platform: ${request.platform}
 Target Content Type: ${request.contentType}
 Tone: ${request.tone}
@@ -178,7 +215,9 @@ ${request.currentContent}
 Output only the final transformed content now.`
   }
 
-  return `Platform: ${request.platform}
+  return `Business Category: ${categoryGuide}
+Sales Angle: ${angleGuide}
+Platform: ${request.platform}
 Content type: ${request.contentType}
 Tone: ${request.tone}
 Language: ${request.language}
@@ -188,32 +227,56 @@ Write the content now.`
 }
 
 function mockGenerate(request: GenerateContentRequest): GeneratedContent {
+  const category = request.businessCategory ?? "general"
+  const angle = request.salesAngle ?? "new_arrival"
   const isMyanmar = request.language === "myanmar" || request.language === "bilingual"
-  const greeting = isMyanmar
-    ? request.language === "bilingual"
-      ? "Hello / Mingalaba!\n\n"
-      : "မင်္ဂလာပါ!\n\n"
-    : "Hello!\n\n"
-  const body = `Here is a ${request.tone} ${request.contentType.replace(
-    "_",
-    " "
-  )} for "${request.topic}" on ${request.platform}.\n\n`
-  const closing = isMyanmar
-    ? request.language === "bilingual"
-      ? "\n#Myanmar #Content #${request.platform}"
-      : "\n#မյանမာ # content #${request.platform}"
-    : `\n#${request.platform} #ContentCreator #SocialMedia`
+
+  const angleLeadMy: Record<SalesAngle, string> = {
+    new_arrival: "✨ ပစ္စည်းသစ်လေး ရောက်ရှိလာပြီနော်!",
+    flash_sale: "⚡ Flash Sale! ဒီနေ့အတွက် အထူးလျှော့ဈေးနဲ့ လက်လွတ်မခံနဲ့နော်!",
+    problem_solution: "💡 နေ့တိုင်း ကြုံနေရတဲ့ အခက်အခဲလေးကို ဒါလေးနဲ့ အလွယ်တကူ ဖြေရှင်းလိုက်ဗျာ!",
+    short_reel: "🎬 ၁၅ စက္ကန့်အတွင်း ကြည့်လိုက် — တကယ်တမ်း အရမ်းမိုက်တဲ့ Item လေးပါ!",
+  }
+
+  const categoryTagMy: Record<BusinessCategory, string> = {
+    general: "#OnlineShopMyanmar #QualityProduct #ShopNow",
+    fashion: "#FashionMyanmar #OOTDMyanmar #StyleDaily",
+    beauty: "#BeautyMyanmar #SkincareMyanmar #GlowUp",
+    food: "#FoodieMyanmar #FreshFood #Delicious",
+    electronics: "#GadgetMyanmar #TechDeals #SmartLiving",
+    home: "#HomeLivingMyanmar #Lifestyle #CozyHome",
+  }
+
+  if (isMyanmar) {
+    const content =
+      `${angleLeadMy[angle]}\n\n` +
+      `တကယ်တမ်း "${request.topic}" ကို ရှာနေတယ်ဆိုရင် ဒီတစ်ခုက အရမ်းတန်ပြီး စိတ်ချရတယ်ဗျာ။ နေ့စဉ်သုံးဖို့ အဆင်ပြေသလို အရည်အသွေးလည်း အပြည့်အဝ အာမခံပေးထားတယ်နော်။\n\n` +
+      `👉 စိတ်ဝင်စားရင် အခုပဲ Inbox မှာ လာမေးမြန်း မှာယူနိုင်ပါပြီဗျာ! (Mock Mode — Settings မှာ API Key ထည့်ပြီး AI အစစ်နဲ့ သုံးနိုင်ပါတယ်)` +
+      (request.includeHashtags ? `\n\n${categoryTagMy[category]}` : "")
+    return {
+      id: crypto.randomUUID(),
+      topic: request.topic,
+      platform: request.platform,
+      contentType: request.contentType,
+      tone: request.tone,
+      content,
+      createdAt: new Date().toISOString(),
+    }
+  }
+
+  const body =
+    `✨ ${request.topic}\n\n` +
+    `Designed for ${category} shoppers (${angle.replace("_", " ")} angle): clean benefits, everyday value, and ready to order today.\n\n` +
+    `This is a mock AI response. Add your API key in Settings to connect to a real AI provider.` +
+    (request.includeHashtags ? `\n\n#${request.platform} #OnlineShop #ContentStudio` : "")
+
   return {
     id: crypto.randomUUID(),
     topic: request.topic,
     platform: request.platform,
     contentType: request.contentType,
     tone: request.tone,
-    content:
-      greeting +
-      body +
-      "This is a mock AI response. Add your API key in Settings to connect to a real AI provider." +
-      closing,
+    content: body,
     createdAt: new Date().toISOString(),
   }
 }
@@ -704,7 +767,7 @@ function parsePhotoSuggestionResponse(raw: string): PhotoSuggestionResult {
 }
 
 const PHOTO_CATEGORY_GUIDANCE: Record<PhotoCategoryKey, string> = {
-  tech: "Tech & Gadgets (smartphones, laptops, electronics). Focus spec1, spec2, spec3 on concise hardware/warranty specs (e.g., '8GB / 256GB', '5000mAh', '1 Year Warranty').",
+  tech: "Electronics & Gadgets (audio, smart accessories, laptops, devices). Focus spec1, spec2, spec3 on concise specs (e.g., '40h Battery', 'Fast Charge', '1 Year Warranty').",
   flash_sale:
     "Flash Sale & Discount (limited-time promotion). Emphasize urgency and savings in headline and specs (e.g., 'Save 30%', 'Today Only', 'Free Delivery').",
   new_arrival:
@@ -733,7 +796,7 @@ Generate a JSON object with these exact 6 keys:
 6. "caption": A ready-to-post Facebook/Instagram caption in natural Myanmar (Burmese) Unicode script with relevant emojis and 3-5 hashtags at the end.
 
 CRITICAL RULES:
-- When writing in Burmese, keep ALL international brand names, model names, and technical terms (e.g., Redmi, iPhone, Samsung, Pro Max, 5G, OLED, SPF, Latte) in their original English spelling. NEVER transliterate brand or model names phonetically into Burmese.
+- When writing in Burmese, keep ALL international brand names, model names, and technical terms (e.g., Zara, Laneige, Sony, Dyson, SPF, Pro, Wireless, Latte) in their original English spelling. NEVER transliterate brand or model names phonetically into Burmese.
 - Do NOT use raw Markdown symbols (* or #) in headline, spec1, spec2, spec3, or suggestedPrice.
 - Do NOT use Markdown * or # heading syntax in caption (only normal #hashtags at the end).
 - Return ONLY valid JSON.`
@@ -884,13 +947,13 @@ export async function suggestFromPhoto(
     if (request.language === "my") {
       const mockByCategory: Record<PhotoCategoryKey, PhotoSuggestionResult> = {
         tech: {
-          headline: "Redmi Note 13 Pro 5G အသစ်ရောက်ရှိ",
-          spec1: "8GB / 256GB",
-          spec2: "5000mAh Battery",
+          headline: "Wireless Noise-Canceling Headphones",
+          spec1: "40h Battery",
+          spec2: "Fast Charge",
           spec3: "1 Year Warranty",
-          suggestedPrice: "890,000 Ks",
+          suggestedPrice: "185,000 Ks",
           caption:
-            "📱 စွမ်းဆောင်ရည်မြင့် Redmi Note 13 Pro 5G ရောက်ရှိပါပြီ!\n\n8GB RAM / 256GB Storage နှင့် 5000mAh Battery ပါဝင်ပြီး Official Warranty ၁ နှစ် အပြည့်အဝ ရရှိမှာပါ။\n\n📩 မှာယူလိုပါက Inbox မှတစ်ဆင့် ဆက်သွယ်နိုင်ပါတယ်ခင်ဗျာ။\n\n#TechMyanmar #Smartphone #NewArrival",
+            "🎧 အသံကြည်လင်ပြီး နေ့တိုင်းသုံးဖို့ အရမ်းမိုက်တဲ့ Wireless Headphones လေး ရောက်ရှိပါပြီဗျာ!\n\nBattery 40 နာရီအထိ ခံပြီး Official Warranty ၁ နှစ် အပြည့်အဝ ပါဝင်တယ်နော်။\n\n📩 မှာယူလိုပါက Inbox မှတစ်ဆင့် ဆက်သွယ်နိုင်ပါတယ်ဗျာ။\n\n#TechMyanmar #Gadgets #NewArrival",
         },
         flash_sale: {
           headline: "ယနေ့တစ်ရက်တည်း အထူးလျှော့ဈေး!",
@@ -934,13 +997,13 @@ export async function suggestFromPhoto(
 
     const mockEnByCategory: Record<PhotoCategoryKey, PhotoSuggestionResult> = {
       tech: {
-        headline: "Redmi Note 13 Pro 5G In Stock",
-        spec1: "8GB / 256GB",
-        spec2: "5000mAh Battery",
+        headline: "Wireless Noise-Canceling Headphones",
+        spec1: "40h Battery",
+        spec2: "Fast Charge",
         spec3: "1 Year Warranty",
-        suggestedPrice: "$299",
+        suggestedPrice: "$89",
         caption:
-          "📱 Upgrade your daily driver with the Redmi Note 13 Pro 5G!\n\nPacked with 8GB / 256GB, a 5000mAh battery, and a full 1 Year Warranty. Message us to order today!\n\n#TechDeals #Smartphone #NewArrival",
+          "🎧 Upgrade your everyday audio with our Wireless Noise-Canceling Headphones!\n\nEnjoy up to 40h battery life, fast charging, and a full 1 Year Warranty. Message us to order today!\n\n#TechDeals #Gadgets #NewArrival",
       },
       flash_sale: {
         headline: "24-Hour Flash Sale — Save Big",
@@ -1037,6 +1100,7 @@ export interface GenerateVideoContentParams {
   platform: VideoPlatformOption | string
   language: "en" | "my"
   brandSignature?: string
+  businessCategory?: BusinessCategory
   onProgress?: (stage: "extracting" | "analyzing") => void
 }
 
@@ -1224,7 +1288,10 @@ function buildVideoPrompt(params: {
   language: "en" | "my"
   productNote?: string
   analysisMode: "direct" | "keyframes"
+  businessCategory?: BusinessCategory
 }): string {
+  const categoryGuide =
+    CATEGORY_PERSONA_GUIDANCE[params.businessCategory ?? "general"]
   const noteBlock = params.productNote?.trim()
     ? `Additional Product Name / Price / Promo Note from seller: "${params.productNote.trim()}"`
     : "No extra product note provided; infer product details from the visuals."
@@ -1236,6 +1303,7 @@ function buildVideoPrompt(params: {
   if (params.language === "my") {
     return `You are Myanmar's #1 high-converting short-form video sales strategist and spoken Burmese copywriter (TikTok, Facebook Reels, YouTube Shorts).
 ${mediaContext}
+Business Category: ${categoryGuide}
 Target Platform: ${params.platform}
 ${noteBlock}
 
@@ -1263,7 +1331,7 @@ Analyze the visual scenes, product details, and pacing, then return ONLY a valid
 CRITICAL LANGUAGE & STYLE RULES:
 - Write in AUTHENTIC, ENERGETIC, CONVERSATIONAL SPOKEN BURMESE (မြန်မာစကားပြော) using natural everyday particles like "ဗျာ", "နော်", "တကယ်တမ်း", "အခုပဲ", "မိုက်တယ်နော်", "လုံးဝတန်တယ်".
 - STRICTLY AVOID stiff, formal, bookish/literary endings such as "ဖြစ်ပါသည်", "ပြုလုပ်နိုင်ပါသည်", "ဝယ်ယူရရှိနိုင်ပါသည်", "ဖော်ပြပေးလိုက်ပါတယ်", "ပါဝင်ပါသည်", or "ရှိပါသည်". Always use natural spoken endings like "ပါတယ်ဗျာ", "လုပ်လို့ရတယ်နော်", "ဝယ်လို့ရပြီနော်".
-- Keep international brand, product, and platform names (e.g., iPhone, Redmi, Samsung, CapCut, TikTok, Reels, Facebook, YouTube) in their original English spelling.
+- Keep international brand, product, and platform names (e.g., Zara, Laneige, Sony, Dyson, CapCut, TikTok, Reels, Facebook, YouTube) in their original English spelling.
 - Do NOT use raw Markdown symbols (*, **, # headings) in hooks, voiceoverScript, or coverTitles. Only normal #hashtags are allowed at the end of caption.
 - Return ONLY valid JSON.`
   }
@@ -1623,6 +1691,7 @@ export async function generateVideoContent(
       language: params.language,
       productNote: params.productNote,
       analysisMode,
+      businessCategory: params.businessCategory,
     })
     return await generateVideoWithOpenAICompatible(
       mediaParts,
@@ -1642,6 +1711,7 @@ export async function generateVideoContent(
       language: params.language,
       productNote: params.productNote,
       analysisMode,
+      businessCategory: params.businessCategory,
     })
     try {
       return await generateVideoWithGemini(

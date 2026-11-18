@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import type { GeneratorFormValues } from "@/features/generator/schema"
+import type { BusinessCategory } from "@/types"
 import { supabase } from "@/lib/supabase"
 import { useUIStore } from "./useUIStore"
 
@@ -28,6 +29,8 @@ export interface ContentBackupData {
   version?: number
   exportedAt?: string
   brandSignature?: string
+  businessCategory?: BusinessCategory
+  autoAppendShopCta?: boolean
   savedVault?: SavedVaultItem[]
   generatedHistory?: GeneratedItem[]
 }
@@ -45,11 +48,15 @@ interface ContentState {
   generatedHistory: GeneratedItem[]
   savedVault: SavedVaultItem[]
   brandSignature: string
+  businessCategory: BusinessCategory
+  autoAppendShopCta: boolean
   posterDraft: PosterDraft | null
   isSyncing: boolean
   setDraftInput: (input: Partial<GeneratorFormValues>) => void
   addGeneratedItem: (item: Omit<GeneratedItem, "id" | "createdAt">) => void
   setBrandSignature: (signature: string) => void
+  setBusinessCategory: (category: BusinessCategory) => void
+  setAutoAppendShopCta: (enabled: boolean) => void
   setPosterDraft: (draft: PosterDraft | null) => void
   saveToVault: (
     item: Omit<SavedVaultItem, "id" | "status"> & {
@@ -69,6 +76,7 @@ const defaultDraft: GeneratorFormValues = {
   platform: "instagram",
   contentType: "post_caption",
   tone: "engaging",
+  salesAngle: "new_arrival",
   language: "english",
   includeHashtags: true,
 }
@@ -80,6 +88,8 @@ export const useContentStore = create<ContentState>()(
       generatedHistory: [],
       savedVault: [],
       brandSignature: "",
+      businessCategory: "general",
+      autoAppendShopCta: true,
       posterDraft: null,
       isSyncing: false,
 
@@ -103,6 +113,8 @@ export const useContentStore = create<ContentState>()(
         }),
 
       setBrandSignature: (brandSignature) => set({ brandSignature }),
+      setBusinessCategory: (businessCategory) => set({ businessCategory }),
+      setAutoAppendShopCta: (autoAppendShopCta) => set({ autoAppendShopCta }),
       setPosterDraft: (posterDraft) => set({ posterDraft }),
 
       saveToVault: (item) =>
@@ -147,6 +159,12 @@ export const useContentStore = create<ContentState>()(
             typeof data.brandSignature === "string"
               ? data.brandSignature
               : state.brandSignature,
+          businessCategory:
+            data.businessCategory ?? state.businessCategory,
+          autoAppendShopCta:
+            typeof data.autoAppendShopCta === "boolean"
+              ? data.autoAppendShopCta
+              : state.autoAppendShopCta,
           savedVault: Array.isArray(data.savedVault)
             ? data.savedVault.map((item) => ({
                 id: item.id || crypto.randomUUID(),
@@ -213,6 +231,8 @@ export const useContentStore = create<ContentState>()(
         generatedHistory: (state.generatedHistory ?? []).slice(0, 10),
         savedVault: state.savedVault ?? [],
         brandSignature: state.brandSignature ?? "",
+        businessCategory: state.businessCategory ?? "general",
+        autoAppendShopCta: state.autoAppendShopCta ?? true,
       }),
     }
   )

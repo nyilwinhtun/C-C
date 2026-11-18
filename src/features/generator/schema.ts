@@ -18,6 +18,9 @@ export const generatorSchema = z.object({
     "storytelling",
     "sales",
   ]),
+  salesAngle: z
+    .enum(["new_arrival", "flash_sale", "problem_solution", "short_reel"])
+    .default("new_arrival"),
   language: z.enum(["myanmar", "english", "bilingual"]),
   includeHashtags: z.boolean().default(true),
 })
