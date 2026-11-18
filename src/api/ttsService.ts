@@ -62,6 +62,186 @@ export function cleanVoiceoverText(raw: string): string {
     .trim()
 }
 
+const BURMESE_DIGITS = [
+  "သုည",
+  "တစ်",
+  "နှစ်",
+  "သုံး",
+  "လေး",
+  "ငါး",
+  "ခြောက်",
+  "ခုနစ်",
+  "ရှစ်",
+  "ကိုး",
+] as const
+
+const BURMESE_PLACE_UNITS: ReadonlyArray<{ value: number; label: string; creakyLabel?: string }> = [
+  { value: 10_000_000, label: "ကုဋေ" },
+  { value: 1_000_000, label: "သန်း" },
+  { value: 100_000, label: "သိန်း" },
+  { value: 10_000, label: "သောင်း" },
+  { value: 1_000, label: "ထောင်", creakyLabel: "ထောင့်" },
+  { value: 100, label: "ရာ", creakyLabel: "ရာ့" },
+  { value: 10, label: "ဆယ်", creakyLabel: "ဆယ့်" },
+]
+
+function integerToBurmeseWords(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return String(n)
+  const intVal = Math.floor(n)
+  if (intVal === 0) return BURMESE_DIGITS[0]
+  if (intVal < 10) return BURMESE_DIGITS[intVal]
+
+  let remaining = intVal
+  let result = ""
+
+  for (const unit of BURMESE_PLACE_UNITS) {
+    if (remaining >= unit.value) {
+      const count = Math.floor(remaining / unit.value)
+      remaining %= unit.value
+
+      const countWords = count >= 10 ? integerToBurmeseWords(count) : BURMESE_DIGITS[count]
+      const unitWord = remaining > 0 && unit.creakyLabel ? unit.creakyLabel : unit.label
+      result += `${countWords}${unitWord}`
+    }
+  }
+
+  if (remaining > 0) {
+    result += BURMESE_DIGITS[remaining]
+  }
+
+  return result
+}
+
+function numericStringToBurmeseWords(rawNum: string): string {
+  const cleaned = rawNum.replace(/,/g, "").trim()
+  if (!cleaned) return rawNum
+
+  // Read leading-zero multi-digit sequences (e.g. phone numbers like 09...) digit by digit
+  if (/^0\d+$/.test(cleaned)) {
+    return cleaned
+      .split("")
+      .map((d) => BURMESE_DIGITS[Number(d)] ?? d)
+      .join(" ")
+  }
+
+  const [intPart, decPart] = cleaned.split(".")
+  const intNum = Number.parseInt(intPart, 10)
+  if (!Number.isFinite(intNum)) return rawNum
+
+  const spokenInt = integerToBurmeseWords(intNum)
+  if (!decPart) return spokenInt
+
+  const spokenDec = decPart
+    .split("")
+    .map((d) => BURMESE_DIGITS[Number(d)] ?? d)
+    .join(" ")
+  return `${spokenInt} ဒသမ ${spokenDec}`
+}
+
+const ENGLISH_TO_BURMESE_PHONETICS: ReadonlyArray<[RegExp, string]> = [
+  [/\bfree\s+delivery\b/gi, "ဖရီး ဒယ်လီဗာရီ"],
+  [/\bfree\s+deli\b/gi, "ဖရီး ဒယ်လီဗာရီ"],
+  [/\bpro\s+max\b/gi, "ပရိုမက်စ်"],
+  [/\bpre[-\s]?order\b/gi, "ပရီအော်ဒါ"],
+  [/\btype[-\s]?c\b/gi, "တိုက်ပ်စီ"],
+  [/\bin[-\s]?stock\b/gi, "အင်စတော့ခ်"],
+  [/\bpromotion\b/gi, "ပရိုမိုးရှင်း"],
+  [/\bpromo\b/gi, "ပရိုမိုးရှင်း"],
+  [/\bdiscount\b/gi, "ဒစ်စကောင့်"],
+  [/\boriginal\b/gi, "အော်ဂျင်နယ်"],
+  [/\bfacebook\b/gi, "ဖေ့စ်ဘွတ်ခ်"],
+  [/\btiktok\b/gi, "တစ်တော့ခ်"],
+  [/\bquality\b/gi, "ကွာလတီ"],
+  [/\breviews?\b/gi, "ရီဗျူး"],
+  [/\binbox\b/gi, "အင်ဘောက်စ်"],
+  [/\bib\b/gi, "အင်ဘောက်စ်"],
+  [/\breels?\b/gi, "ရီးလ်စ်"],
+  [/\blive\b/gi, "လိုက်ဖ်"],
+  [/\bcod\b/gi, "စီအိုဒီ"],
+]
+
+/**
+ * Normalize Burmese script text for clear, natural TTS pronunciation:
+ * - Strips markdown, emojis, and bracketed timestamps/section tags
+ * - Transliterates common English e-commerce/tech terms to phonetic Burmese
+ * - Converts Arabic numbers, prices, currencies, and percentages to spoken Burmese
+ * - Converts slashes, pipes, and hyphens into natural Burmese pauses
+ */
+export function normalizeBurmeseForTTS(rawText: string): string {
+  if (!rawText || !rawText.trim()) return ""
+
+  let text = rawText
+    // Remove bracketed timestamps and timed/section headers like [0-3s], [0-3s Hook], [Hook]
+    .replace(/\[\s*\d+(?::\d+)?\s*s?(?:\s*[-–—]\s*\d+(?::\d+)?\s*s?)?[^\]]*\]/gi, " ")
+    .replace(/\[(hook|body|cta|intro|outro|scene\s*\d*)[^\]]*\]/gi, " ")
+    // Remove emojis, pictographs, variation selectors, and ZWJ sequences
+    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D\u20E3]/gu, "")
+    // Remove markdown headings, bold/italic markers, backticks, underscores, tildes
+    .replace(/[*#`_~]/g, "")
+    // Remove bullet symbols and leading list dashes
+    .replace(/^\s*[-•–—]+\s+/gm, "")
+    .replace(/•/g, " ")
+
+  // Transliterate common English e-commerce & tech terms before hyphen-to-pause conversion
+  for (const [pattern, phonetic] of ENGLISH_TO_BURMESE_PHONETICS) {
+    text = text.replace(pattern, phonetic)
+  }
+
+  // Convert percentages (special case 100% -> ရာနှုန်းပြည့်)
+  text = text.replace(/(?<![\d.])(\d[\d,]*(?:\.\d+)?)\s*%/g, (_match, num: string) => {
+    if (num.replace(/,/g, "") === "100") {
+      return "ရာနှုန်းပြည့်"
+    }
+    return `${numericStringToBurmeseWords(num)} ရာခိုင်နှုန်း`
+  })
+
+  // Convert currency-annotated prices
+  text = text
+    .replace(
+      /(?:Ks|MMK|Kyats?|ကျပ်)\s*(\d[\d,]*(?:\.\d+)?)/gi,
+      (_match, num: string) => `${numericStringToBurmeseWords(num)} ကျပ်`
+    )
+    .replace(
+      /(\d[\d,]*(?:\.\d+)?)\s*(?:Ks|MMK|Kyats?|ကျပ်)\b/gi,
+      (_match, num: string) => `${numericStringToBurmeseWords(num)} ကျပ်`
+    )
+    .replace(
+      /(?:USD|\$)\s*(\d[\d,]*(?:\.\d+)?)/gi,
+      (_match, num: string) => `${numericStringToBurmeseWords(num)} ဒေါ်လာ`
+    )
+    .replace(
+      /(\d[\d,]*(?:\.\d+)?)\s*(?:USD|\$)/gi,
+      (_match, num: string) => `${numericStringToBurmeseWords(num)} ဒေါ်လာ`
+    )
+    .replace(
+      /(?:THB|฿|Baht)\s*(\d[\d,]*(?:\.\d+)?)/gi,
+      (_match, num: string) => `${numericStringToBurmeseWords(num)} ဘတ်`
+    )
+    .replace(
+      /(\d[\d,]*(?:\.\d+)?)\s*(?:THB|฿|Baht)\b/gi,
+      (_match, num: string) => `${numericStringToBurmeseWords(num)} ဘတ်`
+    )
+
+  // Convert remaining Arabic numbers into spoken Burmese
+  text = text.replace(/(?<![\d.])(\d[\d,]*(?:\.\d+)?)(?![\d.])/g, (_match, num: string) =>
+    numericStringToBurmeseWords(num)
+  )
+
+  // Convert slashes, pipes, and hyphens into natural Burmese pauses
+  text = text
+    .replace(/\s*\|\s*/g, "။ ")
+    .replace(/\s*\/\s*/g, "၊ ")
+    .replace(/\s*[-–—]+\s*/g, "၊ ")
+    .replace(/([၊။])(?:\s*[၊။])+/g, "$1")
+
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n")
+    .trim()
+}
+
 function getSavedGeminiApiKey(): string {
   const fromStore = useUIStore.getState().apiKeys.gemini?.trim()
   if (fromStore) return fromStore
@@ -408,7 +588,7 @@ export async function generateBurmeseVoiceover(
   voiceType: BurmeseVoiceType = "female",
   speed: VoiceoverSpeed = 1.0
 ): Promise<VoiceoverResult> {
-  const cleanedText = cleanVoiceoverText(scriptText)
+  const cleanedText = normalizeBurmeseForTTS(scriptText)
   if (!cleanedText) {
     throw new TtsError("Voiceover script is empty after removing timestamps and formatting.")
   }
@@ -469,3 +649,4 @@ export async function generateBurmeseVoiceover(
     throw new TtsError(reason)
   }
 }
+

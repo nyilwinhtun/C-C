@@ -1322,7 +1322,7 @@ Analyze the visual scenes, product details, and pacing, then return ONLY a valid
    (Describe what is happening on screen and the #1 benefit in natural conversational Burmese)
 
    [10-15s Price & Call-to-Action]
-   (State the price/promo with natural spoken Burmese pronunciation for numbers/prices—e.g. "၄၅,၀၀၀ ကျပ် (လေးသောင်းခွဲ)" or "၂ သောင်းကျော်"—and end with an urgent, friendly CTA like "အခုပဲ Inbox မှာ လာမှာလိုက်နော်!")
+   (State the price/promo and CTA using natural spoken Burmese phrasing for all numbers, prices, percentages, and tricky English e-commerce/tech words—e.g. "လေးသောင်းငါးထောင် ကျပ်", "နှစ်ဆယ် ရာခိုင်နှုန်း", "ဖရီး ဒယ်လီဗာရီ", "စီအိုဒီ", "အော်ဂျင်နယ်", "အခုပဲ အင်ဘောက်စ် မှာ လာမှာလိုက်နော်!"—for effortless reading)
 
 3. "coverTitles": An array of 2 short, punchy 3 to 5 word On-Screen Cover Text headlines in Burmese (ready to paste straight into CapCut).
 
