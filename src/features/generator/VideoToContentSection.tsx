@@ -41,6 +41,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ReadAloudButton } from "@/components/shared/read-aloud-button"
+import { VoiceoverStudioCard } from "@/features/generator/VoiceoverStudioCard"
 import {
   Card,
   CardContent,
@@ -877,40 +878,48 @@ export function VideoToContentSection() {
             )}
 
             {(showAllTabs || activeTab === "voiceover") && result.voiceoverScript && (
-              <Card className="border-border/60 shadow-sm overflow-hidden">
-                <CardHeader className="py-2.5 px-4 border-b border-border/60 flex flex-row items-center justify-between space-y-0">
-                  <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                    <Mic className="h-3.5 w-3.5 text-indigo-500" aria-hidden="true" />
-                    {t(language, "generator.videoVoiceoverTitle")}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-3.5 sm:p-4 max-h-[52vh] lg:max-h-none overflow-y-auto">
-                  <p className="text-sm font-myanmar whitespace-pre-wrap leading-[1.85]">
-                    {result.voiceoverScript}
-                  </p>
-                </CardContent>
-                <CardFooter className="border-t border-border/60 bg-muted/10 px-4 py-2.5 flex items-center justify-between gap-2">
-                  <ReadAloudButton
-                    text={result.voiceoverScript}
-                    language={outputLanguage}
-                    size="xs"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => copyText("voiceover", result.voiceoverScript)}
-                    className="h-8 px-3 text-xs border-border/60"
-                  >
-                    {copiedKey === "voiceover" ? (
-                      <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
-                    ) : (
-                      <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                    )}
-                    <span className="ml-1.5">{t(language, "generator.copy")}</span>
-                  </Button>
-                </CardFooter>
-              </Card>
+              <div className="space-y-4">
+                <Card className="border-border/60 shadow-sm overflow-hidden">
+                  <CardHeader className="py-2.5 px-4 border-b border-border/60 flex flex-row items-center justify-between space-y-0">
+                    <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                      <Mic className="h-3.5 w-3.5 text-indigo-500" aria-hidden="true" />
+                      {t(language, "generator.videoVoiceoverTitle")}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-3.5 sm:p-4 max-h-[52vh] lg:max-h-none overflow-y-auto">
+                    <p className="text-sm font-myanmar whitespace-pre-wrap leading-[1.85]">
+                      {result.voiceoverScript}
+                    </p>
+                  </CardContent>
+                  <CardFooter className="border-t border-border/60 bg-muted/10 px-4 py-2.5 flex items-center justify-between gap-2">
+                    <ReadAloudButton
+                      text={result.voiceoverScript}
+                      language={outputLanguage}
+                      size="xs"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => copyText("voiceover", result.voiceoverScript)}
+                      className="h-8 px-3 text-xs border-border/60"
+                    >
+                      {copiedKey === "voiceover" ? (
+                        <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                      )}
+                      <span className="ml-1.5">{t(language, "generator.copy")}</span>
+                    </Button>
+                  </CardFooter>
+                </Card>
+
+                <VoiceoverStudioCard
+                  voiceoverScript={result.voiceoverScript}
+                  videoFile={videoFile}
+                  language={language}
+                />
+              </div>
             )}
 
             {(showAllTabs || activeTab === "caption") && result.caption && (
