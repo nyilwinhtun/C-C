@@ -266,3 +266,4 @@ export function QuickIdeaDialog({ open, onOpenChange }: QuickIdeaDialogProps) {
     </Dialog>
   )
 }
+

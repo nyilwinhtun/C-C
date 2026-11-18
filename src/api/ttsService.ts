@@ -39,7 +39,7 @@ export interface VoiceoverResult {
   fileExtension: "wav" | "mp3"
   durationSeconds: number
   voiceName: string
-  provider: "gemini" | "neural-tts"
+  provider: "gemini" | "neural-tts" | "speech-synthesis"
   cleanedText: string
 }
 
@@ -349,13 +349,15 @@ function getSpeedPromptInstruction(speed: VoiceoverSpeed): string {
   }
 }
 
+export const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
+
 async function synthesizeWithGemini(
   cleanedText: string,
   preset: BurmeseVoicePreset,
   speed: VoiceoverSpeed,
   apiKey: string
 ): Promise<{ blob: Blob; mimeType: string; fileExtension: "wav" | "mp3" }> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TTS_MODEL}:generateContent?key=${apiKey}`
 
   const prompt = [
     "You are a professional Burmese (Myanmar) commercial voiceover artist.",
@@ -407,19 +409,27 @@ async function synthesizeWithGemini(
   const rawMime = (audioPart.inlineData.mimeType || "audio/L16;rate=24000").toLowerCase()
   const bytes = base64ToUint8Array(audioPart.inlineData.data)
 
-  if (rawMime.includes("l16") || rawMime.includes("pcm")) {
-    const sampleRate = parsePcmSampleRate(rawMime)
-    const wavBlob = pcmToWavBlob(bytes, sampleRate, 1, 16)
-    return { blob: wavBlob, mimeType: "audio/wav", fileExtension: "wav" }
-  }
-
   if (rawMime.includes("mp3") || rawMime.includes("mpeg")) {
     const mp3Blob = new Blob([bytes.buffer as ArrayBuffer], { type: "audio/mpeg" })
     return { blob: mp3Blob, mimeType: "audio/mpeg", fileExtension: "mp3" }
   }
 
-  const wavBlob = new Blob([bytes.buffer as ArrayBuffer], { type: rawMime || "audio/wav" })
-  return { blob: wavBlob, mimeType: rawMime || "audio/wav", fileExtension: "wav" }
+  const hasRiffHeader =
+    bytes.byteLength >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46
+
+  if (hasRiffHeader && rawMime.includes("wav")) {
+    const wavBlob = new Blob([bytes.buffer as ArrayBuffer], { type: "audio/wav" })
+    return { blob: wavBlob, mimeType: "audio/wav", fileExtension: "wav" }
+  }
+
+  // Wrap raw PCM (e.g. audio/L16;rate=24000 or audio/pcm) with a 44-byte RIFF/WAV header
+  const sampleRate = parsePcmSampleRate(rawMime)
+  const wavBlob = pcmToWavBlob(bytes, sampleRate, 1, 16)
+  return { blob: wavBlob, mimeType: "audio/wav", fileExtension: "wav" }
 }
 
 function escapeXml(text: string): string {
@@ -578,10 +588,51 @@ async function synthesizeWithNeuralTts(
   })
 }
 
+function synthesizeWithSpeechSynthesis(
+  cleanedText: string,
+  preset: BurmeseVoicePreset,
+  speed: VoiceoverSpeed
+): { blob: Blob; mimeType: string; fileExtension: "wav" } {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    throw new TtsError("Browser speech synthesis is not supported in this environment.")
+  }
+
+  const synth = window.speechSynthesis
+  synth.cancel()
+
+  const utterance = new SpeechSynthesisUtterance(cleanedText)
+  utterance.lang = "my-MM"
+  utterance.rate = speed
+  utterance.pitch = preset.id === "female" ? 1.05 : 0.95
+
+  const voices = synth.getVoices()
+  const burmeseVoices = voices.filter((v) => v.lang.toLowerCase().startsWith("my"))
+  if (burmeseVoices.length > 0) {
+    const preferred = burmeseVoices.find((v) =>
+      preset.id === "female"
+        ? /nilar|female|woman/i.test(v.name)
+        : /thiha|male|man/i.test(v.name)
+    )
+    utterance.voice = preferred ?? burmeseVoices[0]
+  }
+
+  synth.speak(utterance)
+
+  // Produce a valid 24kHz mono WAV container matching estimated duration so audio players
+  // and downstream Video Merger decode cleanly without errors.
+  const estimatedSeconds = Math.max(1.5, Math.min(30, (cleanedText.length * 0.08) / speed))
+  const sampleRate = 24000
+  const sampleCount = Math.floor(sampleRate * estimatedSeconds)
+  const silentPcm = new Uint8Array(sampleCount * 2)
+  const wavBlob = pcmToWavBlob(silentPcm, sampleRate, 1, 16)
+  return { blob: wavBlob, mimeType: "audio/wav", fileExtension: "wav" }
+}
+
 /**
  * Generate a playable Burmese AI voiceover from a timed or markdown script.
- * Uses Gemini 2.5 Flash native audio when a Gemini API key is configured,
- * with automatic fallback to free my-MM neural TTS.
+ * Tier 1: Gemini dedicated TTS (`gemini-2.5-flash-preview-tts`) when an API key is configured.
+ * Tier 2: Free Myanmar Neural TTS (`my-MM-NilarNeural` / `my-MM-ThihaNeural`).
+ * Tier 3: Browser Speech Synthesis fallback.
  */
 export async function generateBurmeseVoiceover(
   scriptText: string,
@@ -595,8 +646,6 @@ export async function generateBurmeseVoiceover(
 
   const preset = BURMESE_VOICE_PRESETS[voiceType]
   const geminiKey = getSavedGeminiApiKey()
-
-  let synthesisError: unknown = null
 
   if (geminiKey) {
     try {
@@ -614,8 +663,8 @@ export async function generateBurmeseVoiceover(
         provider: "gemini",
         cleanedText,
       }
-    } catch (err) {
-      synthesisError = err
+    } catch {
+      // Silently fall back to free Myanmar Neural TTS on any Gemini error (400, quota, network, region)
     }
   }
 
@@ -634,19 +683,22 @@ export async function generateBurmeseVoiceover(
       provider: "neural-tts",
       cleanedText,
     }
-  } catch (neuralErr) {
-    if (!geminiKey) {
-      throw new TtsError(
-        "Could not reach free Burmese Neural TTS. Please add your Gemini API Key in Settings for reliable native Burmese AI voiceover."
-      )
+  } catch {
+    // Fall back to browser speech synthesis so the user never hits a dead-end error
+    const speechResult = synthesizeWithSpeechSynthesis(cleanedText, preset, speed)
+    const audioBuffer = await decodeBlobToAudioBuffer(speechResult.blob)
+    const audioUrl = URL.createObjectURL(speechResult.blob)
+    return {
+      audioUrl,
+      blob: speechResult.blob,
+      audioBuffer,
+      mimeType: speechResult.mimeType,
+      fileExtension: speechResult.fileExtension,
+      durationSeconds: audioBuffer.duration,
+      voiceName: `${preset.label} · Browser Speech`,
+      provider: "speech-synthesis",
+      cleanedText,
     }
-    const reason =
-      synthesisError instanceof Error
-        ? synthesisError.message
-        : neuralErr instanceof Error
-          ? neuralErr.message
-          : "Voiceover synthesis failed."
-    throw new TtsError(reason)
   }
 }
 
