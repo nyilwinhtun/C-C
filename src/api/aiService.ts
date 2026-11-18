@@ -1166,17 +1166,98 @@ function mockGenerateVideoContent(
   }
 }
 
+const OPENROUTER_VIDEO_MODEL = "google/gemini-2.5-flash"
+
+async function generateVideoWithOpenRouter(
+  mediaParts: Array<{ inlineData: { mimeType: string; data: string } }>,
+  prompt: string,
+  apiKey: string,
+  analysisMode: "direct" | "keyframes",
+  frameCount?: number
+): Promise<VideoContentResult> {
+  const imageContentParts = mediaParts.map((part) => ({
+    type: "image_url" as const,
+    image_url: {
+      url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
+    },
+  }))
+
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer": window.location.origin,
+      "X-Title": "Content Creator SaaS",
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_VIDEO_MODEL,
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: prompt }, ...imageContentParts],
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 2048,
+    }),
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw parseApiError("OpenRouter", res.status, text)
+  }
+
+  const data = await res.json()
+  const content = String(data.choices?.[0]?.message?.content ?? "").trim()
+  if (!content) {
+    throw new Error("No content returned from OpenRouter Video API.")
+  }
+
+  return parseVideoContentResponse(content, analysisMode, frameCount)
+}
+
+async function extractKeyframeMedia(params: GenerateVideoContentParams): Promise<{
+  mediaParts: Array<{ inlineData: { mimeType: string; data: string } }>
+  frameCount: number
+  analysisMode: "keyframes"
+}> {
+  params.onProgress?.("extracting")
+  const frames = await extractKeyframesFromVideo(params.file, 5, 720, 0.75)
+  params.onProgress?.("analyzing")
+  return {
+    mediaParts: frames.map((data) => ({
+      inlineData: {
+        mimeType: "image/jpeg",
+        data,
+      },
+    })),
+    frameCount: frames.length,
+    analysisMode: "keyframes",
+  }
+}
+
 export async function generateVideoContent(
   params: GenerateVideoContentParams
 ): Promise<VideoContentResult> {
   const { provider, apiKey } = getAiConfig()
+  const trimmedKey = apiKey.trim()
   const envGeminiKey =
     (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ?? ""
-  const geminiKey =
-    provider === "gemini" ? apiKey.trim() : (envGeminiKey || apiKey.trim())
+  const envOpenRouterKey =
+    (import.meta.env.VITE_OPENROUTER_API_KEY as string | undefined)?.trim() ?? ""
+  const openRouterKey =
+    provider === "openrouter"
+      ? trimmedKey
+      : trimmedKey.startsWith("sk-or-")
+        ? trimmedKey
+        : envOpenRouterKey
+  const geminiKey = provider === "gemini" ? trimmedKey : envGeminiKey
+  const useOpenRouterDirectly = provider === "openrouter"
 
-  const isDirectMode = params.file.size <= VIDEO_DIRECT_MAX_BYTES
-  const analysisMode: "direct" | "keyframes" = isDirectMode ? "direct" : "keyframes"
+  const isDirectMode =
+    !useOpenRouterDirectly && params.file.size <= VIDEO_DIRECT_MAX_BYTES
+  let analysisMode: "direct" | "keyframes" = isDirectMode ? "direct" : "keyframes"
 
   let mediaParts: Array<{ inlineData: { mimeType: string; data: string } }> = []
   let frameCount: number | undefined
@@ -1193,19 +1274,46 @@ export async function generateVideoContent(
       },
     ]
   } else {
-    params.onProgress?.("extracting")
-    const frames = await extractKeyframesFromVideo(params.file, 5, 720, 0.75)
-    frameCount = frames.length
-    params.onProgress?.("analyzing")
-    mediaParts = frames.map((data) => ({
-      inlineData: {
-        mimeType: "image/jpeg",
-        data,
-      },
-    }))
+    const extracted = await extractKeyframeMedia(params)
+    mediaParts = extracted.mediaParts
+    frameCount = extracted.frameCount
+    analysisMode = extracted.analysisMode
+  }
+
+  const routeViaOpenRouter = async (key: string): Promise<VideoContentResult> => {
+    if (mediaParts.some((part) => !part.inlineData.mimeType.startsWith("image/"))) {
+      const extracted = await extractKeyframeMedia(params)
+      mediaParts = extracted.mediaParts
+      frameCount = extracted.frameCount
+      analysisMode = extracted.analysisMode
+    }
+    const orPrompt = buildVideoPrompt({
+      platform: params.platform,
+      language: params.language,
+      productNote: params.productNote,
+      analysisMode,
+    })
+    return await generateVideoWithOpenRouter(
+      mediaParts,
+      orPrompt,
+      key,
+      analysisMode,
+      frameCount
+    )
+  }
+
+  if (useOpenRouterDirectly) {
+    if (!openRouterKey) {
+      await delay(900)
+      return mockGenerateVideoContent(params, analysisMode, frameCount)
+    }
+    return await routeViaOpenRouter(openRouterKey)
   }
 
   if (!geminiKey) {
+    if (openRouterKey) {
+      return await routeViaOpenRouter(openRouterKey)
+    }
     await delay(900)
     return mockGenerateVideoContent(params, analysisMode, frameCount)
   }
@@ -1227,6 +1335,18 @@ export async function generateVideoContent(
       frameCount
     )
   } catch (err) {
+    const isLocationUnsupported =
+      err instanceof Error &&
+      err.message.toLowerCase().includes("user location is not supported") &&
+      (err instanceof ApiError ? err.status === 400 : true)
+
+    if (isLocationUnsupported && openRouterKey) {
+      console.warn(
+        "Gemini location unsupported (400). Routing video analysis through OpenRouter..."
+      )
+      return await routeViaOpenRouter(openRouterKey)
+    }
+
     const isQuota =
       (err instanceof ApiError && err.isQuotaExceeded) ||
       (err instanceof Error &&
