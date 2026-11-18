@@ -118,11 +118,20 @@ export const useContentStore = create<ContentState>()(
         }),
 
       updateVaultItem: (id, updates) =>
-        set((state) => ({
-          savedVault: state.savedVault.map((v) =>
-            v.id === id ? { ...v, ...updates } : v
-          ),
-        })),
+        set((state) => {
+          let updatedItem: SavedVaultItem | undefined
+          const savedVault = state.savedVault.map((v) => {
+            if (v.id === id) {
+              updatedItem = { ...v, ...updates }
+              return updatedItem
+            }
+            return v
+          })
+          if (updatedItem) {
+            void updateVaultItemInSupabase(updatedItem)
+          }
+          return { savedVault }
+        }),
       deleteVaultItem: (id) =>
         set((state) => {
           const next = {
@@ -226,6 +235,26 @@ async function syncVaultItemToSupabase(item: SavedVaultItem): Promise<void> {
     if (error) throw error
   } catch (err) {
     console.error("Failed to sync vault item to Supabase", err)
+  }
+}
+
+async function updateVaultItemInSupabase(item: SavedVaultItem): Promise<void> {
+  const { user } = useUIStore.getState()
+  if (!user) return
+  try {
+    const { error } = (await (supabase.from("vault_items") as any)
+      .update({
+        title: item.title,
+        content: item.content,
+        platform: item.platform,
+        tags: item.tags,
+        status: item.status,
+        scheduled_date: item.scheduledDate ?? null,
+      })
+      .eq("id", item.id)) as any
+    if (error) throw error
+  } catch (err) {
+    console.error("Failed to update vault item in Supabase", err)
   }
 }
 

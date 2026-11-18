@@ -224,7 +224,14 @@ const OPENROUTER_FREE_VISION_MODELS = [
 
 function shouldFallbackOpenRouterModel(err: unknown): boolean {
   if (err instanceof ApiError) {
-    return err.status === 402 || err.status === 404 || err.status === 429 || err.isQuotaExceeded
+    return (
+      err.status === 402 ||
+      err.status === 404 ||
+      err.status === 429 ||
+      err.status === 502 ||
+      err.status === 503 ||
+      err.isQuotaExceeded
+    )
   }
   if (err instanceof Error) {
     const msg = err.message.toLowerCase()
@@ -232,10 +239,27 @@ function shouldFallbackOpenRouterModel(err: unknown): boolean {
       msg.includes("402") ||
       msg.includes("insufficient credits") ||
       msg.includes("404") ||
-      msg.includes("429")
+      msg.includes("429") ||
+      msg.includes("502") ||
+      msg.includes("503")
     )
   }
   return false
+}
+
+const GROQ_VISION_FALLBACK_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+const GROQ_TEXT_ONLY_MODELS = new Set([
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "mixtral-8x7b-32768",
+])
+
+function resolveGroqVisionModel(model: string): string {
+  const trimmed = model.trim()
+  if (!trimmed || GROQ_TEXT_ONLY_MODELS.has(trimmed)) {
+    return GROQ_VISION_FALLBACK_MODEL
+  }
+  return trimmed
 }
 
 async function callOpenRouterWithFallback<T>(
@@ -842,7 +866,7 @@ export async function suggestFromPhoto(
   }
 
   if (provider === "gemini") {
-    const primaryModel = GEMINI_VISION_MODEL
+    const primaryModel = model || GEMINI_VISION_MODEL
     try {
       return await suggestPhotoWithGemini(request, trimmedKey, primaryModel)
     } catch (err) {
@@ -862,7 +886,10 @@ export async function suggestFromPhoto(
             err.message.includes("RESOURCE_EXHAUSTED") ||
             err.message.toLowerCase().includes("quota")))
 
-      if (isQuota || (err instanceof ApiError && err.status === 404)) {
+      if (
+        (isQuota || (err instanceof ApiError && err.status === 404)) &&
+        primaryModel !== GEMINI_FALLBACK_MODEL
+      ) {
         return await suggestPhotoWithGemini(request, trimmedKey, GEMINI_FALLBACK_MODEL)
       }
       throw err
@@ -881,7 +908,7 @@ export async function suggestFromPhoto(
     request,
     provider,
     trimmedKey,
-    model || "llama-3.3-70b-versatile"
+    resolveGroqVisionModel(model)
   )
 }
 
@@ -1272,9 +1299,10 @@ function mockGenerateVideoContent(
   }
 }
 
-async function generateVideoWithOpenRouter(
+async function generateVideoWithOpenAICompatible(
   mediaParts: Array<{ inlineData: { mimeType: string; data: string } }>,
   prompt: string,
+  provider: "openrouter" | "groq",
   apiKey: string,
   model: string,
   analysisMode: "direct" | "keyframes",
@@ -1287,17 +1315,25 @@ async function generateVideoWithOpenRouter(
     },
   }))
 
-  return await callOpenRouterWithFallback(
-    model || DEFAULT_MODELS.openrouter,
-    async (candidateModel) => {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const baseUrl =
+    provider === "groq"
+      ? "https://api.groq.com/openai/v1/chat/completions"
+      : "https://openrouter.ai/api/v1/chat/completions"
+  const providerName = provider === "groq" ? "Groq" : "OpenRouter"
+
+  const sendRequest = async (candidateModel: string): Promise<VideoContentResult> => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    }
+    if (provider === "openrouter") {
+      headers["HTTP-Referer"] = window.location.origin
+      headers["X-Title"] = "Content Creator SaaS"
+    }
+
+    const res = await fetch(baseUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "HTTP-Referer": window.location.origin,
-        "X-Title": "Content Creator SaaS",
-      },
+      headers,
       body: JSON.stringify({
         model: candidateModel,
         messages: [
@@ -1313,17 +1349,26 @@ async function generateVideoWithOpenRouter(
 
     if (!res.ok) {
       const text = await res.text().catch(() => "")
-      throw parseApiError("OpenRouter", res.status, text)
+      throw parseApiError(providerName, res.status, text)
     }
 
     const data = await res.json()
     const content = String(data.choices?.[0]?.message?.content ?? "").trim()
     if (!content) {
-      throw new Error("No content returned from OpenRouter Video API.")
+      throw new Error(`No content returned from ${providerName} Video API.`)
     }
 
     return parseVideoContentResponse(content, analysisMode, frameCount)
-  })
+  }
+
+  if (provider === "openrouter") {
+    return await callOpenRouterWithFallback(
+      model || DEFAULT_MODELS.openrouter,
+      sendRequest
+    )
+  }
+
+  return await sendRequest(resolveGroqVisionModel(model))
 }
 
 async function extractKeyframeMedia(params: GenerateVideoContentParams): Promise<{
@@ -1349,14 +1394,17 @@ async function extractKeyframeMedia(params: GenerateVideoContentParams): Promise
 export async function generateVideoContent(
   params: GenerateVideoContentParams
 ): Promise<VideoContentResult> {
-  const { provider, apiKeys, models } = getAiConfig()
+  const { provider, apiKey, apiKeys, model, models } = getAiConfig()
   const openRouterKey = apiKeys.openrouter.trim()
   const geminiKey = apiKeys.gemini.trim()
+  const groqKey = apiKeys.groq.trim()
   const openRouterModel = models.openrouter || DEFAULT_MODELS.openrouter
-  const useOpenRouterDirectly = provider === "openrouter"
+  const groqModel = models.groq || DEFAULT_MODELS.groq
+  const geminiModel = model || GEMINI_VISION_MODEL
 
+  const useKeyframesOnly = provider !== "gemini"
   const isDirectMode =
-    !useOpenRouterDirectly && params.file.size <= VIDEO_DIRECT_MAX_BYTES
+    !useKeyframesOnly && params.file.size <= VIDEO_DIRECT_MAX_BYTES
   let analysisMode: "direct" | "keyframes" = isDirectMode ? "direct" : "keyframes"
 
   let mediaParts: Array<{ inlineData: { mimeType: string; data: string } }> = []
@@ -1380,24 +1428,29 @@ export async function generateVideoContent(
     analysisMode = extracted.analysisMode
   }
 
-  const routeViaOpenRouter = async (key: string): Promise<VideoContentResult> => {
+  const routeViaOpenAICompatible = async (
+    targetProvider: "openrouter" | "groq",
+    key: string,
+    targetModel: string
+  ): Promise<VideoContentResult> => {
     if (mediaParts.some((part) => !part.inlineData.mimeType.startsWith("image/"))) {
       const extracted = await extractKeyframeMedia(params)
       mediaParts = extracted.mediaParts
       frameCount = extracted.frameCount
       analysisMode = extracted.analysisMode
     }
-    const orPrompt = buildVideoPrompt({
+    const prompt = buildVideoPrompt({
       platform: params.platform,
       language: params.language,
       productNote: params.productNote,
       analysisMode,
     })
-    return await generateVideoWithOpenRouter(
+    return await generateVideoWithOpenAICompatible(
       mediaParts,
-      orPrompt,
+      prompt,
+      targetProvider,
       key,
-      openRouterModel,
+      targetModel,
       analysisMode,
       frameCount
     )
@@ -1415,7 +1468,7 @@ export async function generateVideoContent(
         mediaParts,
         prompt,
         geminiKey,
-        GEMINI_VISION_MODEL,
+        geminiModel,
         analysisMode,
         frameCount
       )
@@ -1428,9 +1481,12 @@ export async function generateVideoContent(
             err.message.includes("RESOURCE_EXHAUSTED") ||
             err.message.toLowerCase().includes("quota")))
 
-      if (isQuota || (err instanceof ApiError && err.status === 404)) {
+      if (
+        (isQuota || (err instanceof ApiError && err.status === 404)) &&
+        geminiModel !== GEMINI_FALLBACK_MODEL
+      ) {
         console.warn(
-          `Gemini quota/model fallback for "${GEMINI_VISION_MODEL}". Retrying with "${GEMINI_FALLBACK_MODEL}"...`
+          `Gemini quota/model fallback for "${geminiModel}". Retrying with "${GEMINI_FALLBACK_MODEL}"...`
         )
         return await generateVideoWithGemini(
           mediaParts,
@@ -1445,18 +1501,24 @@ export async function generateVideoContent(
     }
   }
 
-  if (useOpenRouterDirectly) {
+  if (provider === "openrouter") {
     if (!openRouterKey) {
       await delay(900)
       return mockGenerateVideoContent(params, analysisMode, frameCount)
     }
-    return await routeViaOpenRouter(openRouterKey)
+    return await routeViaOpenAICompatible("openrouter", openRouterKey, openRouterModel)
   }
 
-  if (!geminiKey) {
-    if (openRouterKey) {
-      return await routeViaOpenRouter(openRouterKey)
+  if (provider === "groq") {
+    if (!groqKey) {
+      await delay(900)
+      return mockGenerateVideoContent(params, analysisMode, frameCount)
     }
+    return await routeViaOpenAICompatible("groq", groqKey, groqModel)
+  }
+
+  // Active provider is Gemini
+  if (!apiKey.trim()) {
     await delay(900)
     return mockGenerateVideoContent(params, analysisMode, frameCount)
   }
@@ -1468,7 +1530,7 @@ export async function generateVideoContent(
       console.warn(
         "Gemini location unsupported (400). Routing video analysis through OpenRouter..."
       )
-      return await routeViaOpenRouter(openRouterKey)
+      return await routeViaOpenAICompatible("openrouter", openRouterKey, openRouterModel)
     }
     throw err
   }

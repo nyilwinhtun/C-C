@@ -139,8 +139,12 @@ export function PlannerPage() {
 
   const handleCopy = useCallback(
     async (text: string) => {
-      await navigator.clipboard.writeText(text)
-      toast.success(t(language, "generator.copySuccess"))
+      try {
+        await navigator.clipboard.writeText(text)
+        toast.success(t(language, "generator.copySuccess"))
+      } catch {
+        toast.error(t(language, "generator.copyError"))
+      }
     },
     [language]
   )

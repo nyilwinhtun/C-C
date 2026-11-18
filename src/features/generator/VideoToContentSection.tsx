@@ -23,6 +23,7 @@ import {
 import { toast } from "@/components/ui/sonner"
 import {
   generateVideoContent,
+  isSupportedVideoFile,
   type VideoContentResult,
   type VideoPlatformOption,
 } from "@/api/aiService"
@@ -113,6 +114,12 @@ export function VideoToContentSection() {
       if (!file) return
       if (file.size <= 0) {
         const msg = "Selected file is empty (0 bytes). Please choose a valid video file."
+        setErrorMessage(msg)
+        toast.error(msg)
+        return
+      }
+      if (file.type && !isSupportedVideoFile(file)) {
+        const msg = "Unsupported file format. Please choose a video file (MP4, MOV, WebM)."
         setErrorMessage(msg)
         toast.error(msg)
         return

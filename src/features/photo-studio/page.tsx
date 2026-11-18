@@ -1210,13 +1210,22 @@ export function PhotoStudioPage() {
 
   const handleFile = useCallback(
     (file: File) => {
-      const validTypes = ["image/jpeg", "image/png", "image/webp"]
-      if (!validTypes.includes(file.type)) {
+      const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+      const lowerName = (file.name || "").toLowerCase()
+      const hasValidExt = /\.(jpe?g|png|webp)$/i.test(lowerName)
+      const isValidType = file.type
+        ? validTypes.includes(file.type.toLowerCase())
+        : hasValidExt
+      if (!isValidType) {
         toast.error(t(language, "photoStudio.invalidFile"))
         return
       }
-      setImageMimeType(file.type)
-      setOriginalImageMimeType(file.type)
+      const normalizedMime =
+        file.type === "image/jpg" || (!file.type && /\.jpe?g$/i.test(lowerName))
+          ? "image/jpeg"
+          : file.type || (lowerName.endsWith(".png") ? "image/png" : "image/webp")
+      setImageMimeType(normalizedMime)
+      setOriginalImageMimeType(normalizedMime)
       const reader = new FileReader()
       reader.onload = () => {
         if (typeof reader.result === "string") {
@@ -2038,12 +2047,35 @@ export function PhotoStudioPage() {
   const handleDownload = () => {
     const canvas = canvasRef.current
     if (!canvas || !loadedImage) return
-    const dataUrl = canvas.toDataURL("image/png")
-    const link = document.createElement("a")
-    link.download = `poster-${category}-${layoutTemplate}-${aspectRatio.replace(":", "x")}-${Date.now()}.png`
-    link.href = dataUrl
-    link.click()
-    toast.success(t(language, "photoStudio.downloadSuccess"))
+    const filename = `poster-${category}-${layoutTemplate}-${aspectRatio.replace(":", "x")}-${Date.now()}.png`
+
+    const triggerDownload = (href: string, revokeAfter = false) => {
+      const link = document.createElement("a")
+      link.download = filename
+      link.href = href
+      link.rel = "noopener"
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      if (revokeAfter) {
+        window.setTimeout(() => URL.revokeObjectURL(href), 1500)
+      }
+      toast.success(t(language, "photoStudio.downloadSuccess"))
+    }
+
+    if (typeof canvas.toBlob === "function") {
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const objectUrl = URL.createObjectURL(blob)
+          triggerDownload(objectUrl, true)
+        } else {
+          triggerDownload(canvas.toDataURL("image/png"))
+        }
+      }, "image/png")
+      return
+    }
+
+    triggerDownload(canvas.toDataURL("image/png"))
   }
 
   const handleApplyStarterPreset = (presetKey: "flash_sale" | "new_arrival" | "customer_review") => {
