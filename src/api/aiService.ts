@@ -1036,6 +1036,7 @@ export interface GenerateVideoContentParams {
   productNote?: string
   platform: VideoPlatformOption | string
   language: "en" | "my"
+  brandSignature?: string
   onProgress?: (stage: "extracting" | "analyzing") => void
 }
 
@@ -1044,6 +1045,7 @@ export interface VideoContentResult {
   voiceoverScript: string
   caption: string
   coverTitle: string
+  coverTitles?: string[]
   analysisMode: "direct" | "keyframes"
   frameCount?: number
 }
@@ -1208,6 +1210,15 @@ async function extractKeyframesFromVideo(
   }
 }
 
+function appendBrandSignature(caption: string, brandSignature?: string): string {
+  const trimmedCap = caption.trim()
+  const trimmedSig = brandSignature?.trim()
+  if (!trimmedSig) return trimmedCap
+  if (!trimmedCap) return trimmedSig
+  if (trimmedCap.endsWith(trimmedSig)) return trimmedCap
+  return `${trimmedCap}\n\n${trimmedSig}`
+}
+
 function buildVideoPrompt(params: {
   platform: string
   language: "en" | "my"
@@ -1223,44 +1234,61 @@ function buildVideoPrompt(params: {
       : "Review these 5 evenly spaced keyframes from a short product video in chronological order."
 
   if (params.language === "my") {
-    return `You are a top Myanmar short-form video strategist and copywriter.
+    return `You are Myanmar's #1 high-converting short-form video sales strategist and spoken Burmese copywriter (TikTok, Facebook Reels, YouTube Shorts).
 ${mediaContext}
 Target Platform: ${params.platform}
 ${noteBlock}
 
 Analyze the visual scenes, product details, and pacing, then return ONLY a valid JSON object with these exact 4 keys:
-1. "hooks": An array of 3 scroll-stopping hook strings (for on-screen text in the first 3 seconds) in natural Myanmar (Burmese) Unicode script.
-2. "voiceoverScript": A natural spoken Burmese voiceover script timed to the video flow (e.g. using short time cues like [0-3s], [3-10s], [10-15s] with spoken lines).
-3. "caption": A ready-to-copy-paste ${params.platform} caption in natural Myanmar (Burmese) Unicode script with relevant emojis and 4-6 hashtags at the end.
-4. "coverTitle": A short, punchy 4 to 6 word Cover / Thumbnail Title in natural Myanmar (Burmese) Unicode script.
 
-CRITICAL RULES:
-- Write in natural, engaging spoken Myanmar (Burmese) Unicode script.
-- Keep international brand, product, and platform names (e.g., iPhone, Redmi, Samsung, TikTok, Reels, Facebook, YouTube) in their original English spelling.
-- Do NOT use raw Markdown symbols (*, **, # headings) in hooks, voiceoverScript, or coverTitle. Only normal #hashtags are allowed at the end of caption.
+1. "hooks": An array of 3 scroll-stopping spoken Burmese hook strings for the first 3 seconds, covering these 3 distinct angles:
+   - Hook 1 (Curiosity / သိချင်စိတ်နှိုးဆွ): Makes viewers stop and wonder what happens next.
+   - Hook 2 (Price / Value / တန်ဖိုးပေါ်လွင်): Highlights unbeatable value, deal, or price-to-quality ratio.
+   - Hook 3 (Problem-Solution / ပြဿနာဖြေရှင်း): Calls out a relatable daily pain point and shows the product as the instant fix.
+
+2. "voiceoverScript": A high-energy, natural spoken Burmese voiceover script strictly broken down into these 3 timed sections:
+   [0-3s Hook]
+   (Punchy opening line that grabs attention immediately)
+
+   [3-10s Demo & Key Benefit]
+   (Describe what is happening on screen and the #1 benefit in natural conversational Burmese)
+
+   [10-15s Price & Call-to-Action]
+   (State the price/promo with natural spoken Burmese pronunciation for numbers/prices—e.g. "၄၅,၀၀၀ ကျပ် (လေးသောင်းခွဲ)" or "၂ သောင်းကျော်"—and end with an urgent, friendly CTA like "အခုပဲ Inbox မှာ လာမှာလိုက်နော်!")
+
+3. "coverTitles": An array of 2 short, punchy 3 to 5 word On-Screen Cover Text headlines in Burmese (ready to paste straight into CapCut).
+
+4. "caption": A ready-to-post ${params.platform} social caption in energetic spoken Burmese with natural emojis and 4-6 relevant hashtags at the end.
+
+CRITICAL LANGUAGE & STYLE RULES:
+- Write in AUTHENTIC, ENERGETIC, CONVERSATIONAL SPOKEN BURMESE (မြန်မာစကားပြော) using natural everyday particles like "ဗျာ", "နော်", "တကယ်တမ်း", "အခုပဲ", "မိုက်တယ်နော်", "လုံးဝတန်တယ်".
+- STRICTLY AVOID stiff, formal, bookish/literary endings such as "ဖြစ်ပါသည်", "ပြုလုပ်နိုင်ပါသည်", "ဝယ်ယူရရှိနိုင်ပါသည်", "ဖော်ပြပေးလိုက်ပါတယ်", "ပါဝင်ပါသည်", or "ရှိပါသည်". Always use natural spoken endings like "ပါတယ်ဗျာ", "လုပ်လို့ရတယ်နော်", "ဝယ်လို့ရပြီနော်".
+- Keep international brand, product, and platform names (e.g., iPhone, Redmi, Samsung, CapCut, TikTok, Reels, Facebook, YouTube) in their original English spelling.
+- Do NOT use raw Markdown symbols (*, **, # headings) in hooks, voiceoverScript, or coverTitles. Only normal #hashtags are allowed at the end of caption.
 - Return ONLY valid JSON.`
   }
 
-  return `You are a top short-form video strategist and social media copywriter.
+  return `You are a top short-form video sales strategist and social media copywriter.
 ${mediaContext}
 Target Platform: ${params.platform}
 ${noteBlock}
 
 Analyze the visual scenes, product details, and pacing, then return ONLY a valid JSON object with these exact 4 keys:
-1. "hooks": An array of 3 scroll-stopping hook strings (for on-screen text in the first 3 seconds) in natural English.
-2. "voiceoverScript": A natural spoken English voiceover script timed to the video flow (e.g. using short time cues like [0-3s], [3-10s], [10-15s] with spoken lines).
-3. "caption": A ready-to-copy-paste ${params.platform} caption in English with relevant emojis and 4-6 hashtags at the end.
-4. "coverTitle": A short, punchy 4 to 6 word Cover / Thumbnail Title in English.
+1. "hooks": An array of 3 scroll-stopping hook strings for the first 3 seconds covering 3 angles: (1) Curiosity, (2) Price/Value, and (3) Problem-Solution.
+2. "voiceoverScript": A punchy spoken English voiceover script strictly broken down into [0-3s Hook], [3-10s Demo & Key Benefit], and [10-15s Price & Call-to-Action].
+3. "coverTitles": An array of 2 short, punchy 3 to 5 word On-Screen Cover Text headlines ready to paste into CapCut.
+4. "caption": A ready-to-copy-paste ${params.platform} caption in English with relevant emojis and 4-6 hashtags at the end.
 
 CRITICAL RULES:
-- Do NOT use raw Markdown symbols (*, **, # headings) in hooks, voiceoverScript, or coverTitle. Only normal #hashtags are allowed at the end of caption.
+- Do NOT use raw Markdown symbols (*, **, # headings) in hooks, voiceoverScript, or coverTitles. Only normal #hashtags are allowed at the end of caption.
 - Return ONLY valid JSON.`
 }
 
 function parseVideoContentResponse(
   raw: string,
   analysisMode: "direct" | "keyframes",
-  frameCount?: number
+  frameCount?: number,
+  brandSignature?: string
 ): VideoContentResult {
   const cleaned = raw
     .trim()
@@ -1274,6 +1302,7 @@ function parseVideoContentResponse(
       voiceoverScript?: unknown
       caption?: unknown
       coverTitle?: unknown
+      coverTitles?: unknown
     }
 
     const hooks = Array.isArray(parsed.hooks)
@@ -1287,14 +1316,31 @@ function parseVideoContentResponse(
       typeof parsed.voiceoverScript === "string"
         ? stripMarkdownArtifacts(parsed.voiceoverScript)
         : ""
-    const caption =
+    const rawCaption =
       typeof parsed.caption === "string"
         ? stripMarkdownArtifacts(parsed.caption, true)
         : ""
-    const coverTitle =
+    const caption = appendBrandSignature(rawCaption, brandSignature)
+
+    const parsedCoverTitles = Array.isArray(parsed.coverTitles)
+      ? parsed.coverTitles
+          .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+          .map((item) => stripMarkdownArtifacts(item))
+          .slice(0, 2)
+      : []
+
+    const singleCoverTitle =
       typeof parsed.coverTitle === "string"
         ? stripMarkdownArtifacts(parsed.coverTitle)
         : ""
+
+    const coverTitles =
+      parsedCoverTitles.length > 0
+        ? parsedCoverTitles
+        : singleCoverTitle
+          ? [singleCoverTitle]
+          : []
+    const coverTitle = coverTitles[0] ?? singleCoverTitle
 
     if (hooks.length > 0 || voiceoverScript || caption || coverTitle) {
       return {
@@ -1302,6 +1348,7 @@ function parseVideoContentResponse(
         voiceoverScript,
         caption,
         coverTitle,
+        coverTitles,
         analysisMode,
         frameCount,
       }
@@ -1313,8 +1360,9 @@ function parseVideoContentResponse(
   return {
     hooks: [],
     voiceoverScript: sanitizePlainText(cleaned),
-    caption: "",
+    caption: appendBrandSignature("", brandSignature),
     coverTitle: "",
+    coverTitles: [],
     analysisMode,
     frameCount,
   }
@@ -1326,7 +1374,8 @@ async function generateVideoWithGemini(
   apiKey: string,
   model: string,
   analysisMode: "direct" | "keyframes",
-  frameCount?: number
+  frameCount?: number,
+  brandSignature?: string
 ): Promise<VideoContentResult> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
   const body = {
@@ -1372,7 +1421,7 @@ async function generateVideoWithGemini(
     )
   }
 
-  return parseVideoContentResponse(content, analysisMode, frameCount)
+  return parseVideoContentResponse(content, analysisMode, frameCount, brandSignature)
 }
 
 function mockGenerateVideoContent(
@@ -1382,35 +1431,47 @@ function mockGenerateVideoContent(
 ): VideoContentResult {
   const note = params.productNote?.trim()
   if (params.language === "my") {
+    const captionBody = `✨ ${note ? note + " — " : ""}တကယ်တမ်း နေ့တိုင်းသုံးဖို့ အရမ်းမိုက်ပြီး စိတ်ချရတဲ့ ပစ္စည်းလေးပါဗျာ!\n\n📩 လိုချင်ရင် အခုပဲ Inbox မှာ လာမှာလိုက်နော်!\n\n#ProductShowcase #MyanmarOnlineShop #ReelsMyanmar #Trending`
+    const coverTitles = [
+      "မဝယ်ခင် ဒါအရင်ကြည့်!",
+      "တကယ်တန်တဲ့ ပစ္စည်းကောင်း",
+    ]
     return {
       hooks: [
-        note ? `ဒါလေးကတော့ ${note} ပဲဖြစ်ပါတယ်!` : "ဒီပစ္စည်းလေးကို မဝယ်ခင် ဒါကိုအရင်ကြည့်!",
-        "နေ့တိုင်းသုံးဖို့ အတန်ဆုံးရွေးချယ်မှု 🔥",
-        "စက္ကန့် ၁၅ အတွင်း ဘာကြောင့်လူကြိုက်များလဲကြည့်ရအောင်",
+        note ? `ဒီ ${note} လေး ဘာကြောင့် လူကြိုက်များနေလဲ ကြည့်လိုက်ဗျာ!` : "ဒါလေး မဝယ်ခင် ဒီဗီဒီယိုကို အရင်ကြည့်လိုက်နော်!",
+        "ဒီဈေးနဲ့ ဒီလိုအရည်အသွေး တကယ်တမ်း ဘယ်မှာမှ မရဘူးဗျာ 🔥",
+        "နေ့တိုင်း စိတ်ညစ်နေရတဲ့ ပြဿနာကို ဒါလေးတစ်ခုတည်းနဲ့ ရှင်းလိုက်!",
       ],
       voiceoverScript:
-        "[0-3s] မင်္ဂလာပါ! ဒီနေ့မှာတော့ လူကြိုက်များနေတဲ့ ပစ္စည်းလေးကို လက်တွေ့ပြသပေးသွားပါမယ်။\n\n[3-10s] ဒီဇိုင်းပိုင်းက သပ်ရပ်လှပပြီး နေ့စဉ်အသုံးပြုရတာ အရမ်းအဆင်ပြေပါတယ်။" +
+        "[0-3s Hook]\nဟေ့! ဒီပစ္စည်းလေးကို မဝယ်ခင် ဒီဗီဒီယိုကို အရင်ကြည့်လိုက်နော်!\n\n[3-10s Demo & Key Benefit]\nတကယ်တမ်း လက်တွေ့သုံးကြည့်တော့ ဒီဇိုင်းလည်း သပ်ရပ်သလို နေ့တိုင်းသုံးရတာ အရမ်းအဆင်ပြေတယ်ဗျာ။" +
         (note ? ` (${note})` : "") +
-        "\n\n[10-15s] ပစ္စည်းအရေအတွက် ကန့်သတ်ထားတာမို့ အခုပဲ Inbox မှာ မှာယူလိုက်ပါနော်!",
-      caption: `✨ ${note ? note + " — " : ""}နေ့စဉ်အသုံးပြုဖို့ အရည်အသွေးကောင်းပြီး စိတ်ချရတဲ့ ရွေးချယ်မှု!\n\n📩 မှာယူလိုပါက Inbox မှတစ်ဆင့် ဆက်သွယ်မေးမြန်းနိုင်ပါတယ်ခင်ဗျာ။\n\n#ProductShowcase #MyanmarOnlineShop #ReelsMyanmar #Trending`,
-      coverTitle: "မဖြစ်မနေကြည့်သင့်တဲ့ ပစ္စည်းသစ်",
+        "\n\n[10-15s Price & Call-to-Action]\nဈေးနှုန်းလေးကလည်း အရမ်းတန်နေတုန်း ပစ္စည်းကုန်သွားမှာစိုးလို့ အခုပဲ Inbox မှာ လာမှာလိုက်နော်!",
+      caption: appendBrandSignature(captionBody, params.brandSignature),
+      coverTitle: coverTitles[0],
+      coverTitles,
       analysisMode,
       frameCount,
     }
   }
 
+  const enCaptionBody = `✨ ${note ? note + " — " : ""}Clean design, everyday performance, ready to order today!\n\n📩 DM us or check the link in bio to get yours.\n\n#ProductShowcase #ShortVideo #MustHave #ShopNow`
+  const enCoverTitles = [
+    "Must-See Everyday Upgrade",
+    "Worth Every Penny!",
+  ]
   return {
     hooks: [
-      note ? `Stop scrolling — check out ${note}!` : "Wait until you see this detail!",
-      "3 reasons everyone is switching to this 🔥",
-      "The everyday upgrade you didn't know you needed",
+      note ? `Stop scrolling — wait until you see ${note}!` : "Wait until you see this detail!",
+      "Unbeatable value at this price point 🔥",
+      "The everyday fix you didn't know you needed",
     ],
     voiceoverScript:
-      "[0-3s] If you've been looking for an everyday upgrade, take a quick look at this.\n\n[3-10s] Notice the clean finish and practical design built for daily use." +
+      "[0-3s Hook]\nIf you've been looking for an everyday upgrade, take a quick look at this.\n\n[3-10s Demo & Key Benefit]\nNotice the clean finish and practical design built for daily use." +
       (note ? ` Plus: ${note}.` : "") +
-      "\n\n[10-15s] Stock is limited — tap the link or message us to grab yours today!",
-    caption: `✨ ${note ? note + " — " : ""}Clean design, everyday performance, ready to order today!\n\n📩 DM us or check the link in bio to get yours.\n\n#ProductShowcase #ShortVideo #MustHave #ShopNow`,
-    coverTitle: "Must-See Everyday Product Upgrade",
+      "\n\n[10-15s Price & Call-to-Action]\nStock is limited — tap the link or message us to grab yours today!",
+    caption: appendBrandSignature(enCaptionBody, params.brandSignature),
+    coverTitle: enCoverTitles[0],
+    coverTitles: enCoverTitles,
     analysisMode,
     frameCount,
   }
@@ -1423,7 +1484,8 @@ async function generateVideoWithOpenAICompatible(
   apiKey: string,
   model: string,
   analysisMode: "direct" | "keyframes",
-  frameCount?: number
+  frameCount?: number,
+  brandSignature?: string
 ): Promise<VideoContentResult> {
   const imageContentParts = mediaParts.map((part) => ({
     type: "image_url" as const,
@@ -1475,7 +1537,7 @@ async function generateVideoWithOpenAICompatible(
       throw new Error(`No content returned from ${providerName} Video API.`)
     }
 
-    return parseVideoContentResponse(content, analysisMode, frameCount)
+    return parseVideoContentResponse(content, analysisMode, frameCount, brandSignature)
   }
 
   if (provider === "openrouter") {
@@ -1569,7 +1631,8 @@ export async function generateVideoContent(
       key,
       targetModel,
       analysisMode,
-      frameCount
+      frameCount,
+      params.brandSignature
     )
   }
 
@@ -1587,7 +1650,8 @@ export async function generateVideoContent(
         geminiKey,
         geminiModel,
         analysisMode,
-        frameCount
+        frameCount,
+        params.brandSignature
       )
     } catch (err) {
       const isQuota =
@@ -1611,7 +1675,8 @@ export async function generateVideoContent(
           geminiKey,
           GEMINI_FALLBACK_MODEL,
           analysisMode,
-          frameCount
+          frameCount,
+          params.brandSignature
         )
       }
       throw err

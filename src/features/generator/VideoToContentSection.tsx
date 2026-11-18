@@ -12,6 +12,7 @@ import {
   Loader2,
   Mic,
   Pencil,
+  RotateCcw,
   Save,
   Sparkles,
   Type,
@@ -54,6 +55,72 @@ const VIDEO_PLATFORMS: VideoPlatformOption[] = [
 ]
 
 const DIRECT_MODE_LIMIT_BYTES = 15 * 1024 * 1024
+const VIDEO_DRAFT_STORAGE_KEY = "cc_last_video_draft"
+
+interface StoredVideoDraft {
+  productNote: string
+  platform: VideoPlatformOption
+  outputLanguage: "en" | "my"
+  result: VideoContentResult | null
+}
+
+function loadVideoDraft(fallbackLanguage: "en" | "my"): StoredVideoDraft {
+  if (typeof window === "undefined") {
+    return {
+      productNote: "",
+      platform: "TikTok / Reels",
+      outputLanguage: fallbackLanguage,
+      result: null,
+    }
+  }
+  try {
+    const raw = window.localStorage.getItem(VIDEO_DRAFT_STORAGE_KEY)
+    if (!raw) {
+      return {
+        productNote: "",
+        platform: "TikTok / Reels",
+        outputLanguage: fallbackLanguage,
+        result: null,
+      }
+    }
+    const parsed = JSON.parse(raw) as Partial<StoredVideoDraft>
+    const platform: VideoPlatformOption = VIDEO_PLATFORMS.includes(
+      parsed.platform as VideoPlatformOption
+    )
+      ? (parsed.platform as VideoPlatformOption)
+      : "TikTok / Reels"
+    const outputLanguage: "en" | "my" =
+      parsed.outputLanguage === "en" || parsed.outputLanguage === "my"
+        ? parsed.outputLanguage
+        : fallbackLanguage
+    const productNote = typeof parsed.productNote === "string" ? parsed.productNote : ""
+    const result =
+      parsed.result && typeof parsed.result === "object"
+        ? (parsed.result as VideoContentResult)
+        : null
+
+    return {
+      productNote,
+      platform,
+      outputLanguage,
+      result,
+    }
+  } catch {
+    return {
+      productNote: "",
+      platform: "TikTok / Reels",
+      outputLanguage: fallbackLanguage,
+      result: null,
+    }
+  }
+}
+
+function getCoverTitles(data: VideoContentResult): string[] {
+  if (Array.isArray(data.coverTitles) && data.coverTitles.length > 0) {
+    return data.coverTitles.filter((item) => item.trim().length > 0)
+  }
+  return data.coverTitle?.trim() ? [data.coverTitle.trim()] : []
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) {
@@ -78,28 +145,52 @@ function mapVideoPlatformToVaultPlatform(platform: string): string {
 export function VideoToContentSection() {
   const language = useUIStore((state) => state.language)
   const saveToVault = useContentStore((state) => state.saveToVault)
+  const brandSignature = useContentStore((state) => state.brandSignature)
 
   const resultRef = useRef<HTMLDivElement | null>(null)
+  const prevLanguageRef = useRef(language)
+
+  const [initialDraft] = useState<StoredVideoDraft>(() => loadVideoDraft(language))
 
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  const [productNote, setProductNote] = useState("")
-  const [platform, setPlatform] = useState<VideoPlatformOption>("TikTok / Reels")
-  const [outputLanguage, setOutputLanguage] = useState<"en" | "my">(language)
+  const [productNote, setProductNote] = useState(initialDraft.productNote)
+  const [platform, setPlatform] = useState<VideoPlatformOption>(initialDraft.platform)
+  const [outputLanguage, setOutputLanguage] = useState<"en" | "my">(
+    initialDraft.outputLanguage
+  )
 
   const [progressStage, setProgressStage] = useState<"extracting" | "analyzing" | null>(null)
-  const [result, setResult] = useState<VideoContentResult | null>(null)
+  const [result, setResult] = useState<VideoContentResult | null>(initialDraft.result)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [isInputCollapsed, setIsInputCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState<VideoOutputTab>("hooks")
   const [showAllTabs, setShowAllTabs] = useState(false)
 
   useEffect(() => {
-    setOutputLanguage(language)
+    if (prevLanguageRef.current !== language) {
+      prevLanguageRef.current = language
+      setOutputLanguage(language)
+    }
   }, [language])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      const payload: StoredVideoDraft = {
+        productNote,
+        platform,
+        outputLanguage,
+        result,
+      }
+      window.localStorage.setItem(VIDEO_DRAFT_STORAGE_KEY, JSON.stringify(payload))
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [productNote, platform, outputLanguage, result])
 
   useEffect(() => {
     return () => {
@@ -148,6 +239,27 @@ export function VideoToContentSection() {
     setIsInputCollapsed(false)
   }, [])
 
+  const handleResetDraft = useCallback(() => {
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
+    setVideoFile(null)
+    setProductNote("")
+    setPlatform("TikTok / Reels")
+    setOutputLanguage(language)
+    setResult(null)
+    setErrorMessage(null)
+    setIsInputCollapsed(false)
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem(VIDEO_DRAFT_STORAGE_KEY)
+      } catch {
+        // Ignore storage errors
+      }
+    }
+  }, [language])
+
   const handleGenerate = useCallback(async () => {
     if (!videoFile || progressStage) return
     setErrorMessage(null)
@@ -160,6 +272,7 @@ export function VideoToContentSection() {
         productNote: productNote.trim() || undefined,
         platform,
         language: outputLanguage,
+        brandSignature,
         onProgress: (stage) => setProgressStage(stage),
       })
       setResult(generated)
@@ -190,7 +303,7 @@ export function VideoToContentSection() {
     } finally {
       setProgressStage(null)
     }
-  }, [videoFile, progressStage, productNote, platform, outputLanguage, language])
+  }, [videoFile, progressStage, productNote, platform, outputLanguage, brandSignature, language])
 
   const copyText = useCallback(
     async (key: string, text: string) => {
@@ -214,8 +327,13 @@ export function VideoToContentSection() {
       const hooksBlock = data.hooks
         .map((hook, idx) => `${idx + 1}. ${hook}`)
         .join("\n")
+      const covers = getCoverTitles(data)
+      const coverBlock =
+        covers.length > 1
+          ? covers.map((title, idx) => `${idx + 1}. ${title}`).join("\n")
+          : covers[0] ?? ""
       return [
-        `[${t(language, "generator.videoCoverTitle")}]\n${data.coverTitle}`,
+        `[${t(language, "generator.videoCoverTitle")}]\n${coverBlock}`,
         `[${t(language, "generator.videoHooksTitle")}]\n${hooksBlock}`,
         `[${t(language, "generator.videoVoiceoverTitle")}]\n${data.voiceoverScript}`,
         `[${t(language, "generator.videoCaptionTitle")}]\n${data.caption}`,
@@ -240,6 +358,13 @@ export function VideoToContentSection() {
 
   const isGenerating = progressStage !== null
   const isDirectMode = videoFile ? videoFile.size <= DIRECT_MODE_LIMIT_BYTES : true
+  const hasDraft = Boolean(
+    videoFile ||
+      productNote.trim() ||
+      result ||
+      platform !== "TikTok / Reels"
+  )
+  const coverTitles = result ? getCoverTitles(result) : []
 
   const outputTabs: Array<{
     id: VideoOutputTab
@@ -283,10 +408,23 @@ export function VideoToContentSection() {
               : "border-border/60 shadow-sm"
           }
         >
-          <CardHeader className="pb-4 border-b border-border/60">
+          <CardHeader className="pb-4 border-b border-border/60 flex flex-row items-start justify-between gap-3 space-y-0">
             <CardDescription className="leading-[1.85]">
               {t(language, "generator.videoDesc")}
             </CardDescription>
+            {hasDraft && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleResetDraft}
+                disabled={isGenerating}
+                className="h-7 px-2.5 text-xs shrink-0 border-border/60 text-muted-foreground hover:text-foreground"
+              >
+                <RotateCcw className="h-3 w-3 mr-1" aria-hidden="true" />
+                <span>Clear / New Video</span>
+              </Button>
+            )}
           </CardHeader>
           <CardContent className="grid gap-4 p-4 sm:p-6">
             {errorMessage && (
@@ -768,7 +906,7 @@ export function VideoToContentSection() {
               </Card>
             )}
 
-            {(showAllTabs || activeTab === "cover") && result.coverTitle && (
+            {(showAllTabs || activeTab === "cover") && coverTitles.length > 0 && (
               <Card className="border-border/60 shadow-sm overflow-hidden">
                 <CardHeader className="py-2.5 px-4 border-b border-border/60 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -776,14 +914,40 @@ export function VideoToContentSection() {
                     {t(language, "generator.videoCoverTitle")}
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="p-4">
-                  <p className="text-sm font-semibold font-myanmar leading-relaxed">
-                    {result.coverTitle}
-                  </p>
+                <CardContent className="p-3.5 sm:p-4 space-y-2">
+                  {coverTitles.map((title, index) => (
+                    <div
+                      key={`${index}-${title.slice(0, 12)}`}
+                      className="flex items-start justify-between gap-2 rounded-lg border border-border/60 bg-muted/20 p-2.5"
+                    >
+                      <p className="text-sm font-semibold font-myanmar leading-relaxed">
+                        {coverTitles.length > 1 && (
+                          <span className="text-blue-600 dark:text-blue-400 mr-1.5">
+                            {index + 1}.
+                          </span>
+                        )}
+                        {title}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => copyText(`cover-${index}`, title)}
+                        className="h-7 w-7 p-0 shrink-0"
+                        aria-label={t(language, "generator.copy")}
+                      >
+                        {copiedKey === `cover-${index}` ? (
+                          <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                        )}
+                      </Button>
+                    </div>
+                  ))}
                 </CardContent>
                 <CardFooter className="border-t border-border/60 bg-muted/10 px-4 py-2.5 flex items-center justify-between gap-2">
                   <ReadAloudButton
-                    text={result.coverTitle}
+                    text={coverTitles.join("\n")}
                     language={outputLanguage}
                     size="xs"
                   />
@@ -791,7 +955,14 @@ export function VideoToContentSection() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => copyText("cover", result.coverTitle)}
+                    onClick={() =>
+                      copyText(
+                        "cover",
+                        coverTitles.length > 1
+                          ? coverTitles.map((c, i) => `${i + 1}. ${c}`).join("\n")
+                          : coverTitles[0]
+                      )
+                    }
                     className="h-8 px-3 text-xs border-border/60"
                   >
                     {copiedKey === "cover" ? (

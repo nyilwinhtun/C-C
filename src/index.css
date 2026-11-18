@@ -75,6 +75,11 @@
   * {
     @apply border-border;
   }
+  html,
+  body {
+    overscroll-behavior-y: contain;
+    touch-action: pan-x pan-y;
+  }
   body {
     @apply bg-background text-foreground antialiased;
     font-synthesis: none;
