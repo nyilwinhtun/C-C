@@ -1,7 +1,16 @@
 "use client"
 
 import { useState } from "react"
-import { Calendar, Camera, ChevronRight, FolderKanban, LayoutList } from "lucide-react"
+import {
+  Calendar,
+  Camera,
+  ChevronRight,
+  FolderKanban,
+  Globe,
+  LayoutList,
+  Moon,
+  Sun,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -93,6 +102,9 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
     setSidebarCollapsed: state.setSidebarCollapsed,
     setActivePageKey: state.setActivePageKey,
     language: state.language,
+    setLanguage: state.setLanguage,
+    theme: state.theme,
+    toggleTheme: state.toggleTheme,
   }))
   const {
     sidebarCollapsed,
@@ -100,6 +112,9 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
     setSidebarCollapsed,
     setActivePageKey,
     language,
+    setLanguage,
+    theme,
+    toggleTheme,
   } = useUIStore(sidebarSelector)
 
   const collapsed = sidebarCollapsed && !hovered
@@ -175,24 +190,32 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
         </div>
       </aside>
 
-      {mobileOpen && (
-        <Sheet open={mobileOpen} onOpenChange={onMobileToggle} className="w-[280px] max-w-[82vw] border-l border-border/60">
-          <SheetContent className="w-full p-0">
-            <SheetHeader className="relative flex flex-col items-start gap-1 text-left pr-8 pt-4 pb-4 px-4 border-b border-border/60">
+      <Sheet
+        open={mobileOpen}
+        onOpenChange={onMobileToggle}
+        side="left"
+        className="md:hidden w-[280px] max-w-[82vw] z-50 border-r border-border/60"
+      >
+        <SheetContent className="w-full p-0 border-b-0 justify-between">
+          <div>
+            <SheetHeader className="relative flex flex-col items-start gap-1 text-left pr-10 pt-4 pb-4 px-4 border-b border-border/60">
               <div className="flex items-center gap-2.5">
-                <CCLogo size={26} className="h-6.5 w-6.5 shrink-0 rounded-lg shadow-sm" />
-                <SheetTitle className="text-base leading-tight">{t(language, "sidebar.mobile_nav_title")}</SheetTitle>
+                <CCLogo size={28} className="h-7 w-7 shrink-0 rounded-lg shadow-sm" />
+                <SheetTitle className="text-base leading-tight">
+                  {t(language, "sidebar.mobile_nav_title")}
+                </SheetTitle>
               </div>
-              <SheetDescription className="text-xs leading-snug whitespace-nowrap truncate max-w-full">
+              <SheetDescription className="text-xs leading-snug truncate max-w-full">
                 {t(language, "sidebar.mobile_nav_description")}
               </SheetDescription>
               <SheetClose
+                type="button"
                 onClick={() => onMobileToggle(false)}
                 aria-label={t(language, "sidebar.close_menu_label")}
-                className="absolute right-3 top-4 p-1.5 rounded-lg hover:bg-accent"
+                className="absolute right-3 top-3.5 p-2 rounded-lg text-foreground hover:bg-accent"
               />
             </SheetHeader>
-            <nav className="flex flex-col gap-1 px-3 py-4 border-b border-border/60">
+            <nav className="flex flex-col gap-1 px-3 py-4">
               {navigation.map((item) => (
                 <NavLink
                   key={item.key}
@@ -206,9 +229,42 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
                 />
               ))}
             </nav>
-          </SheetContent>
-        </Sheet>
-      )}
+          </div>
+          <div className="px-3 py-3 border-t border-border/60 flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setLanguage(language === "en" ? "my" : "en")}
+              className="flex-1 h-9 text-xs font-medium border-border/60 gap-1.5"
+              aria-label="Toggle language"
+            >
+              <Globe className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden="true" />
+              <span>{language === "en" ? "English" : "မြန်မာ"}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={toggleTheme}
+              className="flex-1 h-9 text-xs font-medium border-border/60 gap-1.5"
+              aria-label="Toggle dark mode"
+            >
+              {theme === "dark" ? (
+                <>
+                  <Sun className="h-4 w-4 text-amber-500 shrink-0" aria-hidden="true" />
+                  <span>Light</span>
+                </>
+              ) : (
+                <>
+                  <Moon className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden="true" />
+                  <span>Dark</span>
+                </>
+              )}
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
     </>
   )
 }

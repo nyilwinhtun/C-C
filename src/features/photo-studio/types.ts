@@ -134,3 +134,4 @@ export interface PosterState {
   showCodBadge: boolean
   codBadgeText: string
 }
+

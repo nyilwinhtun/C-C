@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import type { GeneratorFormValues } from "@/features/generator/schema"
+import type { VideoContentResult } from "@/api/aiService"
 import type { BusinessCategory } from "@/types"
 import { supabase } from "@/lib/supabase"
 import { useUIStore } from "./useUIStore"
@@ -51,6 +52,10 @@ interface ContentState {
   businessCategory: BusinessCategory
   autoAppendShopCta: boolean
   posterDraft: PosterDraft | null
+  uploadedVideoFile: File | null
+  videoPreviewUrl: string | null
+  videoProductNote: string
+  generatedVideoResult: VideoContentResult | null
   isSyncing: boolean
   setDraftInput: (input: Partial<GeneratorFormValues>) => void
   addGeneratedItem: (item: Omit<GeneratedItem, "id" | "createdAt">) => void
@@ -58,6 +63,10 @@ interface ContentState {
   setBusinessCategory: (category: BusinessCategory) => void
   setAutoAppendShopCta: (enabled: boolean) => void
   setPosterDraft: (draft: PosterDraft | null) => void
+  setUploadedVideo: (file: File | null, previewUrl: string | null) => void
+  setVideoProductNote: (note: string) => void
+  setGeneratedVideoResult: (result: VideoContentResult | null) => void
+  clearUploadedVideo: () => void
   saveToVault: (
     item: Omit<SavedVaultItem, "id" | "status"> & {
       status?: SavedVaultItem["status"]
@@ -91,6 +100,10 @@ export const useContentStore = create<ContentState>()(
       businessCategory: "general",
       autoAppendShopCta: true,
       posterDraft: null,
+      uploadedVideoFile: null,
+      videoPreviewUrl: null,
+      videoProductNote: "",
+      generatedVideoResult: null,
       isSyncing: false,
 
       setDraftInput: (input) =>
@@ -116,6 +129,27 @@ export const useContentStore = create<ContentState>()(
       setBusinessCategory: (businessCategory) => set({ businessCategory }),
       setAutoAppendShopCta: (autoAppendShopCta) => set({ autoAppendShopCta }),
       setPosterDraft: (posterDraft) => set({ posterDraft }),
+      setUploadedVideo: (file, previewUrl) =>
+        set((state) => {
+          if (state.videoPreviewUrl && state.videoPreviewUrl !== previewUrl) {
+            URL.revokeObjectURL(state.videoPreviewUrl)
+          }
+          return { uploadedVideoFile: file, videoPreviewUrl: previewUrl }
+        }),
+      setVideoProductNote: (videoProductNote) => set({ videoProductNote }),
+      setGeneratedVideoResult: (generatedVideoResult) =>
+        set({ generatedVideoResult }),
+      clearUploadedVideo: () =>
+        set((state) => {
+          if (state.videoPreviewUrl) {
+            URL.revokeObjectURL(state.videoPreviewUrl)
+          }
+          return {
+            uploadedVideoFile: null,
+            videoPreviewUrl: null,
+            generatedVideoResult: null,
+          }
+        }),
 
       saveToVault: (item) =>
         set((state) => {

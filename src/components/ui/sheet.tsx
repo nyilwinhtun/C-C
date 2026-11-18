@@ -7,31 +7,33 @@ import { cn } from "@/lib/utils"
 interface SheetProps extends React.HTMLAttributes<HTMLDivElement> {
   open: boolean
   onOpenChange: (open: boolean) => void
+  side?: "left" | "right"
 }
 
 const Sheet = React.forwardRef<HTMLDivElement, SheetProps>(
-  ({ open, onOpenChange, className, ...props }, ref) => {
+  ({ open, onOpenChange, side = "left", className, ...props }, ref) => {
     const handleClose = () => onOpenChange(false)
     return (
       <>
         {open && (
           <div
-            className={cn(
-              "fixed inset-0 z-50 bg-black/40 backdrop-blur-sm transition-opacity duration-300",
-              open ? "opacity-100" : "opacity-0"
-            )}
+            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm transition-opacity duration-200"
             onClick={handleClose}
+            aria-hidden="true"
           />
         )}
         <div
           ref={ref}
           className={cn(
-            "fixed right-0 z-50 h-full w-full max-w-[75%] flex flex-col bg-card border-l border-border shadow-2xl transform transition-transform duration-300",
-            open ? "translate-x-0" : "-translate-x-full",
+            "fixed inset-y-0 z-50 h-full w-full max-w-[82vw] flex flex-col bg-card text-foreground shadow-2xl transform transition-transform duration-250 ease-out",
+            side === "left"
+              ? cn("left-0 border-r border-border", open ? "translate-x-0" : "-translate-x-full pointer-events-none")
+              : cn("right-0 border-l border-border", open ? "translate-x-0" : "translate-x-full pointer-events-none"),
             className
           )}
           role="dialog"
           aria-modal="true"
+          aria-hidden={!open}
           {...props}
         />
       </>

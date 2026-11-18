@@ -11,6 +11,7 @@ import {
   Palette,
   RefreshCw,
   Rows2,
+  Share2,
   Sparkles,
   Store,
   Tag,
@@ -275,6 +276,55 @@ export function PhotoStudioPage() {
     triggerLink(canvas.toDataURL("image/png"))
   }, [poster, primaryImg, secondaryImg, isMy])
 
+  const handleSharePoster = useCallback(async () => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    renderPosterCanvas(canvas, poster, primaryImg, secondaryImg)
+    const filename = `poster-${poster.template}-${poster.aspectRatio.replace(":", "x")}-${Date.now()}.png`
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      if (typeof canvas.toBlob === "function") {
+        canvas.toBlob((b) => resolve(b), "image/png", 1.0)
+      } else {
+        resolve(null)
+      }
+    })
+
+    if (!blob) {
+      handleDownloadPng()
+      return
+    }
+
+    const file = new File([blob], filename, { type: "image/png" })
+    const shareData: ShareData = {
+      files: [file],
+      title: poster.title.trim() || "Online Shop Poster",
+      text: [poster.title.trim(), poster.priceTag.trim(), poster.shopFooterText.trim()]
+        .filter(Boolean)
+        .join(" • "),
+    }
+
+    const canNativeShare =
+      typeof navigator !== "undefined" &&
+      typeof navigator.share === "function" &&
+      (typeof navigator.canShare !== "function" || navigator.canShare({ files: [file] }))
+
+    if (!canNativeShare) {
+      handleDownloadPng()
+      return
+    }
+
+    try {
+      await navigator.share(shareData)
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return
+      }
+      handleDownloadPng()
+    }
+  }, [poster, primaryImg, secondaryImg, handleDownloadPng])
+
   const handleSyncBrandSignature = () => {
     const trimmed = brandSignature.trim()
     setHasCustomFooter(false)
@@ -318,14 +368,25 @@ export function PhotoStudioPage() {
           })}
         </div>
 
-        <Button
-          size="sm"
-          onClick={handleDownloadPng}
-          className="h-8 gap-1.5 rounded-lg px-3 text-xs font-semibold"
-        >
-          <Download className="h-3.5 w-3.5" />
-          {isMy ? "PNG ဒေါင်းလုဒ်" : "Download PNG"}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleSharePoster}
+            className="h-8 gap-1.5 rounded-lg px-3 text-xs font-semibold border-border/70"
+          >
+            <Share2 className="h-3.5 w-3.5" />
+            {isMy ? "1-Tap မျှဝေမည်" : "1-Tap Share"}
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleDownloadPng}
+            className="h-8 gap-1.5 rounded-lg px-3 text-xs font-semibold"
+          >
+            <Download className="h-3.5 w-3.5" />
+            {isMy ? "PNG ဒေါင်းလုဒ်" : "Download PNG"}
+          </Button>
+        </div>
       </div>
 
       {/* Main Responsive Studio Grid */}

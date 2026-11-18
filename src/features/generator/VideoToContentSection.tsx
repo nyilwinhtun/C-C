@@ -152,29 +152,44 @@ export function VideoToContentSection() {
   const brandSignature = useContentStore((state) => state.brandSignature)
   const businessCategory = useContentStore((state) => state.businessCategory)
   const autoAppendShopCta = useContentStore((state) => state.autoAppendShopCta)
+  const videoFile = useContentStore((state) => state.uploadedVideoFile)
+  const previewUrl = useContentStore((state) => state.videoPreviewUrl)
+  const productNote = useContentStore((state) => state.videoProductNote)
+  const result = useContentStore((state) => state.generatedVideoResult)
+  const setUploadedVideo = useContentStore((state) => state.setUploadedVideo)
+  const setProductNote = useContentStore((state) => state.setVideoProductNote)
+  const setResult = useContentStore((state) => state.setGeneratedVideoResult)
+  const clearUploadedVideo = useContentStore((state) => state.clearUploadedVideo)
 
   const resultRef = useRef<HTMLDivElement | null>(null)
   const prevLanguageRef = useRef(language)
 
   const [initialDraft] = useState<StoredVideoDraft>(() => loadVideoDraft(language))
 
-  const [videoFile, setVideoFile] = useState<File | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  const [productNote, setProductNote] = useState(initialDraft.productNote)
   const [platform, setPlatform] = useState<VideoPlatformOption>(initialDraft.platform)
   const [outputLanguage, setOutputLanguage] = useState<"en" | "my">(
     initialDraft.outputLanguage
   )
 
   const [progressStage, setProgressStage] = useState<"extracting" | "analyzing" | null>(null)
-  const [result, setResult] = useState<VideoContentResult | null>(initialDraft.result)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [isInputCollapsed, setIsInputCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState<VideoOutputTab>("hooks")
   const [showAllTabs, setShowAllTabs] = useState(false)
+
+  // Hydrate store from localStorage draft once if store is empty
+  useEffect(() => {
+    const state = useContentStore.getState()
+    if (!state.videoProductNote && initialDraft.productNote) {
+      setProductNote(initialDraft.productNote)
+    }
+    if (!state.generatedVideoResult && initialDraft.result) {
+      setResult(initialDraft.result)
+    }
+  }, [initialDraft, setProductNote, setResult])
 
   useEffect(() => {
     if (prevLanguageRef.current !== language) {
@@ -198,14 +213,6 @@ export function VideoToContentSection() {
     }
   }, [productNote, platform, outputLanguage, result])
 
-  useEffect(() => {
-    return () => {
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl)
-      }
-    }
-  }, [previewUrl])
-
   const handleSelectFile = useCallback(
     (file: File | null | undefined) => {
       if (!file) return
@@ -223,38 +230,24 @@ export function VideoToContentSection() {
       }
       const nextPreviewUrl = URL.createObjectURL(file)
       setErrorMessage(null)
-      setPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev)
-        return nextPreviewUrl
-      })
-      setVideoFile(file)
+      setUploadedVideo(file, nextPreviewUrl)
       setResult(null)
       setIsInputCollapsed(false)
     },
-    []
+    [setUploadedVideo, setResult]
   )
 
   const handleClearFile = useCallback(() => {
-    setPreviewUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev)
-      return null
-    })
-    setVideoFile(null)
-    setResult(null)
+    clearUploadedVideo()
     setErrorMessage(null)
     setIsInputCollapsed(false)
-  }, [])
+  }, [clearUploadedVideo])
 
   const handleResetDraft = useCallback(() => {
-    setPreviewUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev)
-      return null
-    })
-    setVideoFile(null)
+    clearUploadedVideo()
     setProductNote("")
     setPlatform("TikTok / Reels")
     setOutputLanguage(language)
-    setResult(null)
     setErrorMessage(null)
     setIsInputCollapsed(false)
     if (typeof window !== "undefined") {
@@ -264,7 +257,7 @@ export function VideoToContentSection() {
         // Ignore storage errors
       }
     }
-  }, [language])
+  }, [clearUploadedVideo, setProductNote, language])
 
   const handleGenerate = useCallback(async () => {
     if (!videoFile || progressStage) return

@@ -55,11 +55,12 @@ export function Header({ title, onMenuToggle, onOpenSettings }: HeaderProps) {
     <header className="flex items-center justify-between gap-4 px-4 sm:px-6 h-14 border-b border-border/60 bg-background/80 backdrop-blur-md sticky top-0 z-20">
       <div className="flex items-center gap-3 min-w-0">
         <Button
+          type="button"
           variant="outline"
           size="icon"
           onClick={onMenuToggle}
           className="md:hidden h-9 w-9 border-border/60 shrink-0"
-          aria-label={t(language, "nav.collapse")}
+          aria-label={t(language, "sidebar.mobile_nav_title")}
         >
           <Menu className="h-4 w-4" aria-hidden="true" />
         </Button>
