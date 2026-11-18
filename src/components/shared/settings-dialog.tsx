@@ -69,18 +69,33 @@ const PROVIDER_INFO: Record<
 }
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
-  const { language, aiProvider, aiApiKey, aiModel, setAIProvider, setAIApiKey, setAIModel } =
-    useUIStore(
-      useShallow((state) => ({
-        language: state.language,
-        aiProvider: state.aiProvider,
-        aiApiKey: state.aiApiKey,
-        aiModel: state.aiModel,
-        setAIProvider: state.setAIProvider,
-        setAIApiKey: state.setAIApiKey,
-        setAIModel: state.setAIModel,
-      }))
-    )
+  const {
+    language,
+    aiProvider,
+    geminiApiKey,
+    openrouterApiKey,
+    groqApiKey,
+    aiModel,
+    setAIProvider,
+    setGeminiApiKey,
+    setOpenrouterApiKey,
+    setGroqApiKey,
+    setAIModel,
+  } = useUIStore(
+    useShallow((state) => ({
+      language: state.language,
+      aiProvider: state.aiProvider,
+      geminiApiKey: state.geminiApiKey,
+      openrouterApiKey: state.openrouterApiKey,
+      groqApiKey: state.groqApiKey,
+      aiModel: state.aiModel,
+      setAIProvider: state.setAIProvider,
+      setGeminiApiKey: state.setGeminiApiKey,
+      setOpenrouterApiKey: state.setOpenrouterApiKey,
+      setGroqApiKey: state.setGroqApiKey,
+      setAIModel: state.setAIModel,
+    }))
+  )
 
   const { brandSignature, savedVault, generatedHistory, setBrandSignature, importBackup } =
     useContentStore(
@@ -93,26 +108,33 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       }))
     )
 
-  const [apiKey, setApiKey] = useState(aiApiKey)
+  const [geminiKey, setGeminiKey] = useState(geminiApiKey)
+  const [openrouterKey, setOpenrouterKey] = useState(openrouterApiKey)
+  const [groqKey, setGroqKey] = useState(groqApiKey)
   const [signature, setSignature] = useState(brandSignature)
-  const [showKey, setShowKey] = useState(false)
+  const [showKeys, setShowKeys] = useState<Record<AIProvider, boolean>>({
+    gemini: false,
+    openrouter: false,
+    groq: false,
+  })
   const [loading, setLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
-  const providerInfo = PROVIDER_INFO[aiProvider]
   const currentPresets = PRESET_MODELS[aiProvider]
   const isPreset = currentPresets.includes(aiModel)
   const [isCustomMode, setIsCustomMode] = useState(!isPreset && Boolean(aiModel))
 
   useEffect(() => {
     if (open) {
-      setApiKey(aiApiKey)
+      setGeminiKey(geminiApiKey)
+      setOpenrouterKey(openrouterApiKey)
+      setGroqKey(groqApiKey)
       setSignature(brandSignature)
       setIsCustomMode(!PRESET_MODELS[aiProvider].includes(aiModel) && Boolean(aiModel))
     }
-    // Only re-sync local form state when the dialog opens or persisted key changes
+    // Only re-sync local form state when the dialog opens or persisted keys change
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, aiApiKey, brandSignature])
+  }, [open, geminiApiKey, openrouterApiKey, groqApiKey, brandSignature])
 
   const handleProviderChange = (provider: AIProvider) => {
     setAIProvider(provider)
@@ -251,50 +273,92 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               />
             )}
           </div>
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium">{t(language, "settings.apiKey")}</label>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setShowKey(!showKey)}
-                aria-label={showKey ? "Hide key" : "Show key"}
-              >
-                {showKey ? (
-                  <EyeOff className="h-4 w-4" aria-hidden="true" />
-                ) : (
-                  <Eye className="h-4 w-4" aria-hidden="true" />
-                )}
-              </Button>
-            </div>
-            <Input
-              type={showKey ? "text" : "password"}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder={t(language, "settings.apiKeyPlaceholder")}
-              disabled={loading}
-            />
+          <div className="space-y-3">
+            {(
+              [
+                {
+                  id: "gemini" as const,
+                  value: geminiKey,
+                  setter: setGeminiKey,
+                  saved: Boolean(geminiApiKey),
+                  placeholder: "AIza...",
+                },
+                {
+                  id: "openrouter" as const,
+                  value: openrouterKey,
+                  setter: setOpenrouterKey,
+                  saved: Boolean(openrouterApiKey),
+                  placeholder: "sk-or-v1-...",
+                },
+                {
+                  id: "groq" as const,
+                  value: groqKey,
+                  setter: setGroqKey,
+                  saved: Boolean(groqApiKey),
+                  placeholder: "gsk_...",
+                },
+              ] as const
+            ).map((field) => {
+              const info = PROVIDER_INFO[field.id]
+              const isShown = showKeys[field.id]
+              return (
+                <div key={field.id} className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <label htmlFor={`api-key-${field.id}`} className="text-sm font-medium">
+                        {info.label} {t(language, "settings.apiKey")}
+                      </label>
+                      {field.saved && (
+                        <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                          ••••
+                        </span>
+                      )}
+                    </div>
+                    <a
+                      href={info.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-primary underline underline-offset-4 hover:text-primary/80"
+                    >
+                      <Link className="h-3 w-3 shrink-0 opacity-70" aria-hidden="true" />
+                      <span>{info.linkLabel}</span>
+                    </a>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      id={`api-key-${field.id}`}
+                      type={isShown ? "text" : "password"}
+                      value={field.value}
+                      onChange={(e) => field.setter(e.target.value)}
+                      placeholder={
+                        field.saved ? "••••" : `${t(language, "settings.apiKeyPlaceholder")} (${field.placeholder})`
+                      }
+                      disabled={loading}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        setShowKeys((prev) => ({ ...prev, [field.id]: !prev[field.id] }))
+                      }
+                      aria-label={isShown ? `Hide ${info.label} key` : `Show ${info.label} key`}
+                    >
+                      {isShown ? (
+                        <EyeOff className="h-4 w-4" aria-hidden="true" />
+                      ) : (
+                        <Eye className="h-4 w-4" aria-hidden="true" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
           <div className="space-y-1 pt-2 border-t border-border">
             <div className="flex items-start gap-2 text-xs text-muted-foreground">
               <ShieldAlert className="h-3 w-3 shrink-0 mt-0.5" aria-hidden="true" />
-              <span>
-                {t(language, "settings.apiKeyStored")}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Link className="h-3 w-3 shrink-0 opacity-50" aria-hidden="true" />
-              <span className="text-xs">
-                {t(language, "settings.providerLink", { provider: providerInfo.label })}:{" "}
-                <a
-                  href={providerInfo.link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary underline underline-offset-4 hover:text-primary/80"
-                >
-                  {providerInfo.label}
-                </a>
-              </span>
+              <span>{t(language, "settings.apiKeyStored")}</span>
             </div>
           </div>
           <div className="space-y-2">
@@ -364,7 +428,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </Button>
             <Button
               onClick={() => {
-                setAIApiKey(apiKey)
+                setGeminiApiKey(geminiKey.trim())
+                setOpenrouterApiKey(openrouterKey.trim())
+                setGroqApiKey(groqKey.trim())
                 setBrandSignature(signature)
                 setLoading(true)
                 setTimeout(() => {
@@ -373,7 +439,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   onOpenChange(false)
                 }, 600)
               }}
-              disabled={loading || (!apiKey && signature === brandSignature)}
+              disabled={
+                loading ||
+                (geminiKey.trim() === geminiApiKey &&
+                  openrouterKey.trim() === openrouterApiKey &&
+                  groqKey.trim() === groqApiKey &&
+                  signature === brandSignature)
+              }
             >
               {loading ? t(language, "settings.saveSaving") : t(language, "settings.save")}
             </Button>

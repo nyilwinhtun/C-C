@@ -216,15 +216,83 @@ function mockGenerate(request: GenerateContentRequest): GeneratedContent {
   }
 }
 
+const OPENROUTER_FREE_VISION_MODELS = [
+  "google/gemma-3-27b-it:free",
+  "qwen/qwen2.5-vl-72b-instruct:free",
+  "meta-llama/llama-3.2-11b-vision-instruct:free",
+] as const
+
+function shouldFallbackOpenRouterModel(err: unknown): boolean {
+  if (err instanceof ApiError) {
+    return err.status === 402 || err.status === 404 || err.status === 429 || err.isQuotaExceeded
+  }
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase()
+    return (
+      msg.includes("402") ||
+      msg.includes("insufficient credits") ||
+      msg.includes("404") ||
+      msg.includes("429")
+    )
+  }
+  return false
+}
+
+async function callOpenRouterWithFallback<T>(
+  primaryModel: string,
+  callFn: (model: string) => Promise<T>
+): Promise<T> {
+  const modelsToTry = [
+    primaryModel,
+    ...OPENROUTER_FREE_VISION_MODELS.filter((m) => m !== primaryModel),
+  ]
+  let lastError: unknown
+  for (const candidateModel of modelsToTry) {
+    try {
+      return await callFn(candidateModel)
+    } catch (err) {
+      lastError = err
+      if (!shouldFallbackOpenRouterModel(err)) {
+        throw err
+      }
+      console.warn(
+        `OpenRouter model "${candidateModel}" failed (${err instanceof ApiError ? err.status : "error"}). Retrying with next free fallback model...`
+      )
+    }
+  }
+  throw lastError
+}
+
 function getAiConfig() {
-  const { aiProvider, aiApiKey, aiModel } = useUIStore.getState()
+  const {
+    aiProvider,
+    aiModel,
+    geminiApiKey,
+    openrouterApiKey,
+    groqApiKey,
+  } = useUIStore.getState()
   const envGeminiKey =
+    (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ?? ""
+  const envOpenRouterKey =
+    (import.meta.env.VITE_OPENROUTER_API_KEY as string | undefined)?.trim() ?? ""
+
+  const resolvedGeminiKey = geminiApiKey.trim() || envGeminiKey
+  const resolvedOpenRouterKey = openrouterApiKey.trim() || envOpenRouterKey
+  const resolvedGroqKey = groqApiKey.trim()
+
+  const apiKey =
     aiProvider === "gemini"
-      ? ((import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ?? "")
-      : ""
+      ? resolvedGeminiKey
+      : aiProvider === "openrouter"
+        ? resolvedOpenRouterKey
+        : resolvedGroqKey
+
   return {
     provider: aiProvider,
-    apiKey: aiApiKey || envGeminiKey,
+    apiKey,
+    geminiApiKey: resolvedGeminiKey,
+    openrouterApiKey: resolvedOpenRouterKey,
+    groqApiKey: resolvedGroqKey,
     model: aiModel === "gemini-2.5-flash-lite" ? GEMINI_FALLBACK_MODEL : aiModel,
   }
 }
@@ -349,7 +417,7 @@ async function generateWithOpenAICompatible(
 export async function generateContent(
   request: GenerateContentRequest
 ): Promise<GeneratedContent> {
-  const { provider, apiKey, model } = getAiConfig()
+  const { provider, apiKey, geminiApiKey, model } = getAiConfig()
   const trimmedKey = apiKey.trim()
 
   if (!trimmedKey) {
@@ -380,13 +448,36 @@ export async function generateContent(
         throw err
       }
     }
-    const fallbackModel =
-      provider === "groq" ? "llama-3.3-70b-versatile" : "openrouter/auto"
+
+    if (provider === "openrouter") {
+      try {
+        return await callOpenRouterWithFallback(model || "openrouter/auto", (candidateModel) =>
+          generateWithOpenAICompatible(request, "openrouter", trimmedKey, candidateModel)
+        )
+      } catch (err) {
+        if (geminiApiKey) {
+          console.warn("OpenRouter failed. Falling back to direct Google Gemini API...")
+          try {
+            return await generateWithGemini(request, geminiApiKey, GEMINI_MODEL)
+          } catch (geminiErr) {
+            const isQuota =
+              (geminiErr instanceof ApiError && geminiErr.isQuotaExceeded) ||
+              (geminiErr instanceof Error && geminiErr.message.includes("429"))
+            if (isQuota && GEMINI_MODEL !== GEMINI_FALLBACK_MODEL) {
+              return await generateWithGemini(request, geminiApiKey, GEMINI_FALLBACK_MODEL)
+            }
+            throw geminiErr
+          }
+        }
+        throw err
+      }
+    }
+
     return await generateWithOpenAICompatible(
       request,
       provider,
       trimmedKey,
-      model || fallbackModel
+      model || "llama-3.3-70b-versatile"
     )
   } catch (err) {
     console.error(`AI generation failed via ${provider}`, err)
@@ -642,7 +733,7 @@ async function suggestPhotoWithOpenAICompatible(
 export async function suggestFromPhoto(
   request: PhotoSuggestionRequest
 ): Promise<PhotoSuggestionResult> {
-  const { provider, apiKey, model } = getAiConfig()
+  const { provider, apiKey, geminiApiKey, model } = getAiConfig()
   const trimmedKey = apiKey.trim()
 
   if (!trimmedKey) {
@@ -769,13 +860,35 @@ export async function suggestFromPhoto(
     }
   }
 
-  const fallbackModel =
-    provider === "groq" ? "llama-3.3-70b-versatile" : "openrouter/auto"
+  if (provider === "openrouter") {
+    try {
+      return await callOpenRouterWithFallback(model || "openrouter/auto", (candidateModel) =>
+        suggestPhotoWithOpenAICompatible(request, "openrouter", trimmedKey, candidateModel)
+      )
+    } catch (err) {
+      if (geminiApiKey) {
+        console.warn("OpenRouter vision failed. Falling back to direct Google Gemini API...")
+        try {
+          return await suggestPhotoWithGemini(request, geminiApiKey, GEMINI_VISION_MODEL)
+        } catch (geminiErr) {
+          const isQuota =
+            (geminiErr instanceof ApiError && geminiErr.isQuotaExceeded) ||
+            (geminiErr instanceof Error && geminiErr.message.includes("429"))
+          if (isQuota || (geminiErr instanceof ApiError && geminiErr.status === 404)) {
+            return await suggestPhotoWithGemini(request, geminiApiKey, GEMINI_FALLBACK_MODEL)
+          }
+          throw geminiErr
+        }
+      }
+      throw err
+    }
+  }
+
   return await suggestPhotoWithOpenAICompatible(
     request,
     provider,
     trimmedKey,
-    model || fallbackModel
+    model || "llama-3.3-70b-versatile"
   )
 }
 
@@ -1182,39 +1295,41 @@ async function generateVideoWithOpenRouter(
     },
   }))
 
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-      "HTTP-Referer": window.location.origin,
-      "X-Title": "Content Creator SaaS",
-    },
-    body: JSON.stringify({
-      model: OPENROUTER_VIDEO_MODEL,
-      messages: [
-        {
-          role: "user",
-          content: [{ type: "text", text: prompt }, ...imageContentParts],
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: 2048,
-    }),
+  return await callOpenRouterWithFallback(OPENROUTER_VIDEO_MODEL, async (candidateModel) => {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "HTTP-Referer": window.location.origin,
+        "X-Title": "Content Creator SaaS",
+      },
+      body: JSON.stringify({
+        model: candidateModel,
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: prompt }, ...imageContentParts],
+          },
+        ],
+        temperature: 0.7,
+        max_tokens: 2048,
+      }),
+    })
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "")
+      throw parseApiError("OpenRouter", res.status, text)
+    }
+
+    const data = await res.json()
+    const content = String(data.choices?.[0]?.message?.content ?? "").trim()
+    if (!content) {
+      throw new Error("No content returned from OpenRouter Video API.")
+    }
+
+    return parseVideoContentResponse(content, analysisMode, frameCount)
   })
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    throw parseApiError("OpenRouter", res.status, text)
-  }
-
-  const data = await res.json()
-  const content = String(data.choices?.[0]?.message?.content ?? "").trim()
-  if (!content) {
-    throw new Error("No content returned from OpenRouter Video API.")
-  }
-
-  return parseVideoContentResponse(content, analysisMode, frameCount)
 }
 
 async function extractKeyframeMedia(params: GenerateVideoContentParams): Promise<{
@@ -1240,19 +1355,9 @@ async function extractKeyframeMedia(params: GenerateVideoContentParams): Promise
 export async function generateVideoContent(
   params: GenerateVideoContentParams
 ): Promise<VideoContentResult> {
-  const { provider, apiKey } = getAiConfig()
-  const trimmedKey = apiKey.trim()
-  const envGeminiKey =
-    (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ?? ""
-  const envOpenRouterKey =
-    (import.meta.env.VITE_OPENROUTER_API_KEY as string | undefined)?.trim() ?? ""
-  const openRouterKey =
-    provider === "openrouter"
-      ? trimmedKey
-      : trimmedKey.startsWith("sk-or-")
-        ? trimmedKey
-        : envOpenRouterKey
-  const geminiKey = provider === "gemini" ? trimmedKey : envGeminiKey
+  const { provider, geminiApiKey, openrouterApiKey } = getAiConfig()
+  const openRouterKey = openrouterApiKey.trim()
+  const geminiKey = geminiApiKey.trim()
   const useOpenRouterDirectly = provider === "openrouter"
 
   const isDirectMode =
@@ -1302,12 +1407,65 @@ export async function generateVideoContent(
     )
   }
 
+  const runDirectGemini = async (): Promise<VideoContentResult> => {
+    const prompt = buildVideoPrompt({
+      platform: params.platform,
+      language: params.language,
+      productNote: params.productNote,
+      analysisMode,
+    })
+    try {
+      return await generateVideoWithGemini(
+        mediaParts,
+        prompt,
+        geminiKey,
+        GEMINI_VISION_MODEL,
+        analysisMode,
+        frameCount
+      )
+    } catch (err) {
+      const isQuota =
+        (err instanceof ApiError && err.isQuotaExceeded) ||
+        (err instanceof Error &&
+          (err.message === QUOTA_EXCEEDED_MESSAGE ||
+            err.message.includes("429") ||
+            err.message.includes("RESOURCE_EXHAUSTED") ||
+            err.message.toLowerCase().includes("quota")))
+
+      if (isQuota || (err instanceof ApiError && err.status === 404)) {
+        console.warn(
+          `Gemini quota/model fallback for "${GEMINI_VISION_MODEL}". Retrying with "${GEMINI_FALLBACK_MODEL}"...`
+        )
+        return await generateVideoWithGemini(
+          mediaParts,
+          prompt,
+          geminiKey,
+          GEMINI_FALLBACK_MODEL,
+          analysisMode,
+          frameCount
+        )
+      }
+      throw err
+    }
+  }
+
   if (useOpenRouterDirectly) {
     if (!openRouterKey) {
+      if (geminiKey) {
+        return await runDirectGemini()
+      }
       await delay(900)
       return mockGenerateVideoContent(params, analysisMode, frameCount)
     }
-    return await routeViaOpenRouter(openRouterKey)
+    try {
+      return await routeViaOpenRouter(openRouterKey)
+    } catch (err) {
+      if (geminiKey) {
+        console.warn("OpenRouter video analysis failed. Falling back to direct Google Gemini API...")
+        return await runDirectGemini()
+      }
+      throw err
+    }
   }
 
   if (!geminiKey) {
@@ -1318,22 +1476,8 @@ export async function generateVideoContent(
     return mockGenerateVideoContent(params, analysisMode, frameCount)
   }
 
-  const prompt = buildVideoPrompt({
-    platform: params.platform,
-    language: params.language,
-    productNote: params.productNote,
-    analysisMode,
-  })
-
   try {
-    return await generateVideoWithGemini(
-      mediaParts,
-      prompt,
-      geminiKey,
-      GEMINI_VISION_MODEL,
-      analysisMode,
-      frameCount
-    )
+    return await runDirectGemini()
   } catch (err) {
     const isLocationUnsupported =
       err instanceof Error &&
@@ -1345,28 +1489,6 @@ export async function generateVideoContent(
         "Gemini location unsupported (400). Routing video analysis through OpenRouter..."
       )
       return await routeViaOpenRouter(openRouterKey)
-    }
-
-    const isQuota =
-      (err instanceof ApiError && err.isQuotaExceeded) ||
-      (err instanceof Error &&
-        (err.message === QUOTA_EXCEEDED_MESSAGE ||
-          err.message.includes("429") ||
-          err.message.includes("RESOURCE_EXHAUSTED") ||
-          err.message.toLowerCase().includes("quota")))
-
-    if (isQuota || (err instanceof ApiError && err.status === 404)) {
-      console.warn(
-        `Gemini quota/model fallback for "${GEMINI_VISION_MODEL}". Retrying with "${GEMINI_FALLBACK_MODEL}"...`
-      )
-      return await generateVideoWithGemini(
-        mediaParts,
-        prompt,
-        geminiKey,
-        GEMINI_FALLBACK_MODEL,
-        analysisMode,
-        frameCount
-      )
     }
     throw err
   }

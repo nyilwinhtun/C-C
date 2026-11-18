@@ -280,7 +280,7 @@ export function VideoToContentSection() {
               {t(language, "generator.videoDesc")}
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4 p-4 sm:p-6">
+          <CardContent className="grid gap-4 p-4 pb-20 sm:p-6 sm:pb-20 lg:pb-6">
             {errorMessage && (
               <div
                 role="alert"

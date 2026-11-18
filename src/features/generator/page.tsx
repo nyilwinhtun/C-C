@@ -727,7 +727,9 @@ export function GeneratorPage() {
       </div>
 
       {generatorMode === "video" ? (
-        <VideoToContentSection />
+        <div className="pb-20 lg:pb-0">
+          <VideoToContentSection />
+        </div>
       ) : (
         <>
           <div className={isInputCollapsed && result ? "hidden lg:flex flex-wrap items-center gap-2" : "flex flex-wrap items-center gap-2"}>
