@@ -83,8 +83,28 @@
   }
   .font-myanmar {
     font-family: "Noto Sans Myanmar", "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
-    line-height: 1.85;
+    line-height: 1.75;
   }
+  :root[lang="my"] body {
+    font-family: "Noto Sans Myanmar", "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
+    line-height: 1.75;
+  }
+  :root[lang="my"] button,
+  :root[lang="my"] input,
+  :root[lang="my"] select,
+  :root[lang="my"] textarea,
+  :root[lang="my"] label,
+  :root[lang="my"] p,
+  :root[lang="my"] h1,
+  :root[lang="my"] h2,
+  :root[lang="my"] h3,
+  :root[lang="my"] h4 {
+    line-height: 1.75;
+  }
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 @keyframes shimmer {

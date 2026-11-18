@@ -225,7 +225,11 @@ export function PlannerPage() {
             <Badge variant="outline">
               {scheduledItems.length} {t(language, "planner.scheduled")}
             </Badge>
-            <Button size="sm" onClick={() => setAddDialogOpen(true)}>
+            <Button
+              size="sm"
+              onClick={() => setAddDialogOpen(true)}
+              className="min-h-[44px] rounded-xl font-medium px-4"
+            >
               <Plus className="h-4 w-4 mr-1.5" aria-hidden="true" />
               {t(language, "planner.addPost")}
             </Button>
@@ -233,13 +237,18 @@ export function PlannerPage() {
         </CardHeader>
         <CardContent>
           {sortedDates.length === 0 ? (
-            <div className="flex h-64 flex-col items-center justify-center rounded-lg border-2 border-dashed border-border p-6 text-center text-sm text-muted-foreground leading-relaxed gap-3">
-              <p>
+            <div className="flex h-64 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border/70 bg-muted/15 p-6 text-center text-sm text-muted-foreground leading-relaxed gap-3">
+              <p className="max-w-sm">
                 {dateFilter
                   ? t(language, "planner.noPostsForDate")
                   : t(language, "planner.empty")}
               </p>
-              <Button variant="outline" size="sm" onClick={() => setAddDialogOpen(true)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setAddDialogOpen(true)}
+                className="min-h-[44px] rounded-xl font-medium px-4"
+              >
                 <Plus className="h-4 w-4 mr-1.5" aria-hidden="true" />
                 {t(language, "planner.addPost")}
               </Button>
@@ -249,7 +258,7 @@ export function PlannerPage() {
               {sortedDates.map((date) => {
                 const items = groupedByDate.get(date) ?? []
                 return (
-                  <div key={date} className="border border-border rounded-xl p-4">
+                  <div key={date} className="border border-border/60 rounded-2xl p-4">
                     <div className="flex flex-wrap items-center gap-2 mb-3">
                       <Calendar className="h-4 w-4" aria-hidden="true" />
                       <h3 className="font-semibold leading-relaxed">
@@ -366,7 +375,7 @@ export function PlannerPage() {
           ) : (
             <div className="space-y-3">
               {unscheduledItems.map((item) => (
-                <Card key={item.id} className="border rounded-xl p-4">
+                <Card key={item.id} className="border border-border/60 rounded-2xl p-4">
                   <CardHeader className="p-0">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">

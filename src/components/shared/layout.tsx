@@ -59,6 +59,10 @@ export function Layout() {
   const generatedCount = generatedHistory.length
 
   useEffect(() => {
+    document.documentElement.lang = language
+  }, [language])
+
+  useEffect(() => {
     const onResize = () => {
       if (window.innerWidth >= 768) {
         setMobileOpen(false)
@@ -71,10 +75,10 @@ export function Layout() {
   const Page = pages[activePageKey] ?? GeneratorPage
 
   const mobileNavItems = [
-    { key: "generator", label: t(language, "nav.generator"), icon: LayoutList },
-    { key: "photo-studio", label: t(language, "nav.photo-studio"), icon: Camera },
-    { key: "vault", label: t(language, "nav.vault"), icon: FolderKanban },
-    { key: "planner", label: t(language, "nav.planner"), icon: Calendar },
+    { key: "generator", label: t(language, "nav.mobile.generator"), icon: LayoutList },
+    { key: "photo-studio", label: t(language, "nav.mobile.photo-studio"), icon: Camera },
+    { key: "vault", label: t(language, "nav.mobile.vault"), icon: FolderKanban },
+    { key: "planner", label: t(language, "nav.mobile.planner"), icon: Calendar },
   ] as const
 
   return (
@@ -108,39 +112,76 @@ export function Layout() {
       {/* Mobile Fixed Bottom Navigation Bar */}
       <nav
         aria-label={t(language, "sidebar.mobile_nav_title")}
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border/60 bg-background/85 backdrop-blur-md pb-[env(safe-area-inset-bottom)]"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border/60 bg-background/90 backdrop-blur-lg pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.25)]"
       >
         <div className="grid grid-cols-5 items-stretch">
           {mobileNavItems.map((item) => {
             const Icon = item.icon
-            const isActive = activePageKey === item.key
+            const isActive = !settingsOpen && activePageKey === item.key
             return (
               <button
                 key={item.key}
                 type="button"
-                onClick={() => setActivePageKey(item.key)}
+                onClick={() => {
+                  setSettingsOpen(false)
+                  setActivePageKey(item.key)
+                }}
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
-                  "flex flex-col items-center justify-center gap-1 min-h-[58px] px-1 py-1.5 text-[10px] font-medium transition-colors",
+                  "relative flex flex-col items-center justify-center gap-1 min-h-[60px] px-1 py-1.5 text-[11px] leading-tight transition-colors cursor-pointer",
                   isActive
-                    ? "text-blue-600 dark:text-blue-400 bg-blue-50/80 dark:bg-blue-950/40"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
+                    ? "text-blue-600 dark:text-blue-400 font-semibold"
+                    : "text-muted-foreground font-medium hover:text-foreground hover:bg-accent/30"
                 )}
               >
-                <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
-                <span className="truncate max-w-full leading-tight">{item.label}</span>
+                {isActive && (
+                  <span
+                    className="absolute top-0 inset-x-3 h-0.5 rounded-full bg-blue-600 dark:bg-blue-400"
+                    aria-hidden="true"
+                  />
+                )}
+                <span
+                  className={cn(
+                    "flex items-center justify-center rounded-full px-2.5 py-0.5 transition-colors",
+                    isActive ? "bg-blue-500/12 dark:bg-blue-500/20" : ""
+                  )}
+                >
+                  <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                </span>
+                <span className="max-w-full whitespace-nowrap leading-tight">
+                  {item.label}
+                </span>
               </button>
             )
           })}
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
-            aria-label={t(language, "header.settings")}
-            className="flex flex-col items-center justify-center gap-1 min-h-[58px] px-1 py-1.5 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-colors"
+            aria-label={t(language, "nav.mobile.settings")}
+            aria-current={settingsOpen ? "page" : undefined}
+            className={cn(
+              "relative flex flex-col items-center justify-center gap-1 min-h-[60px] px-1 py-1.5 text-[11px] leading-tight transition-colors cursor-pointer",
+              settingsOpen
+                ? "text-blue-600 dark:text-blue-400 font-semibold"
+                : "text-muted-foreground font-medium hover:text-foreground hover:bg-accent/30"
+            )}
           >
-            <Settings className="h-5 w-5 shrink-0" aria-hidden="true" />
-            <span className="truncate max-w-full leading-tight">
-              {t(language, "header.settings")}
+            {settingsOpen && (
+              <span
+                className="absolute top-0 inset-x-3 h-0.5 rounded-full bg-blue-600 dark:bg-blue-400"
+                aria-hidden="true"
+              />
+            )}
+            <span
+              className={cn(
+                "flex items-center justify-center rounded-full px-2.5 py-0.5 transition-colors",
+                settingsOpen ? "bg-blue-500/12 dark:bg-blue-500/20" : ""
+              )}
+            >
+              <Settings className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+            </span>
+            <span className="max-w-full whitespace-nowrap leading-tight">
+              {t(language, "nav.mobile.settings")}
             </span>
           </button>
         </div>
@@ -155,7 +196,7 @@ export function Layout() {
 function StatCard({ title, value, icon }: { title: string; value: number; icon: React.ComponentType<any> }) {
   const Icon = icon
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-4 shadow-xs transition-all hover:shadow-sm flex items-center justify-between gap-3">
+    <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-xs transition-all hover:shadow-sm flex items-center justify-between gap-3">
       <div className="min-w-0">
         <span className="text-xs font-medium text-muted-foreground leading-relaxed block truncate">
           {title}

@@ -32,6 +32,7 @@ import { t } from "@/locales/translations"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { ReadAloudButton } from "@/components/shared/read-aloud-button"
 import {
   Card,
@@ -280,7 +281,7 @@ export function VideoToContentSection() {
               {t(language, "generator.videoDesc")}
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4 p-4 pb-20 sm:p-6 sm:pb-20 lg:pb-6">
+          <CardContent className="grid gap-4 p-4 sm:p-6">
             {errorMessage && (
               <div
                 role="alert"
@@ -483,12 +484,12 @@ export function VideoToContentSection() {
               </div>
             </div>
 
-            <div className="sticky bottom-2 z-20 lg:static bg-background/90 backdrop-blur-sm pt-1.5 pb-0.5 rounded-xl lg:bg-transparent lg:backdrop-blur-none lg:p-0">
+            <div className="pt-2">
               <Button
                 type="button"
                 onClick={handleGenerate}
                 disabled={!videoFile || isGenerating}
-                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 border-0 h-10"
+                className="w-full min-h-[44px] rounded-xl font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 border-0"
               >
                 {isGenerating ? (
                   <>
@@ -515,14 +516,54 @@ export function VideoToContentSection() {
         ref={resultRef}
         className="w-full lg:w-[440px] shrink-0 flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start scroll-mt-4"
       >
-        {!result ? (
+        {isGenerating ? (
+          <Card className="border-border/60 shadow-sm overflow-hidden" aria-busy="true">
+            <CardHeader className="py-3.5 px-4 border-b border-border/60 bg-muted/20">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <Skeleton className="h-8 w-8 rounded-lg" />
+                  <div className="space-y-1.5">
+                    <Skeleton className="h-3.5 w-28" />
+                    <Skeleton className="h-2.5 w-20" />
+                  </div>
+                </div>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1 text-[11px] font-medium text-blue-600 dark:text-blue-400">
+                  <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                  <span>
+                    {progressStage === "extracting"
+                      ? t(language, "generator.videoProgressExtracting")
+                      : t(language, "generator.videoProgressAnalyzing")}
+                  </span>
+                </span>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-5 space-y-4">
+              <div className="grid grid-cols-4 gap-1.5">
+                <Skeleton className="h-8 rounded-lg" />
+                <Skeleton className="h-8 rounded-lg" />
+                <Skeleton className="h-8 rounded-lg" />
+                <Skeleton className="h-8 rounded-lg" />
+              </div>
+              <div className="space-y-2.5">
+                <Skeleton className="h-12 w-full rounded-xl" />
+                <Skeleton className="h-12 w-full rounded-xl" />
+                <Skeleton className="h-12 w-full rounded-xl" />
+              </div>
+              <div className="space-y-2 pt-2 border-t border-border/60">
+                <Skeleton className="h-3.5 w-full" />
+                <Skeleton className="h-3.5 w-[88%]" />
+                <Skeleton className="h-3.5 w-[70%]" />
+              </div>
+            </CardContent>
+          </Card>
+        ) : !result ? (
           <Card className="border-border/60 border-dashed bg-card/60">
             <CardContent className="p-8 text-center flex flex-col items-center justify-center gap-3">
-              <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
-                <Video className="h-5 w-5" aria-hidden="true" />
+              <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-500/10 to-indigo-500/10 border border-blue-500/15 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                <Video className="h-6 w-6" aria-hidden="true" />
               </div>
               <div className="space-y-1">
-                <p className="text-sm font-medium">
+                <p className="text-sm font-semibold">
                   {t(language, "generator.videoEmptyTitle")}
                 </p>
                 <p className="text-xs text-muted-foreground leading-relaxed max-w-xs mx-auto">

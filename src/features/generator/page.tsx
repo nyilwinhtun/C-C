@@ -727,7 +727,7 @@ export function GeneratorPage() {
       </div>
 
       {generatorMode === "video" ? (
-        <div className="pb-20 lg:pb-0">
+        <div className="pb-4 lg:pb-0">
           <VideoToContentSection />
         </div>
       ) : (
@@ -889,11 +889,11 @@ export function GeneratorPage() {
                   </div>
                 </div>
 
-                <div className="sticky bottom-2 z-20 lg:static flex gap-2 pt-1.5 pb-0.5 bg-background/90 backdrop-blur-sm rounded-xl lg:bg-transparent lg:backdrop-blur-none lg:pt-1 lg:pb-0">
+                <div className="flex gap-2 pt-2">
                   <Button
                     type="submit"
                     variant="default"
-                    className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 border-0"
+                    className="flex-1 min-h-[44px] rounded-xl font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 border-0"
                     disabled={isGeneratingFlag}
                   >
                     {isGeneratingFlag ? (
@@ -1060,11 +1060,70 @@ export function GeneratorPage() {
                   </div>
                 </div>
               ) : !result && !displayedText ? (
-                <div className="flex flex-1 min-h-[240px] flex-col items-center justify-center gap-2.5 text-muted-foreground leading-relaxed text-center px-4">
-                  <div className="h-12 w-12 rounded-2xl border border-border/60 bg-muted/40 flex items-center justify-center">
-                    <FileText className="h-6 w-6 opacity-60" aria-hidden="true" />
+                <div className="flex flex-1 min-h-[260px] flex-col items-center justify-center gap-4 text-center px-3 py-4">
+                  <div className="h-14 w-14 rounded-2xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 flex items-center justify-center text-blue-600 dark:text-blue-400 shadow-xs">
+                    <Sparkles className="h-6 w-6" aria-hidden="true" />
                   </div>
-                  <p className="text-sm">{t(language, "generator.noContent")}</p>
+                  <div className="space-y-1 max-w-xs">
+                    <p className="text-sm font-semibold text-foreground leading-relaxed">
+                      {t(language, "generator.emptyTitle")}
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {t(language, "generator.emptyDesc")}
+                    </p>
+                  </div>
+                  <div className="w-full max-w-sm space-y-2 pt-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {t(language, "presets.title")}
+                    </p>
+                    <div className="grid grid-cols-1 gap-1.5">
+                      {[
+                        {
+                          label: t(language, "presets.flashSale"),
+                          topic: language === "my"
+                            ? "ဒီနေ့တစ်ရက်တည်း 30% Off Flash Sale အထူးလျှော့ဈေး"
+                            : "24-Hour Weekend Flash Sale — 30% Off All Best Sellers",
+                          platform: "facebook" as const,
+                          contentType: "post_caption" as const,
+                          tone: "sales" as const,
+                          language: language === "my" ? ("myanmar" as const) : ("english" as const),
+                        },
+                        {
+                          label: t(language, "presets.newArrival"),
+                          topic: language === "my"
+                            ? "ပစ္စည်းသစ် ရောက်ရှိပါပြီ — အရည်အသွေးမြင့် Premium Collection"
+                            : "New Arrival Showcase — Meet Our Latest Collection",
+                          platform: "instagram" as const,
+                          contentType: "post_caption" as const,
+                          tone: "engaging" as const,
+                          language: language === "my" ? ("myanmar" as const) : ("english" as const),
+                        },
+                        {
+                          label: t(language, "presets.customerReview"),
+                          topic: language === "my"
+                            ? "ဝယ်ယူအားပေးသူ Customer များ၏ အမှန်တကယ် သုံးသပ်ချက်"
+                            : "Real Customer Review: Why Buyers Love Our Product",
+                          platform: "facebook" as const,
+                          contentType: "post_caption" as const,
+                          tone: "storytelling" as const,
+                          language: language === "my" ? ("myanmar" as const) : ("english" as const),
+                        },
+                      ].map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => handleLoadTemplate(preset)}
+                          className="flex items-center justify-between gap-2 w-full rounded-xl border border-border/60 bg-background/70 hover:bg-accent/60 hover:border-blue-500/30 px-3 py-2 text-left text-xs font-medium transition-all cursor-pointer"
+                        >
+                          <span className="flex items-center gap-2 min-w-0">
+                            <Sparkles className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
+                            <span className="truncate">{preset.label}</span>
+                          </span>
+                          <span className="text-[10px] text-muted-foreground shrink-0">→</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               ) : viewMode === "editor" ? (
                 <>

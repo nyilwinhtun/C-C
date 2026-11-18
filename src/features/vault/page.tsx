@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { Calendar, Copy, Pencil, Plus, Trash2 } from "lucide-react"
+import { Calendar, Copy, FolderKanban, Pencil, Plus, Sparkles, Trash2 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
 import type { SavedVaultItem } from "@/store/useContentStore"
@@ -140,8 +140,12 @@ export function VaultPage() {
 
   const handleCopy = useCallback(
     async (text: string) => {
-      await navigator.clipboard.writeText(text)
-      toast.success(t(language, "vault.copy"))
+      try {
+        await navigator.clipboard.writeText(text)
+        toast.success(t(language, "generator.copySuccess"))
+      } catch {
+        toast.error(t(language, "generator.copyError"))
+      }
     },
     [language]
   )
@@ -236,27 +240,94 @@ export function VaultPage() {
     </Dialog>
   )
 
+  const handleAddStarterPreset = useCallback(
+    (presetKey: "flash_sale" | "new_arrival" | "customer_review") => {
+      const isMy = language === "my"
+      const presets = {
+        flash_sale: {
+          title: t(language, "presets.flashSale"),
+          platform: "facebook",
+          content: isMy
+            ? "⚡ ဒီနေ့တစ်ရက်တည်း 30% Off Flash Sale!\nလူကြိုက်များတဲ့ Best Seller ပစ္စည်းတွေကို အထူးလျှော့ဈေးနဲ့ မှာယူနိုင်ပါပြီ။ Stock ကုန်ခင် Inbox မှာ အမြန်ဆုံး မှာယူလိုက်ပါ!"
+            : "⚡ 24-Hour Flash Sale! Get 30% off our best-selling items today only. Limited stock — DM us now to order!",
+          tags: ["flashsale", "promo", "specialoffer"],
+        },
+        new_arrival: {
+          title: t(language, "presets.newArrival"),
+          platform: "instagram",
+          content: isMy
+            ? "✨ ပစ္စည်းသစ် ရောက်ရှိပါပြီ!\nဒီဇိုင်းသစ်၊ အရည်အသွေးမြင့် Collection အသစ်ကို အခုပဲ မှာယူနိုင်ပါပြီ။ အသေးစိတ်သိလိုပါက Comment သို့မဟုတ် Inbox မှာ မေးမြန်းနိုင်ပါတယ်။"
+            : "✨ New Arrival Showcase! Our latest collection is finally here — crafted for everyday comfort and style. Tap the link or DM to grab yours!",
+          tags: ["newarrival", "collection", "launch"],
+        },
+        customer_review: {
+          title: t(language, "presets.customerReview"),
+          platform: "facebook",
+          content: isMy
+            ? "⭐ ဝယ်ယူအားပေးသူ Customer များ၏ အမှန်တကယ် သုံးသပ်ချက်!\n\"အရည်အသွေးအရမ်းကောင်းပြီး ပို့ဆောင်မှုလည်း မြန်ဆန်ပါတယ်\" — ယုံကြည်စိတ်ချစွာ အားပေးကြတဲ့အတွက် ကျေးဇူးတင်ပါတယ်။"
+            : "⭐ Real Customer Review: \"Super fast delivery and amazing quality!\" Thank you for trusting our shop — ready to order yours?",
+          tags: ["review", "testimonial", "bestseller"],
+        },
+      } as const
+      const p = presets[presetKey]
+      saveToVault({
+        title: p.title,
+        platform: p.platform,
+        content: p.content,
+        tags: [...p.tags],
+      })
+      toast.success(t(language, "vault.saveSuccess"))
+    },
+    [language, saveToVault]
+  )
+
   const emptyState = (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <CardTitle className="text-xl">{t(language, "vault.title")}</CardTitle>
           <CardDescription>{t(language, "vault.emptySubtitle")}</CardDescription>
         </div>
-        <Button onClick={openCreateDialog}>
+        <Button onClick={openCreateDialog} className="min-h-[44px] rounded-xl font-medium">
           <Plus className="h-4 w-4 mr-2" aria-hidden="true" />
           {t(language, "vault.newIdea")}
         </Button>
       </div>
-      <Card className="max-w-2xl">
-        <CardHeader>
-          <CardTitle>{t(language, "vault.title")}</CardTitle>
-          <CardDescription>{t(language, "vault.emptySubtitle")}</CardDescription>
-        </CardHeader>
-        <CardContent className="h-96 flex flex-col items-center justify-center text-center">
-          <p className="text-muted-foreground leading-relaxed">
-            {t(language, "vault.emptyDesc")}
-          </p>
+      <Card className="border-border/60 border-dashed bg-card/70">
+        <CardContent className="py-12 px-6 flex flex-col items-center justify-center text-center gap-4">
+          <div className="h-14 w-14 rounded-2xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 flex items-center justify-center text-blue-600 dark:text-blue-400">
+            <FolderKanban className="h-6 w-6" aria-hidden="true" />
+          </div>
+          <div className="space-y-1 max-w-md">
+            <h3 className="text-base font-semibold text-foreground leading-relaxed">
+              {t(language, "vault.emptyTitle")}
+            </h3>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {t(language, "vault.emptyPresetHint")}
+            </p>
+          </div>
+          <div className="w-full max-w-md space-y-2 pt-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t(language, "presets.title")}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {[
+                { key: "flash_sale" as const, label: t(language, "presets.flashSale") },
+                { key: "new_arrival" as const, label: t(language, "presets.newArrival") },
+                { key: "customer_review" as const, label: t(language, "presets.customerReview") },
+              ].map((preset) => (
+                <button
+                  key={preset.key}
+                  type="button"
+                  onClick={() => handleAddStarterPreset(preset.key)}
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-border/60 bg-background/80 hover:bg-accent/60 hover:border-blue-500/30 px-3 py-2.5 text-xs font-medium transition-all cursor-pointer"
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{preset.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         </CardContent>
       </Card>
       {renderDialog()}
@@ -283,7 +354,7 @@ export function VaultPage() {
             onChange={(e) => setSearch(e.target.value)}
             className="w-full sm:w-[280px]"
           />
-          <Button onClick={openCreateDialog}>
+          <Button onClick={openCreateDialog} className="min-h-[44px] rounded-xl font-medium">
             <Plus className="h-4 w-4 mr-2" aria-hidden="true" />
             {t(language, "vault.newIdea")}
           </Button>
@@ -312,7 +383,7 @@ export function VaultPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filteredItems.map((item) => (
-            <Card key={item.id} className="border rounded-xl p-4 flex flex-col justify-between min-w-0">
+            <Card key={item.id} className="border border-border/60 rounded-2xl p-4 flex flex-col justify-between min-w-0">
               <CardHeader>
                 <div className="flex flex-col gap-3 mb-2">
                   <div className="min-w-0">

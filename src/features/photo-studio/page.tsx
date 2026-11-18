@@ -49,6 +49,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 
 type AspectRatioKey = "1:1" | "4:5" | "9:16"
@@ -2045,6 +2046,97 @@ export function PhotoStudioPage() {
     toast.success(t(language, "photoStudio.downloadSuccess"))
   }
 
+  const handleApplyStarterPreset = (presetKey: "flash_sale" | "new_arrival" | "customer_review") => {
+    const isMy = language === "my"
+    const presets = {
+      flash_sale: {
+        category: "flash_sale" as PhotoCategoryKey,
+        badge: "discount" as BadgeKey,
+        headline: isMy ? "ဒီနေ့တစ်ရက်တည်း 30% Off!" : "Weekend Flash Sale — 30% Off",
+        originalPrice: "65,000 Ks",
+        priceTag: "45,500 Ks",
+        spec1: isMy ? "အကန့်အသတ်ရှိသည်" : "24 Hours Only",
+        spec2: isMy ? "အိမ်အရောက်ပို့" : "Fast Delivery",
+        spec3: isMy ? "Warranty ပါ" : "1 Yr Warranty",
+        caption: isMy
+          ? "⚡ ဒီနေ့တစ်ရက်တည်း 30% Off Flash Sale!\nမူလဈေး 65,000 Ks မှ 45,500 Ks ဖြင့် မှာယူနိုင်ပါပြီ။\nInbox မှတစ်ဆင့် အမြန်ဆုံး မှာယူလိုက်ပါ! 🛍️"
+          : "⚡ 24-Hour Flash Sale! Get 30% off today only — now 45,500 Ks (was 65,000 Ks). DM us now before stock runs out! 🛍️",
+        bgFrom: "#1e3a8a",
+        bgTo: "#4f46e5",
+      },
+      new_arrival: {
+        category: "new_arrival" as PhotoCategoryKey,
+        badge: "new" as BadgeKey,
+        headline: isMy ? "ပစ္စည်းသစ် ရောက်ရှိပါပြီ ✨" : "New Arrival Collection ✨",
+        originalPrice: "",
+        priceTag: "55,000 Ks",
+        spec1: "Premium Quality",
+        spec2: isMy ? "In Stock" : "Ready to Ship",
+        spec3: isMy ? "Free Gift ပါ" : "Free Gift",
+        caption: isMy
+          ? "✨ ပစ္စည်းသစ်လေးတွေ ရောက်ရှိပါပြီ!\nအရည်အသွေးကောင်းပြီး ဒီဇိုင်းလှပတဲ့ Collection အသစ်ကို 55,000 Ks ဖြင့် ရရှိနိုင်ပါပြီ။"
+          : "✨ Just landed! Meet our brand-new collection crafted for everyday style. Now available for 55,000 Ks — tap to order!",
+        bgFrom: "#0f766e",
+        bgTo: "#2563eb",
+      },
+      customer_review: {
+        category: "fashion" as PhotoCategoryKey,
+        badge: "delivery" as BadgeKey,
+        headline: isMy ? "Customer များ 100% ကြိုက်နှစ်သက်မှု ⭐" : "5-Star Customer Favorite ⭐",
+        originalPrice: "",
+        priceTag: "38,000 Ks",
+        spec1: "4.9/5 Rating",
+        spec2: "100% Authentic",
+        spec3: isMy ? "COD ရရှိနိုင်" : "COD Available",
+        caption: isMy
+          ? "⭐ ဝယ်ယူအားပေးသူတိုင်း စိတ်ကျေနပ်မှု အပြည့်အဝ ရရှိထားတဲ့ Best Seller!\nယုံကြည်စိတ်ချစွာ မှာယူနိုင်ပါပြီ။"
+          : "⭐ Rated 4.9/5 by our happy customers! See why this best-seller keeps selling out every week.",
+        bgFrom: "#6d28d9",
+        bgTo: "#db2777",
+      },
+    } as const
+
+    const p = presets[presetKey]
+    setCategory(p.category)
+    setBadge(p.badge)
+    setHeadline(p.headline)
+    setOriginalPrice(p.originalPrice)
+    setPriceTag(p.priceTag)
+    setSpec1(p.spec1)
+    setSpec2(p.spec2)
+    setSpec3(p.spec3)
+    setCaption(p.caption)
+
+    if (!imageDataUrl) {
+      const offscreen = document.createElement("canvas")
+      offscreen.width = 900
+      offscreen.height = 900
+      const ctx = offscreen.getContext("2d")
+      if (ctx) {
+        const grad = ctx.createLinearGradient(0, 0, 900, 900)
+        grad.addColorStop(0, p.bgFrom)
+        grad.addColorStop(1, p.bgTo)
+        ctx.fillStyle = grad
+        ctx.fillRect(0, 0, 900, 900)
+
+        ctx.fillStyle = "rgba(255,255,255,0.10)"
+        ctx.beginPath()
+        ctx.arc(450, 380, 210, 0, Math.PI * 2)
+        ctx.fill()
+
+        ctx.fillStyle = "rgba(255,255,255,0.9)"
+        ctx.font = "600 32px Inter, sans-serif"
+        ctx.textAlign = "center"
+        ctx.fillText("PRODUCT SHOWCASE", 450, 390)
+
+        const dataUrl = offscreen.toDataURL("image/png")
+        setOriginalImageDataUrl(dataUrl)
+        setImageDataUrl(dataUrl)
+      }
+    }
+    toast.success(t(language, "photoStudio.draftLoaded"))
+  }
+
   const handleCopyCaption = async () => {
     if (!caption.trim()) return
     try {
@@ -2890,10 +2982,56 @@ export function PhotoStudioPage() {
               </Button>
             </CardHeader>
             <CardContent>
-              {!loadedImage ? (
-                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed bg-muted/30 min-h-[320px] p-6 text-center text-muted-foreground">
-                  <ImagePlus className="h-10 w-10 mb-2 opacity-50" aria-hidden="true" />
-                  <p className="text-sm leading-[1.85]">{t(language, "photoStudio.emptyPreview")}</p>
+              {isGeneratingScene || isRemovingBg ? (
+                <div className="flex flex-col items-center justify-center rounded-2xl border border-border/60 bg-muted/20 min-h-[340px] p-6 gap-4" aria-busy="true">
+                  <Skeleton className="w-full max-w-[320px] aspect-square rounded-2xl" />
+                  <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-600 dark:text-blue-400" aria-hidden="true" />
+                    <span>
+                      {isRemovingBg
+                        ? t(language, "photoStudio.cutoutProcessing")
+                        : t(language, "photoStudio.sceneGenerating")}
+                    </span>
+                  </div>
+                </div>
+              ) : !loadedImage ? (
+                <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 bg-muted/20 min-h-[340px] p-6 text-center gap-4">
+                  <div className="h-14 w-14 rounded-2xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                    <ImagePlus className="h-6 w-6" aria-hidden="true" />
+                  </div>
+                  <div className="space-y-1 max-w-xs">
+                    <p className="text-sm font-semibold text-foreground leading-relaxed">
+                      {t(language, "photoStudio.emptyPreview")}
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {t(language, "photoStudio.emptyDesc")}
+                    </p>
+                  </div>
+                  <div className="w-full max-w-sm space-y-2 pt-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {t(language, "presets.title")}
+                    </p>
+                    <div className="grid grid-cols-1 gap-1.5">
+                      {[
+                        { key: "flash_sale" as const, label: t(language, "presets.flashSale") },
+                        { key: "new_arrival" as const, label: t(language, "presets.newArrival") },
+                        { key: "customer_review" as const, label: t(language, "presets.customerReview") },
+                      ].map((preset) => (
+                        <button
+                          key={preset.key}
+                          type="button"
+                          onClick={() => handleApplyStarterPreset(preset.key)}
+                          className="flex items-center justify-between gap-2 w-full rounded-xl border border-border/60 bg-background/80 hover:bg-accent/60 hover:border-blue-500/30 px-3 py-2 text-left text-xs font-medium transition-all cursor-pointer"
+                        >
+                          <span className="flex items-center gap-2 min-w-0">
+                            <Sparkles className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
+                            <span className="truncate">{preset.label}</span>
+                          </span>
+                          <span className="text-[10px] text-muted-foreground shrink-0">→</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="flex justify-center bg-muted/20 rounded-xl p-2 sm:p-4 border">
@@ -2924,13 +3062,22 @@ export function PhotoStudioPage() {
               </Button>
             </CardHeader>
             <CardContent>
-              <Textarea
-                rows={5}
-                value={caption}
-                onChange={(e) => setCaption(e.target.value)}
-                placeholder={t(language, "photoStudio.captionPlaceholder")}
-                className="font-myanmar leading-[1.85]"
-              />
+              {isAnalyzing ? (
+                <div className="space-y-2.5 py-2" aria-busy="true">
+                  <Skeleton className="h-3.5 w-full" />
+                  <Skeleton className="h-3.5 w-[90%]" />
+                  <Skeleton className="h-3.5 w-[82%]" />
+                  <Skeleton className="h-3.5 w-[65%]" />
+                </div>
+              ) : (
+                <Textarea
+                  rows={5}
+                  value={caption}
+                  onChange={(e) => setCaption(e.target.value)}
+                  placeholder={t(language, "photoStudio.captionPlaceholder")}
+                  className="font-myanmar leading-[1.85]"
+                />
+              )}
             </CardContent>
           </Card>
         </div>
