@@ -3,11 +3,12 @@
 import { useState } from "react"
 import { t } from "@/locales/translations"
 import { useShallow } from "zustand/react/shallow"
-import { Menu, Settings, Globe, LogOut } from "lucide-react"
+import { Menu, Plus, Settings, Globe, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/shared/theme-toggle"
 import { useUIStore } from "@/store/useUIStore"
 import { SettingsDialog } from "@/components/shared/settings-dialog"
+import { QuickIdeaDialog } from "@/components/shared/quick-idea-dialog"
 import { supabase } from "@/lib/supabase"
 import { toast } from "@/components/ui/sonner"
 
@@ -27,6 +28,7 @@ export function Header({ title, onMenuToggle, onOpenSettings }: HeaderProps) {
     }))
   )
   const [internalSettingsOpen, setInternalSettingsOpen] = useState(false)
+  const [quickIdeaOpen, setQuickIdeaOpen] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
 
   const handleOpenSettings = () => {
@@ -70,6 +72,17 @@ export function Header({ title, onMenuToggle, onOpenSettings }: HeaderProps) {
       </div>
       <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
         <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onClick={() => setQuickIdeaOpen(true)}
+          aria-label={t(language, "header.quickIdea")}
+          title={t(language, "header.quickIdea")}
+          className="h-8 w-8 border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+        </Button>
+        <Button
           variant="outline"
           size="sm"
           onClick={() => setLanguage(language === "en" ? "my" : "en")}
@@ -109,6 +122,7 @@ export function Header({ title, onMenuToggle, onOpenSettings }: HeaderProps) {
       {!onOpenSettings && (
         <SettingsDialog open={internalSettingsOpen} onOpenChange={setInternalSettingsOpen} />
       )}
+      <QuickIdeaDialog open={quickIdeaOpen} onOpenChange={setQuickIdeaOpen} />
     </header>
   )
 }

@@ -63,6 +63,7 @@ interface ContentState {
   videoPreviewUrl: string | null
   videoProductNote: string
   generatedVideoResult: VideoContentResult | null
+  voiceoverDraftScript: string
   isSyncing: boolean
   setDraftInput: (input: Partial<GeneratorFormValues>) => void
   addGeneratedItem: (item: Omit<GeneratedItem, "id" | "createdAt">) => void
@@ -75,6 +76,7 @@ interface ContentState {
   setUploadedVideo: (file: File | null, previewUrl: string | null) => void
   setVideoProductNote: (note: string) => void
   setGeneratedVideoResult: (result: VideoContentResult | null) => void
+  setVoiceoverDraftScript: (script: string) => void
   clearUploadedVideo: () => void
   saveToVault: (
     item: Omit<SavedVaultItem, "id" | "status"> & {
@@ -115,6 +117,7 @@ export const useContentStore = create<ContentState>()(
       videoPreviewUrl: null,
       videoProductNote: "",
       generatedVideoResult: null,
+      voiceoverDraftScript: "",
       isSyncing: false,
 
       setDraftInput: (input) =>
@@ -152,6 +155,7 @@ export const useContentStore = create<ContentState>()(
       setVideoProductNote: (videoProductNote) => set({ videoProductNote }),
       setGeneratedVideoResult: (generatedVideoResult) =>
         set({ generatedVideoResult }),
+      setVoiceoverDraftScript: (voiceoverDraftScript) => set({ voiceoverDraftScript }),
       clearUploadedVideo: () =>
         set((state) => {
           if (state.videoPreviewUrl) {

@@ -1,0 +1,647 @@
+"use client"
+
+import { useCallback, useEffect, useRef, useState } from "react"
+import {
+  Download,
+  Film,
+  Loader2,
+  Mic,
+  Share2,
+  Sparkles,
+  Upload,
+  Volume2,
+  VolumeX,
+  X,
+} from "lucide-react"
+import { toast } from "@/components/ui/sonner"
+import { useShallow } from "zustand/react/shallow"
+import { isSupportedVideoFile } from "@/api/aiService"
+import {
+  BURMESE_VOICE_PRESETS,
+  VOICEOVER_SPEEDS,
+  cleanVoiceoverText,
+  generateBurmeseVoiceover,
+  type BurmeseVoiceType,
+  type VoiceoverResult,
+  type VoiceoverSpeed,
+} from "@/api/ttsService"
+import {
+  mergeVideoWithVoiceover,
+  type MergeVideoAudioResult,
+  type OriginalAudioVolume,
+} from "@/lib/videoAudioMerger"
+import { useContentStore } from "@/store/useContentStore"
+import { useUIStore } from "@/store/useUIStore"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+
+const VOLUME_OPTIONS: Array<{
+  value: OriginalAudioVolume
+  label: string
+  labelMy: string
+}> = [
+  { value: 0, label: "Mute 0%", labelMy: "အသံပိတ် 0%" },
+  { value: 0.15, label: "Low 15%", labelMy: "နောက်ခံတိုး 15%" },
+  { value: 0.5, label: "Normal 50%", labelMy: "ပုံမှန် 50%" },
+]
+
+function triggerBlobDownload(url: string, filename: string) {
+  const link = document.createElement("a")
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+export function VoiceoverPage() {
+  const language = useUIStore(useShallow((state) => state.language))
+  const isMy = language === "my"
+
+  const {
+    voiceoverDraftScript,
+    setVoiceoverDraftScript,
+    videoFile,
+    videoPreviewUrl,
+    setUploadedVideo,
+    clearUploadedVideo,
+  } = useContentStore(
+    useShallow((state) => ({
+      voiceoverDraftScript: state.voiceoverDraftScript,
+      setVoiceoverDraftScript: state.setVoiceoverDraftScript,
+      videoFile: state.uploadedVideoFile,
+      videoPreviewUrl: state.videoPreviewUrl,
+      setUploadedVideo: state.setUploadedVideo,
+      clearUploadedVideo: state.clearUploadedVideo,
+    }))
+  )
+
+  const [voiceType, setVoiceType] = useState<BurmeseVoiceType>("female")
+  const [speed, setSpeed] = useState<VoiceoverSpeed>(1.0)
+  const [originalVolume, setOriginalVolume] = useState<OriginalAudioVolume>(0.15)
+
+  const [isGeneratingVoice, setIsGeneratingVoice] = useState(false)
+  const [voiceoverResult, setVoiceoverResult] = useState<VoiceoverResult | null>(null)
+
+  const [isMergingVideo, setIsMergingVideo] = useState(false)
+  const [mergeProgress, setMergeProgress] = useState(0)
+  const [mergedVideo, setMergedVideo] = useState<MergeVideoAudioResult | null>(null)
+
+  const mergeAbortRef = useRef<AbortController | null>(null)
+  const voiceUrlRef = useRef<string | null>(null)
+  const mergedUrlRef = useRef<string | null>(null)
+
+  const revokeVoiceUrl = useCallback(() => {
+    if (voiceUrlRef.current) {
+      URL.revokeObjectURL(voiceUrlRef.current)
+      voiceUrlRef.current = null
+    }
+  }, [])
+
+  const revokeMergedUrl = useCallback(() => {
+    if (mergedUrlRef.current) {
+      URL.revokeObjectURL(mergedUrlRef.current)
+      mergedUrlRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      mergeAbortRef.current?.abort()
+      revokeVoiceUrl()
+      revokeMergedUrl()
+    }
+  }, [revokeVoiceUrl, revokeMergedUrl])
+
+  const handleSelectVideoFile = (file?: File | null) => {
+    if (!file) return
+    if (!isSupportedVideoFile(file)) {
+      toast.error(
+        isMy
+          ? "ပံ့ပိုးထားသော ဗီဒီယိုဖိုင် (MP4, MOV, WebM) ရွေးချယ်ပါ။"
+          : "Please choose a supported video file (MP4, MOV, WebM)."
+      )
+      return
+    }
+    const url = URL.createObjectURL(file)
+    setUploadedVideo(file, url)
+    revokeMergedUrl()
+    setMergedVideo(null)
+  }
+
+  const handleGenerateVoice = async () => {
+    const trimmed = cleanVoiceoverText(voiceoverDraftScript)
+    if (!trimmed) {
+      toast.error(
+        isMy
+          ? "အသံသွင်းရန် စာသားထည့်ပါ။"
+          : "Please enter voiceover text before generating."
+      )
+      return
+    }
+
+    setIsGeneratingVoice(true)
+    try {
+      const result = await generateBurmeseVoiceover(trimmed, voiceType, speed)
+      revokeVoiceUrl()
+      revokeMergedUrl()
+      voiceUrlRef.current = result.audioUrl
+      setVoiceoverResult(result)
+      setMergedVideo(null)
+      toast.success(
+        isMy ? "AI အသံနမူနာ ဖန်တီးပြီးပါပြီ။" : "Burmese AI voiceover generated!"
+      )
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to generate Burmese voiceover."
+      toast.error(msg)
+    } finally {
+      setIsGeneratingVoice(false)
+    }
+  }
+
+  const handleDownloadAudio = () => {
+    if (!voiceoverResult) return
+    const timestamp = new Date().toISOString().slice(0, 10)
+    triggerBlobDownload(
+      voiceoverResult.audioUrl,
+      `burmese-voiceover-${voiceType}-${timestamp}.${voiceoverResult.fileExtension}`
+    )
+  }
+
+  const handleMergeVideo = async () => {
+    if (!videoFile) {
+      toast.error(
+        isMy
+          ? "ဗီဒီယိုဖိုင် မရှိသေးပါ။ ဗီဒီယိုတစ်ခု တင်ပေးပါ။"
+          : "No video file loaded. Upload a video below first."
+      )
+      return
+    }
+    if (!voiceoverResult) {
+      toast.error(
+        isMy
+          ? "အရင်ဆုံး AI Voiceover အသံဖန်တီးပါ။"
+          : "Generate the AI voice preview first."
+      )
+      return
+    }
+
+    mergeAbortRef.current?.abort()
+    const controller = new AbortController()
+    mergeAbortRef.current = controller
+
+    setIsMergingVideo(true)
+    setMergeProgress(0)
+
+    try {
+      const merged = await mergeVideoWithVoiceover({
+        videoFile,
+        voiceoverAudio: voiceoverResult.audioBuffer,
+        originalVolume,
+        voiceoverVolume: 1.0,
+        onProgress: setMergeProgress,
+        signal: controller.signal,
+      })
+
+      revokeMergedUrl()
+      mergedUrlRef.current = merged.videoUrl
+      setMergedVideo(merged)
+
+      const baseName = videoFile.name.replace(/\.[^.]+$/, "") || "video"
+      triggerBlobDownload(
+        merged.videoUrl,
+        `${baseName}-burmese-ai.${merged.fileExtension}`
+      )
+
+      toast.success(
+        isMy
+          ? "အသံနှင့် ဗီဒီယို ပေါင်းစပ်ပြီး ဒေါင်းလုဒ်ဆွဲပြီးပါပြီ။"
+          : "Video & AI voiceover merged and downloaded!"
+      )
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return
+      }
+      const msg =
+        err instanceof Error ? err.message : "Failed to merge audio and video."
+      toast.error(msg)
+    } finally {
+      setIsMergingVideo(false)
+    }
+  }
+
+  const handleShareVideo = async () => {
+    if (!mergedVideo) return
+    const baseName = videoFile?.name.replace(/\.[^.]+$/, "") || "burmese-ai-video"
+    const filename = `${baseName}-burmese-ai.${mergedVideo.fileExtension}`
+    const file = new File([mergedVideo.blob], filename, {
+      type: mergedVideo.mimeType,
+    })
+
+    if (
+      typeof navigator !== "undefined" &&
+      typeof navigator.share === "function" &&
+      typeof navigator.canShare === "function" &&
+      navigator.canShare({ files: [file] })
+    ) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: "Burmese AI Voiceover Video",
+        })
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return
+        toast.error("Could not open share sheet. Use Download instead.")
+      }
+      return
+    }
+
+    triggerBlobDownload(mergedVideo.videoUrl, filename)
+    toast.info("Direct sharing is not supported on this browser; downloading video instead.")
+  }
+
+  const canShareFiles =
+    typeof navigator !== "undefined" && typeof navigator.share === "function"
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-4 pb-24 lg:pb-6">
+      <Card className="border-indigo-500/30 bg-gradient-to-br from-indigo-500/[0.04] via-card to-blue-500/[0.04] shadow-sm overflow-hidden">
+        <CardHeader className="py-3 px-4 border-b border-border/60 flex flex-row items-center justify-between gap-2 space-y-0">
+          <div className="min-w-0">
+            <CardTitle className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 font-myanmar">
+              <Sparkles className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>
+                {isMy
+                  ? "မြန်မာ AI အသံသွင်းနှင့် ဗီဒီယိုပေါင်းစပ်စတူဒီယို"
+                  : "Burmese AI Voiceover & Video Merge Studio"}
+              </span>
+            </CardTitle>
+            <CardDescription className="text-xs mt-0.5 font-myanmar">
+              {isMy
+                ? "စာသားမှ AI အသံဖန်တီးပြီး ဗီဒီယိုနှင့် တိုက်ရိုက်ပေါင်းစပ်ထုတ်ယူပါ"
+                : "Synthesize Burmese AI voiceover and optionally merge directly into a video"}
+            </CardDescription>
+          </div>
+          <Badge variant="secondary" className="text-[10px] shrink-0">
+            100% On-Device
+          </Badge>
+        </CardHeader>
+
+        <CardContent className="p-3.5 sm:p-5 space-y-4">
+          {/* Script input */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <Label
+                htmlFor="voiceover-page-text"
+                className="text-xs font-medium text-muted-foreground font-myanmar"
+              >
+                {isMy ? "အသံဖတ်မည့် စာသား" : "Spoken Script"}
+              </Label>
+              {voiceoverDraftScript && (
+                <button
+                  type="button"
+                  onClick={() => setVoiceoverDraftScript("")}
+                  className="text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  {isMy ? "ရှင်းမည်" : "Clear"}
+                </button>
+              )}
+            </div>
+            <Textarea
+              id="voiceover-page-text"
+              value={voiceoverDraftScript}
+              onChange={(e) => setVoiceoverDraftScript(e.target.value)}
+              rows={5}
+              placeholder={
+                isMy
+                  ? "အသံပြောင်းလိုသော မြန်မာစာသားကို ရိုက်ထည့်ပါ သို့မဟုတ် စာသားပို့စ်/ဗီဒီယိုမှ ပေးပို့ပါ..."
+                  : "Type or paste Burmese script here, or send from Text Post / Video Script..."
+              }
+              className="text-sm font-myanmar leading-relaxed resize-y bg-background/80 border-border/60"
+            />
+          </div>
+
+          {/* Voice, Speed, Original Audio */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                <Mic className="h-3 w-3" aria-hidden="true" />
+                {isMy ? "အသံအမျိုးအစား" : "Voice"}
+              </Label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(["female", "male"] as BurmeseVoiceType[]).map((type) => {
+                  const preset = BURMESE_VOICE_PRESETS[type]
+                  const active = voiceType === type
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setVoiceType(type)}
+                      className={`rounded-lg border px-2.5 py-2 text-left transition-colors cursor-pointer ${
+                        active
+                          ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
+                          : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                      }`}
+                    >
+                      <div className="text-xs font-semibold leading-tight">
+                        {type === "female" ? "Female" : "Male"}
+                      </div>
+                      <div className="text-[11px] opacity-80 truncate font-myanmar">
+                        {type === "female" ? "Nilar" : "Thiha"}
+                      </div>
+                      <span className="sr-only">{preset.labelMy}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-medium text-muted-foreground">
+                {isMy ? "မြန်နှုန်း" : "Speed"}
+              </Label>
+              <div className="grid grid-cols-4 gap-1">
+                {VOICEOVER_SPEEDS.map((option) => {
+                  const active = speed === option
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setSpeed(option)}
+                      className={`rounded-lg border py-2.5 text-xs font-semibold transition-colors cursor-pointer ${
+                        active
+                          ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
+                          : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                      }`}
+                    >
+                      {option.toFixed(1)}x
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                {originalVolume === 0 ? (
+                  <VolumeX className="h-3 w-3" aria-hidden="true" />
+                ) : (
+                  <Volume2 className="h-3 w-3" aria-hidden="true" />
+                )}
+                {isMy ? "မူရင်းဗီဒီယိုအသံ" : "Original Audio"}
+              </Label>
+              <div className="grid grid-cols-3 gap-1">
+                {VOLUME_OPTIONS.map((opt) => {
+                  const active = originalVolume === opt.value
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setOriginalVolume(opt.value)}
+                      title={isMy ? opt.labelMy : opt.label}
+                      className={`rounded-lg border px-1 py-2.5 text-[11px] font-semibold transition-colors truncate cursor-pointer ${
+                        active
+                          ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
+                          : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Generate Audio CTA (Desktop) */}
+          <div className="hidden lg:block">
+            <Button
+              type="button"
+              onClick={handleGenerateVoice}
+              disabled={isGeneratingVoice || isMergingVideo || !voiceoverDraftScript.trim()}
+              className="w-full h-10 text-sm font-semibold bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white border-0"
+            >
+              {isGeneratingVoice ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
+                  {isMy ? "AI အသံဖန်တီးနေသည်..." : "Synthesizing Burmese Voiceover..."}
+                </>
+              ) : (
+                <>
+                  <Mic className="h-4 w-4 mr-2" aria-hidden="true" />
+                  {isMy ? "AI အသံနမူနာ ဖန်တီးမည်" : "Generate Voice Preview"}
+                </>
+              )}
+            </Button>
+          </div>
+
+          {/* Audio Preview Player */}
+          {voiceoverResult && (
+            <div className="rounded-xl border border-border/60 bg-background/80 p-3 space-y-2.5">
+              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground truncate">
+                  {voiceoverResult.voiceName}
+                </span>
+                <span className="shrink-0">
+                  {voiceoverResult.durationSeconds.toFixed(1)}s ·{" "}
+                  {voiceoverResult.fileExtension.toUpperCase()}
+                </span>
+              </div>
+              <audio controls src={voiceoverResult.audioUrl} className="w-full h-10" />
+              <div className="flex items-center justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDownloadAudio}
+                  className="h-8 px-3 text-xs border-border/60"
+                >
+                  <Download className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                  {isMy ? "အသံဖိုင် ဒေါင်းလုဒ်ဆွဲမည်" : "Download Audio"} (.{voiceoverResult.fileExtension})
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Optional Video Upload & Merge Section */}
+          <div className="space-y-3 pt-2 border-t border-border/60">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5 font-myanmar">
+                <Film className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                {isMy
+                  ? "ဗီဒီယိုနှင့် ပေါင်းစပ်မည် (Optional)"
+                  : "Merge with Video (Optional)"}
+              </Label>
+              {videoFile && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    clearUploadedVideo()
+                    revokeMergedUrl()
+                    setMergedVideo(null)
+                  }}
+                  className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                >
+                  <X className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
+                  {isMy ? "ဖယ်ရှားမည်" : "Remove"}
+                </Button>
+              )}
+            </div>
+
+            {!videoFile ? (
+              <div className="relative rounded-xl border-2 border-dashed border-border/70 bg-muted/20 hover:bg-muted/40 hover:border-indigo-500/50 p-4 text-center transition-colors cursor-pointer">
+                <input
+                  type="file"
+                  accept="video/*,.mp4,.mov,.m4v,.webm,.3gp,.mkv"
+                  className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                  onChange={(e) => {
+                    handleSelectVideoFile(e.target.files?.[0])
+                    e.target.value = ""
+                  }}
+                />
+                <div className="flex items-center justify-center gap-2.5 pointer-events-none">
+                  <Upload className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0" aria-hidden="true" />
+                  <span className="text-xs font-medium text-muted-foreground font-myanmar">
+                    {isMy
+                      ? "အသံနှင့်ပေါင်းစပ်ရန် ဗီဒီယိုဖိုင် ရွေးချယ်ပါ (MP4, MOV)"
+                      : "Tap to upload a video (MP4, MOV, WebM) to merge voiceover"}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-border/60 bg-muted/20 p-3 space-y-2.5">
+                {videoPreviewUrl && (
+                  <video
+                    src={videoPreviewUrl}
+                    controls
+                    playsInline
+                    muted
+                    className="w-full max-h-[160px] rounded-lg bg-black/90 object-contain"
+                  />
+                )}
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="font-medium truncate">{videoFile.name}</span>
+                  <Badge variant="secondary" className="text-[11px] shrink-0">
+                    {formatFileSize(videoFile.size)}
+                  </Badge>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button
+                type="button"
+                onClick={handleMergeVideo}
+                disabled={!voiceoverResult || !videoFile || isMergingVideo || isGeneratingVoice}
+                className="flex-1 h-10 text-xs sm:text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white border-0 disabled:opacity-50"
+              >
+                {isMergingVideo ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" aria-hidden="true" />
+                    Merging Audio &amp; Video... {mergeProgress}%
+                  </>
+                ) : (
+                  <>
+                    <Film className="h-4 w-4 mr-1.5" aria-hidden="true" />
+                    {isMy ? "ဗီဒီယိုနှင့် ပေါင်းစပ်ပြီး ဒေါင်းလုဒ်ဆွဲမည်" : "Merge into Video & Download"}
+                  </>
+                )}
+              </Button>
+
+              {mergedVideo && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleShareVideo}
+                  className="h-10 px-4 text-xs font-semibold border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
+                >
+                  <Share2 className="h-4 w-4 mr-1.5" aria-hidden="true" />
+                  {canShareFiles ? (isMy ? "မျှဝေမည်" : "Share Video") : (isMy ? "ထပ်မံဒေါင်းလုဒ်ဆွဲမည်" : "Download Again")}
+                </Button>
+              )}
+            </div>
+
+            {isMergingVideo && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>Merging Audio &amp; Video...</span>
+                  <span className="font-semibold text-foreground">{mergeProgress}%</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-150"
+                    style={{ width: `${mergeProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Mobile Bottom Thumb-Zone Bar */}
+      <div className="lg:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur-md px-3 py-2.5 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+        <div className="flex items-center gap-2 max-w-3xl mx-auto">
+          <Button
+            type="button"
+            onClick={handleGenerateVoice}
+            disabled={isGeneratingVoice || isMergingVideo || !voiceoverDraftScript.trim()}
+            className="flex-1 min-h-[44px] text-xs font-semibold bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white border-0 font-myanmar"
+          >
+            {isGeneratingVoice ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" aria-hidden="true" />
+                {isMy ? "ဖန်တီးနေသည်..." : "Generating..."}
+              </>
+            ) : (
+              <>
+                <Mic className="h-4 w-4 mr-1.5" aria-hidden="true" />
+                {isMy ? "AI အသံဖန်တီးမည်" : "Generate Voice"}
+              </>
+            )}
+          </Button>
+          {voiceoverResult && videoFile && (
+            <Button
+              type="button"
+              onClick={handleMergeVideo}
+              disabled={isMergingVideo || isGeneratingVoice}
+              className="min-h-[44px] px-3.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white border-0 font-myanmar"
+            >
+              <Film className="h-4 w-4 mr-1.5" aria-hidden="true" />
+              {isMy ? "ပေါင်းစပ်မည်" : "Merge"}
+            </Button>
+          )}
+          {mergedVideo && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleShareVideo}
+              className="min-h-[44px] px-3 text-xs font-semibold border-emerald-500/40"
+            >
+              <Share2 className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

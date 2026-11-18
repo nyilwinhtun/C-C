@@ -28,6 +28,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { vaultItemSchema, type VaultItemFormValues } from "@/features/vault/schema"
+import { PlannerPage } from "@/features/planner/page"
 
 const PLATFORMS: { value: "facebook" | "tiktok" | "youtube" | "instagram"; label: string }[] = [
   { value: "facebook", label: "Facebook" },
@@ -241,7 +242,7 @@ export function VaultPage() {
         contentType: isVideo ? "video_script" : "post_caption",
         salesAngle: isPromo ? "promo_showcase" : undefined,
       })
-      setActivePageKey("generator")
+      setActivePageKey("text")
       toast.success(
         language === "my"
           ? "AI Generator ထဲသို့ ထည့်သွင်းပြီးပါပြီ"
@@ -576,6 +577,52 @@ export function VaultPage() {
         </div>
       )}
       {renderDialog()}
+    </div>
+  )
+}
+
+export function VaultAndCalendarPage() {
+  const language = useUIStore(useShallow((state) => state.language))
+  const [subTab, setSubTab] = useState<"vault" | "calendar">("vault")
+
+  return (
+    <div className="space-y-4">
+      <div
+        role="tablist"
+        aria-label={t(language, "page.vault")}
+        className="inline-flex w-full sm:w-auto items-center rounded-xl border border-border/60 bg-muted/40 p-1"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subTab === "vault"}
+          onClick={() => setSubTab("vault")}
+          className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs sm:text-sm font-medium transition-all cursor-pointer font-myanmar ${
+            subTab === "vault"
+              ? "bg-background text-foreground shadow-sm border border-border/60"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <FolderKanban className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{t(language, "nav.mobile.vault")}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subTab === "calendar"}
+          onClick={() => setSubTab("calendar")}
+          className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs sm:text-sm font-medium transition-all cursor-pointer font-myanmar ${
+            subTab === "calendar"
+              ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Calendar className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{t(language, "nav.mobile.planner")}</span>
+        </button>
+      </div>
+
+      {subTab === "vault" ? <VaultPage /> : <PlannerPage />}
     </div>
   )
 }

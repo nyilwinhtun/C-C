@@ -1,6 +1,6 @@
 export type Theme = 'light' | 'dark'
 
-export type NavItemKey = 'generator' | 'photo-studio' | 'vault' | 'planner'
+export type NavItemKey = 'text' | 'video' | 'voiceover' | 'studio' | 'vault'
 
 export interface NavItem {
   key: NavItemKey

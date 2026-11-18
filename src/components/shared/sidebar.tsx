@@ -2,14 +2,15 @@
 
 import { useState } from "react"
 import {
-  Calendar,
   Camera,
   ChevronRight,
+  FileText,
   FolderKanban,
   Globe,
-  LayoutList,
+  Mic,
   Moon,
   Sun,
+  Video,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -64,28 +65,34 @@ function NavLink({ item, active, onSelect, collapsed }: NavLinkProps) {
 
 const navigation: NavItem[] = [
   {
-    key: "generator",
-    title: "Generator",
+    key: "text",
+    title: "Text Post",
     url: "/",
-    icon: LayoutList,
+    icon: FileText,
   },
   {
-    key: "photo-studio",
+    key: "video",
+    title: "Video Script",
+    url: "/video",
+    icon: Video,
+  },
+  {
+    key: "voiceover",
+    title: "AI Voiceover",
+    url: "/voiceover",
+    icon: Mic,
+  },
+  {
+    key: "studio",
     title: "Photo Studio",
-    url: "/photo-studio",
+    url: "/studio",
     icon: Camera,
   },
   {
     key: "vault",
-    title: "Vault",
+    title: "Vault & Calendar",
     url: "/vault",
     icon: FolderKanban,
-  },
-  {
-    key: "planner",
-    title: "Planner",
-    url: "/planner",
-    icon: Calendar,
   },
 ]
 

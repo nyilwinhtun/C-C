@@ -5,6 +5,7 @@ import {
   AlertCircle,
   Calendar,
   Check,
+  ChevronDown,
   Copy,
   Film,
   FolderOpen,
@@ -15,6 +16,8 @@ import {
   Pencil,
   RotateCcw,
   Save,
+  Share2,
+  SlidersHorizontal,
   Sparkles,
   Type,
   Upload,
@@ -41,7 +44,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ReadAloudButton } from "@/components/shared/read-aloud-button"
-import { VoiceoverStudioCard } from "@/features/generator/VoiceoverStudioCard"
+import { cleanVoiceoverText } from "@/api/ttsService"
 import {
   Card,
   CardContent,
@@ -158,7 +161,9 @@ function mapVideoPlatformToVaultPlatform(platform: string): string {
 
 export function VideoToContentSection() {
   const language = useUIStore((state) => state.language)
+  const setActivePageKey = useUIStore((state) => state.setActivePageKey)
   const saveToVault = useContentStore((state) => state.saveToVault)
+  const setVoiceoverDraftScript = useContentStore((state) => state.setVoiceoverDraftScript)
   const brandSignature = useContentStore((state) => state.brandSignature)
   const businessCategory = useContentStore((state) => state.businessCategory)
   const customNiche = useContentStore((state) => state.customNiche)
@@ -187,7 +192,8 @@ export function VideoToContentSection() {
 
   const [progressStage, setProgressStage] = useState<"extracting" | "analyzing" | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
-  const [isInputCollapsed, setIsInputCollapsed] = useState(false)
+  const [mobileView, setMobileView] = useState<"create" | "result">("create")
+  const [optionsOpen, setOptionsOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<VideoOutputTab>("hooks")
   const [showAllTabs, setShowAllTabs] = useState(false)
 
@@ -243,7 +249,7 @@ export function VideoToContentSection() {
       setErrorMessage(null)
       setUploadedVideo(file, nextPreviewUrl)
       setResult(null)
-      setIsInputCollapsed(false)
+      setMobileView("create")
     },
     [setUploadedVideo, setResult]
   )
@@ -251,7 +257,7 @@ export function VideoToContentSection() {
   const handleClearFile = useCallback(() => {
     clearUploadedVideo()
     setErrorMessage(null)
-    setIsInputCollapsed(false)
+    setMobileView("create")
   }, [clearUploadedVideo])
 
   const handleResetDraft = useCallback(() => {
@@ -260,7 +266,7 @@ export function VideoToContentSection() {
     setPlatform("TikTok / Reels")
     setOutputLanguage(language)
     setErrorMessage(null)
-    setIsInputCollapsed(false)
+    setMobileView("create")
     if (typeof window !== "undefined") {
       try {
         window.localStorage.removeItem(VIDEO_DRAFT_STORAGE_KEY)
@@ -273,6 +279,9 @@ export function VideoToContentSection() {
   const handleGenerate = useCallback(async () => {
     if (!videoFile || progressStage) return
     setErrorMessage(null)
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setMobileView("result")
+    }
     setProgressStage(
       videoFile.size <= DIRECT_MODE_LIMIT_BYTES ? "analyzing" : "extracting"
     )
@@ -314,10 +323,7 @@ export function VideoToContentSection() {
       setShowAllTabs(false)
       toast.success(t(language, "generator.videoSuccess"))
       if (typeof window !== "undefined" && window.innerWidth < 1024) {
-        setIsInputCollapsed(true)
-        setTimeout(() => {
-          resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
-        }, 100)
+        setMobileView("result")
       }
     } catch (err) {
       const message =
@@ -424,37 +430,83 @@ export function VideoToContentSection() {
     { id: "cover", label: t(language, "generator.videoTabCover"), icon: Type },
   ]
 
-  return (
-    <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 items-start">
-      <div className="w-full flex-1 min-w-0">
-        {isInputCollapsed && result && (
-          <div className="lg:hidden flex items-center justify-between gap-2 rounded-xl border border-border/60 bg-card px-3.5 py-2.5 shadow-sm">
-            <div className="flex items-center gap-2 min-w-0">
-              <Video className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
-              <span className="text-xs font-medium truncate">
-                {videoFile?.name || productNote || t(language, "generator.modeVideo")}
-              </span>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setIsInputCollapsed(false)}
-              className="h-7 px-2.5 text-xs shrink-0 border-border/60 font-myanmar"
-            >
-              <Pencil className="h-3 w-3 mr-1" aria-hidden="true" />
-              {t(language, "generator.edit")}
-            </Button>
-          </div>
-        )}
+  const handleSendToVoiceover = useCallback(() => {
+    if (!result) return
+    const scriptSource = result.voiceoverScript?.trim() || result.caption?.trim() || ""
+    if (!scriptSource) return
+    setVoiceoverDraftScript(cleanVoiceoverText(scriptSource))
+    setActivePageKey("voiceover")
+  }, [result, setVoiceoverDraftScript, setActivePageKey])
 
-        <Card
-          className={
-            isInputCollapsed && result
-              ? "hidden lg:block border-border/60 shadow-sm"
-              : "border-border/60 shadow-sm"
-          }
+  const handleShareResult = useCallback(async () => {
+    if (!result) return
+    const textToShare = [
+      result.hooks.length > 0 ? result.hooks.join("\n") : "",
+      result.voiceoverScript || "",
+      result.caption || "",
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+    if (!textToShare.trim()) return
+
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      try {
+        await navigator.share({
+          title: result.coverTitle || "Video Script",
+          text: textToShare,
+        })
+        return
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return
+      }
+    }
+    await copyText("share-fallback", textToShare)
+  }, [result, copyText])
+
+  return (
+    <div className="space-y-3 sm:space-y-4 pb-24 lg:pb-0">
+      {/* Mobile 2-Pill Create vs Result Switcher */}
+      <div
+        role="tablist"
+        aria-label="Create or Result View"
+        className="lg:hidden grid grid-cols-2 items-center rounded-xl border border-border/60 bg-muted/40 p-1"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mobileView === "create"}
+          onClick={() => setMobileView("create")}
+          className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all cursor-pointer font-myanmar ${
+            mobileView === "create"
+              ? "bg-background text-foreground shadow-sm border border-border/60"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
         >
+          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{t(language, "generator.tabCreate")}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mobileView === "result"}
+          onClick={() => setMobileView("result")}
+          className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all cursor-pointer font-myanmar ${
+            mobileView === "result"
+              ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{t(language, "generator.tabResult")}</span>
+          {(result || isGenerating) && (
+            <span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true" />
+          )}
+        </button>
+      </div>
+
+      <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 items-start">
+        <div className={`w-full flex-1 min-w-0 ${mobileView === "create" ? "block" : "hidden lg:block"}`}>
+          <Card className="border-border/60 shadow-sm">
           <CardHeader className="py-3 px-4 sm:py-4 sm:px-5 border-b border-border/60 flex flex-row items-start justify-between gap-3 space-y-0">
             <CardDescription className="text-xs sm:text-sm leading-relaxed">
               {t(language, "generator.videoDesc")}
@@ -639,41 +691,69 @@ export function VideoToContentSection() {
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="video-platform" className="leading-relaxed">
-                  {t(language, "generator.videoPlatform")}
-                </Label>
-                <Select
-                  id="video-platform"
-                  value={platform}
-                  onChange={(e) => setPlatform(e.target.value as VideoPlatformOption)}
-                  className="border-border/60"
-                  disabled={isGenerating}
-                >
-                  {VIDEO_PLATFORMS.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+            {/* Collapsible Options Panel (Platform & Output Language) */}
+            <div className="rounded-xl border border-border/60 bg-muted/20 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setOptionsOpen((prev) => !prev)}
+                aria-expanded={optionsOpen}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-xs font-medium text-foreground hover:bg-muted/40 transition-colors cursor-pointer"
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <SlidersHorizontal className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
+                  <span className="font-semibold font-myanmar">
+                    ⚙️ {t(language, "generator.optionsToggle")}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground truncate">
+                    · {platform} · {outputLanguage === "my" ? "MY" : "EN"}
+                  </span>
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-150 ${
+                    optionsOpen ? "rotate-180" : ""
+                  }`}
+                  aria-hidden="true"
+                />
+              </button>
 
-              <div className="grid gap-1.5">
-                <Label htmlFor="video-language" className="leading-relaxed">
-                  {t(language, "generator.videoOutputLang")}
-                </Label>
-                <Select
-                  id="video-language"
-                  value={outputLanguage}
-                  onChange={(e) => setOutputLanguage(e.target.value as "en" | "my")}
-                  className="border-border/60"
-                  disabled={isGenerating}
-                >
-                  <option value="my">{t(language, "generator.language_myanmar")}</option>
-                  <option value="en">{t(language, "generator.language_english")}</option>
-                </Select>
-              </div>
+              {optionsOpen && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 pt-2 border-t border-border/60 bg-background/40">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="video-platform" className="text-xs leading-relaxed">
+                      {t(language, "generator.videoPlatform")}
+                    </Label>
+                    <Select
+                      id="video-platform"
+                      value={platform}
+                      onChange={(e) => setPlatform(e.target.value as VideoPlatformOption)}
+                      className="border-border/60"
+                      disabled={isGenerating}
+                    >
+                      {VIDEO_PLATFORMS.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="video-language" className="text-xs leading-relaxed">
+                      {t(language, "generator.videoOutputLang")}
+                    </Label>
+                    <Select
+                      id="video-language"
+                      value={outputLanguage}
+                      onChange={(e) => setOutputLanguage(e.target.value as "en" | "my")}
+                      className="border-border/60"
+                      disabled={isGenerating}
+                    >
+                      <option value="my">{t(language, "generator.language_myanmar")}</option>
+                      <option value="en">{t(language, "generator.language_english")}</option>
+                    </Select>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="pt-2">
@@ -706,7 +786,9 @@ export function VideoToContentSection() {
 
       <div
         ref={resultRef}
-        className="w-full lg:w-[440px] shrink-0 flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start scroll-mt-4"
+        className={`w-full lg:w-[440px] shrink-0 flex-col gap-4 lg:sticky lg:top-6 lg:self-start scroll-mt-4 ${
+          mobileView === "result" ? "flex" : "hidden lg:flex"
+        }`}
       >
         {isGenerating ? (
           <Card className="border-border/60 shadow-sm overflow-hidden" aria-busy="true">
@@ -916,11 +998,14 @@ export function VideoToContentSection() {
                   </CardFooter>
                 </Card>
 
-                <VoiceoverStudioCard
-                  voiceoverScript={result.voiceoverScript}
-                  videoFile={videoFile}
-                  language={language}
-                />
+                <Button
+                  type="button"
+                  onClick={handleSendToVoiceover}
+                  className="w-full h-10 text-xs sm:text-sm font-semibold bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white border-0 shadow-sm font-myanmar"
+                >
+                  <Mic className="h-4 w-4 mr-1.5" aria-hidden="true" />
+                  {t(language, "generator.sendToVoiceover")}
+                </Button>
               </div>
             )}
 
@@ -1101,6 +1186,79 @@ export function VideoToContentSection() {
                 </Button>
               </div>
             </div>
+          </div>
+        )}
+      </div>
+      </div>
+
+      {/* Mobile Bottom Thumb-Zone Action Bar */}
+      <div className="lg:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur-md px-3 py-2.5 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+        {mobileView === "create" ? (
+          <div className="flex items-center gap-2 max-w-2xl mx-auto">
+            <Button
+              type="button"
+              onClick={handleGenerate}
+              disabled={!videoFile || isGenerating}
+              className="flex-1 min-h-[44px] rounded-xl font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-0 shadow-md shadow-blue-500/20 font-myanmar"
+            >
+              {isGenerating ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden="true" />
+                  <span>
+                    {progressStage === "extracting"
+                      ? t(language, "generator.videoProgressExtracting")
+                      : t(language, "generator.videoProgressAnalyzing")}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4 mr-2" aria-hidden="true" />
+                  <span>{t(language, "generator.videoGenerate")}</span>
+                </>
+              )}
+            </Button>
+            {result && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setMobileView("result")}
+                className="min-h-[44px] px-3 rounded-xl border-border/60 text-xs font-semibold font-myanmar"
+              >
+                {t(language, "generator.tabResult")}
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 max-w-2xl mx-auto">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => result && copyText("all-mobile", formatAllContent(result))}
+              disabled={!result}
+              className="min-h-[44px] px-3 rounded-xl border-border/60 text-xs font-semibold font-myanmar"
+            >
+              <Copy className="h-4 w-4 mr-1" aria-hidden="true" />
+              {t(language, "generator.copy")}
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSendToVoiceover}
+              disabled={!result || (!result.voiceoverScript && !result.caption)}
+              className="flex-1 min-h-[44px] px-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white border-0 text-xs font-semibold font-myanmar"
+            >
+              <Mic className="h-4 w-4 mr-1.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">{t(language, "generator.sendToVoiceover")}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleShareResult}
+              disabled={!result}
+              className="min-h-[44px] px-3 rounded-xl border-border/60 text-xs font-semibold"
+              aria-label={t(language, "generator.share")}
+            >
+              <Share2 className="h-4 w-4" aria-hidden="true" />
+            </Button>
           </div>
         )}
       </div>

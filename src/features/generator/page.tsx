@@ -7,7 +7,6 @@ import {
   Calendar,
   Camera,
   Copy,
-  FileText,
   Globe,
   Loader2,
   RefreshCw,
@@ -30,7 +29,10 @@ import {
   Check,
   AlertTriangle,
   ImagePlus,
+  Mic,
   Pencil,
+  SlidersHorizontal,
+  ChevronDown,
 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
@@ -40,7 +42,7 @@ import {
   type GeneratorFormInput,
 } from "@/features/generator/schema"
 import { useGenerateContent } from "@/features/generator/useGenerateContent"
-import { VideoToContentSection } from "@/features/generator/VideoToContentSection"
+import { cleanVoiceoverText } from "@/api/ttsService"
 import { ReadAloudButton } from "@/components/shared/read-aloud-button"
 import {
   useContentStore,
@@ -410,6 +412,7 @@ export function GeneratorPage() {
     setCustomNiche,
     setAutoAppendShopCta,
     setPosterDraft,
+    setVoiceoverDraftScript,
   } = useContentStore(
     useShallow((state) => ({
       addGeneratedItem: state.addGeneratedItem,
@@ -423,10 +426,10 @@ export function GeneratorPage() {
       setCustomNiche: state.setCustomNiche,
       setAutoAppendShopCta: state.setAutoAppendShopCta,
       setPosterDraft: state.setPosterDraft,
+      setVoiceoverDraftScript: state.setVoiceoverDraftScript,
     }))
   )
 
-  const [generatorMode, setGeneratorMode] = useState<"text" | "video">("text")
   const [activeAction, setActiveAction] = useState<ActiveAction | null>(null)
   const pendingActionRef = useRef<ActiveAction | null>(null)
   const previewRef = useRef<HTMLDivElement | null>(null)
@@ -479,10 +482,7 @@ export function GeneratorPage() {
       toast.success(t(language, successKey))
 
       if (typeof window !== "undefined" && window.innerWidth < 1024) {
-        setIsInputCollapsed(true)
-        setTimeout(() => {
-          previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
-        }, 100)
+        setMobileView("result")
       }
     },
     onError: (err) => {
@@ -505,7 +505,8 @@ export function GeneratorPage() {
   const [typewriterIndex, setTypewriterIndex] = useState(0)
   const [isTypewriting, setIsTypewriting] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
-  const [isInputCollapsed, setIsInputCollapsed] = useState(false)
+  const [mobileView, setMobileView] = useState<"create" | "result">("create")
+  const [optionsOpen, setOptionsOpen] = useState(false)
 
   const form = useForm<GeneratorFormInput>({
     resolver: zodResolver(generatorSchema),
@@ -539,6 +540,9 @@ export function GeneratorPage() {
     setDisplayedText("")
     setTypewriterIndex(0)
     setIsTypewriting(false)
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setMobileView("result")
+    }
     generate({
       ...data,
       salesAngle: data.salesAngle ?? "viral_story",
@@ -681,8 +685,15 @@ export function GeneratorPage() {
       result?.topic || form.getValues("topic")
     )
     setPosterDraft(draft)
-    setActivePageKey("photo-studio")
+    setActivePageKey("studio")
   }, [displayedText, result, form, setPosterDraft, setActivePageKey])
+
+  const handleSendToVoiceover = useCallback(() => {
+    const activeText = (displayedText || result?.content || "").trim()
+    if (!activeText) return
+    setVoiceoverDraftScript(cleanVoiceoverText(activeText))
+    setActivePageKey("voiceover")
+  }, [displayedText, result, setVoiceoverDraftScript, setActivePageKey])
 
   const handleRegenerate = useCallback(() => {
     if (!result) return
@@ -695,6 +706,9 @@ export function GeneratorPage() {
     setDisplayedText("")
     setTypewriterIndex(0)
     setIsTypewriting(false)
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setMobileView("result")
+    }
     generate({
       topic: result.topic,
       platform: result.platform,
@@ -835,51 +849,47 @@ export function GeneratorPage() {
   }, [contentToShow, viewMode])
 
   return (
-    <div className="space-y-3 sm:space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div
-          role="tablist"
-          aria-label="Generator Mode"
-          className="inline-flex w-full sm:w-auto items-center rounded-xl border border-border/60 bg-muted/40 p-1"
+    <div className="space-y-3 sm:space-y-4 pb-24 lg:pb-0">
+      {/* Mobile 2-Pill Create vs Result Switcher */}
+      <div
+        role="tablist"
+        aria-label="Create or Result View"
+        className="lg:hidden grid grid-cols-2 items-center rounded-xl border border-border/60 bg-muted/40 p-1"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mobileView === "create"}
+          onClick={() => setMobileView("create")}
+          className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all cursor-pointer font-myanmar ${
+            mobileView === "create"
+              ? "bg-background text-foreground shadow-sm border border-border/60"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
         >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={generatorMode === "text"}
-            onClick={() => setGeneratorMode("text")}
-            className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs sm:text-sm font-medium transition-all cursor-pointer ${
-              generatorMode === "text"
-                ? "bg-background text-foreground shadow-sm border border-border/60"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <FileText className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>{t(language, "generator.modeText")}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={generatorMode === "video"}
-            onClick={() => setGeneratorMode("video")}
-            className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs sm:text-sm font-medium transition-all cursor-pointer ${
-              generatorMode === "video"
-                ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Video className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>{t(language, "generator.modeVideo")}</span>
-          </button>
-        </div>
+          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{t(language, "generator.tabCreate")}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mobileView === "result"}
+          onClick={() => setMobileView("result")}
+          className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all cursor-pointer font-myanmar ${
+            mobileView === "result"
+              ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{t(language, "generator.tabResult")}</span>
+          {(result || isGeneratingFlag) && (
+            <span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true" />
+          )}
+        </button>
       </div>
 
-      {generatorMode === "video" ? (
-        <div className="pb-4 lg:pb-0">
-          <VideoToContentSection />
-        </div>
-      ) : (
-        <>
-          <div className={isInputCollapsed && result ? "hidden lg:flex flex-wrap items-center gap-2" : "flex flex-wrap items-center gap-2"}>
+      <div className={mobileView === "create" ? "flex flex-wrap items-center gap-2" : "hidden lg:flex flex-wrap items-center gap-2"}>
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider leading-relaxed mr-1">
           {t(language, "generator.templates")}
         </span>
@@ -898,29 +908,8 @@ export function GeneratorPage() {
       </div>
 
       <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 items-start">
-        <div className="w-full flex-1 min-w-0">
-          {isInputCollapsed && result && (
-            <div className="lg:hidden flex items-center justify-between gap-2 rounded-xl border border-border/60 bg-card px-3.5 py-2.5 shadow-sm">
-              <div className="flex items-center gap-2 min-w-0">
-                <FileText className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
-                <span className="text-xs font-medium truncate font-myanmar">
-                  {result.topic || form.getValues("topic") || t(language, "generator.modeText")}
-                </span>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setIsInputCollapsed(false)}
-                className="h-7 px-2.5 text-xs shrink-0 border-border/60 font-myanmar"
-              >
-                <Pencil className="h-3 w-3 mr-1" aria-hidden="true" />
-                {t(language, "generator.edit")}
-              </Button>
-            </div>
-          )}
-
-          <Card className={isInputCollapsed && result ? "hidden lg:block border-border/60 shadow-sm" : "border-border/60 shadow-sm"}>
+        <div className={`w-full flex-1 min-w-0 ${mobileView === "create" ? "block" : "hidden lg:block"}`}>
+          <Card className="border-border/60 shadow-sm">
             <CardHeader className="py-3 px-4 sm:py-4 sm:px-5 border-b border-border/60">
               <CardDescription className="text-xs sm:text-sm leading-relaxed">{t(language, "generator.desc")}</CardDescription>
             </CardHeader>
@@ -938,38 +927,6 @@ export function GeneratorPage() {
                 className="grid gap-3 p-3.5 sm:p-5"
               >
                 <div className="grid gap-1.5">
-                  <Label htmlFor="creatorNiche" className="leading-relaxed font-myanmar">
-                    {t(language, "settings.businessCategory")}
-                  </Label>
-                  <Select
-                    id="creatorNiche"
-                    value={businessCategory}
-                    onChange={(e) => {
-                      const nextCat = (e.target as HTMLSelectElement).value as BusinessCategory
-                      setBusinessCategory(nextCat)
-                      setAutoAppendShopCta(isShoppingCategory(nextCat))
-                    }}
-                    className="border-border/60 font-myanmar"
-                  >
-                    {BUSINESS_CATEGORIES.map((cat) => (
-                      <option key={cat.value} value={cat.value}>
-                        {language === "my" ? `${cat.labelMy} (${cat.label})` : cat.label}
-                      </option>
-                    ))}
-                  </Select>
-                  {businessCategory === "custom" && (
-                    <Input
-                      id="generatorCustomNiche"
-                      type="text"
-                      value={customNiche}
-                      onChange={(e) => setCustomNiche(e.target.value)}
-                      placeholder={t(language, "settings.customNichePlaceholder")}
-                      className="border-border/60 font-myanmar text-sm"
-                    />
-                  )}
-                </div>
-
-                <div className="grid gap-1.5">
                   <Label htmlFor="topic" className="leading-relaxed">{t(language, "generator.topic")}</Label>
                   <Input
                     id="topic"
@@ -984,10 +941,10 @@ export function GeneratorPage() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-2.5">
                   <div className="grid gap-1.5">
-                    <Label htmlFor="platform" className="leading-relaxed">{t(language, "generator.platform")}</Label>
-                    <Select id="platform" className="border-border/60" {...form.register("platform")}>
+                    <Label htmlFor="platform" className="leading-relaxed text-xs">{t(language, "generator.platform")}</Label>
+                    <Select id="platform" className="border-border/60 h-9 text-xs sm:text-sm" {...form.register("platform")}>
                       <option value="">{t(language, "generator.platform")}</option>
                       {PLATFORMS.map((p) => (
                         <option key={p.value} value={p.value}>
@@ -997,8 +954,8 @@ export function GeneratorPage() {
                     </Select>
                   </div>
                   <div className="grid gap-1.5">
-                    <Label htmlFor="contentType" className="leading-relaxed">{t(language, "generator.contentType")}</Label>
-                    <Select id="contentType" className="border-border/60" {...form.register("contentType")}>
+                    <Label htmlFor="contentType" className="leading-relaxed text-xs">{t(language, "generator.contentType")}</Label>
+                    <Select id="contentType" className="border-border/60 h-9 text-xs sm:text-sm" {...form.register("contentType")}>
                       <option value="">{t(language, "generator.contentType")}</option>
                       {CONTENT_TYPES.map((ct) => (
                         <option key={ct.value} value={ct.value}>
@@ -1009,96 +966,158 @@ export function GeneratorPage() {
                   </div>
                 </div>
 
-                <div className="grid gap-1.5">
-                  <Label className="text-xs sm:text-sm leading-relaxed">{t(language, "generator.salesAngle")}</Label>
-                  <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={t(language, "generator.salesAngle")}>
-                    {SALES_ANGLES.map((angleOption) => {
-                      const isSelected = selectedSalesAngle === angleOption.value
-                      return (
-                        <button
-                          key={angleOption.value}
-                          type="button"
-                          role="radio"
-                          aria-checked={isSelected}
-                          onClick={() =>
-                            form.setValue("salesAngle", angleOption.value, {
-                              shouldDirty: true,
-                              shouldValidate: true,
-                            })
-                          }
-                          className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] sm:text-xs font-medium transition-all cursor-pointer font-myanmar ${
-                            isSelected
-                              ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white border-transparent shadow-xs"
-                              : "border-border/60 bg-background/80 text-muted-foreground hover:text-foreground hover:bg-accent/70"
-                          }`}
-                        >
-                          {language === "my" ? angleOption.labelMy : angleOption.label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                <div className="grid gap-1.5">
-                  <Label className="text-xs sm:text-sm leading-relaxed">{t(language, "generator.tone")}</Label>
-                  <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t(language, "generator.tone")}>
-                    {TONES.map((toneOption) => {
-                      const isSelected = selectedTone === toneOption.value
-                      return (
-                        <button
-                          key={toneOption.value}
-                          type="button"
-                          role="radio"
-                          aria-checked={isSelected}
-                          onClick={() =>
-                            form.setValue("tone", toneOption.value, {
-                              shouldDirty: true,
-                              shouldValidate: true,
-                            })
-                          }
-                          className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-all leading-relaxed cursor-pointer ${
-                            isSelected
-                              ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-transparent shadow-sm shadow-blue-500/20"
-                              : "border-border/60 bg-background/80 text-muted-foreground hover:text-foreground hover:bg-accent/70"
-                          }`}
-                        >
-                          {toneOption.label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  {form.formState.errors.tone && (
-                    <span className="text-xs text-destructive leading-relaxed">
-                      {form.formState.errors.tone.message}
+                {/* Collapsible Options Panel (Niche, Angle, Tone, Output Language, Hashtags) */}
+                <div className="rounded-xl border border-border/60 bg-muted/20 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setOptionsOpen((prev) => !prev)}
+                    aria-expanded={optionsOpen}
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-xs font-medium text-foreground hover:bg-muted/40 transition-colors cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <SlidersHorizontal className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
+                      <span className="font-semibold font-myanmar">
+                        ⚙️ {t(language, "generator.optionsToggle")}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground truncate">
+                        · {selectedTone || "engaging"} · {form.watch("language") || "english"}
+                      </span>
                     </span>
+                    <ChevronDown
+                      className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-150 ${
+                        optionsOpen ? "rotate-180" : ""
+                      }`}
+                      aria-hidden="true"
+                    />
+                  </button>
+
+                  {optionsOpen && (
+                    <div className="grid gap-3 p-3 pt-2 border-t border-border/60 bg-background/40">
+                      <div className="grid gap-1.5">
+                        <Label htmlFor="creatorNiche" className="leading-relaxed font-myanmar text-xs">
+                          {t(language, "settings.businessCategory")}
+                        </Label>
+                        <Select
+                          id="creatorNiche"
+                          value={businessCategory}
+                          onChange={(e) => {
+                            const nextCat = (e.target as HTMLSelectElement).value as BusinessCategory
+                            setBusinessCategory(nextCat)
+                            setAutoAppendShopCta(isShoppingCategory(nextCat))
+                          }}
+                          className="border-border/60 font-myanmar"
+                        >
+                          {BUSINESS_CATEGORIES.map((cat) => (
+                            <option key={cat.value} value={cat.value}>
+                              {language === "my" ? `${cat.labelMy} (${cat.label})` : cat.label}
+                            </option>
+                          ))}
+                        </Select>
+                        {businessCategory === "custom" && (
+                          <Input
+                            id="generatorCustomNiche"
+                            type="text"
+                            value={customNiche}
+                            onChange={(e) => setCustomNiche(e.target.value)}
+                            placeholder={t(language, "settings.customNichePlaceholder")}
+                            className="border-border/60 font-myanmar text-sm"
+                          />
+                        )}
+                      </div>
+
+                      <div className="grid gap-1.5">
+                        <Label className="text-xs leading-relaxed">{t(language, "generator.salesAngle")}</Label>
+                        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={t(language, "generator.salesAngle")}>
+                          {SALES_ANGLES.map((angleOption) => {
+                            const isSelected = selectedSalesAngle === angleOption.value
+                            return (
+                              <button
+                                key={angleOption.value}
+                                type="button"
+                                role="radio"
+                                aria-checked={isSelected}
+                                onClick={() =>
+                                  form.setValue("salesAngle", angleOption.value, {
+                                    shouldDirty: true,
+                                    shouldValidate: true,
+                                  })
+                                }
+                                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer font-myanmar ${
+                                  isSelected
+                                    ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white border-transparent shadow-xs"
+                                    : "border-border/60 bg-background/80 text-muted-foreground hover:text-foreground hover:bg-accent/70"
+                                }`}
+                              >
+                                {language === "my" ? angleOption.labelMy : angleOption.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-1.5">
+                        <Label className="text-xs leading-relaxed">{t(language, "generator.tone")}</Label>
+                        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={t(language, "generator.tone")}>
+                          {TONES.map((toneOption) => {
+                            const isSelected = selectedTone === toneOption.value
+                            return (
+                              <button
+                                key={toneOption.value}
+                                type="button"
+                                role="radio"
+                                aria-checked={isSelected}
+                                onClick={() =>
+                                  form.setValue("tone", toneOption.value, {
+                                    shouldDirty: true,
+                                    shouldValidate: true,
+                                  })
+                                }
+                                className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-all leading-relaxed cursor-pointer ${
+                                  isSelected
+                                    ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-transparent shadow-sm shadow-blue-500/20"
+                                    : "border-border/60 bg-background/80 text-muted-foreground hover:text-foreground hover:bg-accent/70"
+                                }`}
+                              >
+                                {toneOption.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+                        {form.formState.errors.tone && (
+                          <span className="text-xs text-destructive leading-relaxed">
+                            {form.formState.errors.tone.message}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                        <div className="grid gap-1.5">
+                          <Label htmlFor="language" className="text-xs leading-relaxed">{t(language, "generator.language")}</Label>
+                          <Select id="language" className="border-border/60" {...form.register("language")}>
+                            {LANGUAGES.map((l) => (
+                              <option key={l.value} value={l.value}>
+                                {l.label}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                        <div className="flex items-center h-10 px-3 rounded-md border border-border/60 bg-background/50">
+                          <Label htmlFor="includeHashtags" className="flex items-center gap-2 cursor-pointer text-xs leading-relaxed w-full">
+                            <input
+                              id="includeHashtags"
+                              type="checkbox"
+                              {...form.register("includeHashtags")}
+                              className="rounded border-input bg-background text-blue-600 focus:ring-blue-500"
+                            />
+                            <span>{t(language, "generator.includeHashtags")}</span>
+                          </Label>
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="language" className="leading-relaxed">{t(language, "generator.language")}</Label>
-                    <Select id="language" className="border-border/60" {...form.register("language")}>
-                      {LANGUAGES.map((l) => (
-                        <option key={l.value} value={l.value}>
-                          {l.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                  <div className="flex items-center h-10 px-3 rounded-md border border-border/60 bg-background/50">
-                    <Label htmlFor="includeHashtags" className="flex items-center gap-2 cursor-pointer text-xs sm:text-sm leading-relaxed w-full">
-                      <input
-                        id="includeHashtags"
-                        type="checkbox"
-                        {...form.register("includeHashtags")}
-                        className="rounded border-input bg-background text-blue-600 focus:ring-blue-500"
-                      />
-                      <span>{t(language, "generator.includeHashtags")}</span>
-                    </Label>
-                  </div>
-                </div>
-
-                <div className="flex gap-2 pt-2">
+                <div className="flex gap-2 pt-1">
                   <Button
                     type="submit"
                     variant="default"
@@ -1136,7 +1155,12 @@ export function GeneratorPage() {
           </Card>
         </div>
 
-        <div ref={previewRef} className="w-full lg:w-[420px] shrink-0 flex flex-col gap-3 lg:sticky lg:top-6 lg:self-start scroll-mt-4">
+        <div
+          ref={previewRef}
+          className={`w-full lg:w-[420px] shrink-0 flex-col gap-3 lg:sticky lg:top-6 lg:self-start scroll-mt-4 ${
+            mobileView === "result" ? "flex" : "hidden lg:flex"
+          }`}
+        >
           <Card className="border-border/60 shadow-sm overflow-hidden">
             <CardHeader className="py-2.5 px-3.5 sm:py-3 sm:px-5 border-b border-border/60 bg-muted/20">
               <div className="flex items-center justify-between gap-2">
@@ -1412,7 +1436,7 @@ export function GeneratorPage() {
                 </div>
               )}
             </CardContent>
-            <CardFooter className="sticky bottom-16 sm:bottom-20 z-20 lg:static border-t border-border/60 bg-card/95 lg:bg-muted/10 backdrop-blur-md lg:backdrop-blur-none px-3 py-2.5 sm:px-5 sm:py-3 flex-col gap-2 shadow-lg lg:shadow-none">
+            <CardFooter className="border-t border-border/60 bg-muted/10 px-3 py-2.5 sm:px-5 sm:py-3 flex-col gap-2">
               {contentToShow && (
                 <div className="grid grid-cols-4 gap-1.5 w-full">
                   {(
@@ -1506,16 +1530,28 @@ export function GeneratorPage() {
                   {t(language, "vault.schedule")}
                 </Button>
               </div>
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleCreatePoster}
-                disabled={!contentToShow || isGeneratingFlag}
-                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-0 shadow-xs font-myanmar"
-              >
-                <ImagePlus className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                {t(language, "generator.createPoster")}
-              </Button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 w-full">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleSendToVoiceover}
+                  disabled={!contentToShow || isGeneratingFlag}
+                  className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white border-0 shadow-xs font-myanmar"
+                >
+                  <Mic className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                  {t(language, "generator.sendToVoiceover")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleCreatePoster}
+                  disabled={!contentToShow || isGeneratingFlag}
+                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-0 shadow-xs font-myanmar"
+                >
+                  <ImagePlus className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                  {t(language, "generator.createPoster")}
+                </Button>
+              </div>
             </CardFooter>
           </Card>
 
@@ -1656,8 +1692,74 @@ export function GeneratorPage() {
           )}
         </div>
       </div>
-        </>
-      )}
+
+      {/* Mobile Bottom Thumb-Zone Action Bar */}
+      <div className="lg:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur-md px-3 py-2.5 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+        {mobileView === "create" ? (
+          <div className="flex items-center gap-2 max-w-2xl mx-auto">
+            <Button
+              type="button"
+              onClick={() => void form.handleSubmit(onSubmit)()}
+              disabled={isGeneratingFlag}
+              className="flex-1 min-h-[44px] rounded-xl font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-0 shadow-md shadow-blue-500/20 font-myanmar"
+            >
+              {isGeneratingFlag ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden="true" />
+                  {t(language, "generator.generating")}
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4 mr-2" aria-hidden="true" />
+                  {t(language, "generator.generate")}
+                </>
+              )}
+            </Button>
+            {result && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setMobileView("result")}
+                className="min-h-[44px] px-3 rounded-xl border-border/60 text-xs font-semibold font-myanmar"
+              >
+                {t(language, "generator.tabResult")}
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 max-w-2xl mx-auto">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleCopy}
+              disabled={isCopying || !contentToShow}
+              className="min-h-[44px] px-3 rounded-xl border-border/60 text-xs font-semibold font-myanmar"
+            >
+              <Copy className="h-4 w-4 mr-1" aria-hidden="true" />
+              {t(language, "generator.copy")}
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSendToVoiceover}
+              disabled={!contentToShow || isGeneratingFlag}
+              className="flex-1 min-h-[44px] px-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white border-0 text-xs font-semibold font-myanmar"
+            >
+              <Mic className="h-4 w-4 mr-1.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">{t(language, "generator.sendToVoiceover")}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleShare}
+              disabled={!contentToShow}
+              className="min-h-[44px] px-3 rounded-xl border-border/60 text-xs font-semibold"
+              aria-label={t(language, "generator.share")}
+            >
+              <Share2 className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

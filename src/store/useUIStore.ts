@@ -130,6 +130,25 @@ interface LegacyPersistedUIState extends Partial<UIState> {
   aiModel?: string
 }
 
+function normalizePageKey(key: string): string {
+  switch (key) {
+    case "generator":
+      return "text"
+    case "photo-studio":
+      return "studio"
+    case "planner":
+      return "vault"
+    case "text":
+    case "video":
+    case "voiceover":
+    case "studio":
+    case "vault":
+      return key
+    default:
+      return "text"
+  }
+}
+
 export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
@@ -139,8 +158,8 @@ export const useUIStore = create<UIState>()(
         set((state) => ({ theme: state.theme === "light" ? "dark" : "light" })),
       sidebarCollapsed: false,
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
-      activePageKey: "generator",
-      setActivePageKey: (activePageKey) => set({ activePageKey }),
+      activePageKey: "text",
+      setActivePageKey: (activePageKey) => set({ activePageKey: normalizePageKey(activePageKey) }),
       language: "en",
       setLanguage: (language) => set({ language }),
       // Auth
