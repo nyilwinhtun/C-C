@@ -129,7 +129,7 @@ export default function App() {
   return (
     <AppErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <Toaster position="bottom-right" richColors />
+        <Toaster position="bottom-right" richColors mobileOffset={{ bottom: "5rem" }} />
         <AppContent />
       </QueryClientProvider>
     </AppErrorBoundary>

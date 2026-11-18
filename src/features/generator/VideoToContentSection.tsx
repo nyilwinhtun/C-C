@@ -798,7 +798,7 @@ export function VideoToContentSection() {
               </Card>
             )}
 
-            <div className="sticky bottom-2 z-20 lg:static flex items-center gap-2 rounded-xl border border-border/60 bg-card/95 backdrop-blur-md p-2 shadow-lg lg:border-0 lg:bg-transparent lg:backdrop-blur-none lg:p-0 lg:shadow-none">
+            <div className="sticky bottom-20 z-20 lg:static flex items-center gap-2 rounded-xl border border-border/60 bg-card/95 backdrop-blur-md p-2 shadow-lg lg:border-0 lg:bg-transparent lg:backdrop-blur-none lg:p-0 lg:shadow-none">
               <Button
                 type="button"
                 variant="outline"

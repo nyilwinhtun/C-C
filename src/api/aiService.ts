@@ -242,10 +242,14 @@ async function callOpenRouterWithFallback<T>(
   primaryModel: string,
   callFn: (model: string) => Promise<T>
 ): Promise<T> {
-  const modelsToTry = [
-    primaryModel,
-    ...OPENROUTER_FREE_VISION_MODELS.filter((m) => m !== primaryModel),
-  ]
+  const normalizedPrimary = primaryModel.trim()
+  const modelsToTry =
+    !normalizedPrimary || normalizedPrimary === "openrouter/auto"
+      ? [...OPENROUTER_FREE_VISION_MODELS]
+      : [
+          normalizedPrimary,
+          ...OPENROUTER_FREE_VISION_MODELS.filter((m) => m !== normalizedPrimary),
+        ]
   let lastError: unknown
   for (const candidateModel of modelsToTry) {
     try {
@@ -439,7 +443,7 @@ export async function generateContent(
         if (isLocationUnsupportedError(err) && apiKeys.openrouter) {
           console.warn("Gemini location unsupported. Falling back to OpenRouter...")
           return await callOpenRouterWithFallback(
-            models.openrouter || "openrouter/auto",
+            models.openrouter || DEFAULT_MODELS.openrouter,
             (candidateModel) =>
               generateWithOpenAICompatible(request, "openrouter", apiKeys.openrouter, candidateModel)
           )
@@ -463,27 +467,11 @@ export async function generateContent(
     }
 
     if (provider === "openrouter") {
-      try {
-        return await callOpenRouterWithFallback(model || "openrouter/auto", (candidateModel) =>
+      return await callOpenRouterWithFallback(
+        model || DEFAULT_MODELS.openrouter,
+        (candidateModel) =>
           generateWithOpenAICompatible(request, "openrouter", trimmedKey, candidateModel)
-        )
-      } catch (err) {
-        if (apiKeys.gemini) {
-          console.warn("OpenRouter failed. Falling back to direct Google Gemini API...")
-          try {
-            return await generateWithGemini(request, apiKeys.gemini, GEMINI_MODEL)
-          } catch (geminiErr) {
-            const isQuota =
-              (geminiErr instanceof ApiError && geminiErr.isQuotaExceeded) ||
-              (geminiErr instanceof Error && geminiErr.message.includes("429"))
-            if (isQuota && GEMINI_MODEL !== GEMINI_FALLBACK_MODEL) {
-              return await generateWithGemini(request, apiKeys.gemini, GEMINI_FALLBACK_MODEL)
-            }
-            throw geminiErr
-          }
-        }
-        throw err
-      }
+      )
     }
 
     return await generateWithOpenAICompatible(
@@ -861,7 +849,7 @@ export async function suggestFromPhoto(
       if (isLocationUnsupportedError(err) && apiKeys.openrouter) {
         console.warn("Gemini location unsupported for vision. Falling back to OpenRouter...")
         return await callOpenRouterWithFallback(
-          models.openrouter || "openrouter/auto",
+          models.openrouter || DEFAULT_MODELS.openrouter,
           (candidateModel) =>
             suggestPhotoWithOpenAICompatible(request, "openrouter", apiKeys.openrouter, candidateModel)
         )
@@ -882,27 +870,11 @@ export async function suggestFromPhoto(
   }
 
   if (provider === "openrouter") {
-    try {
-      return await callOpenRouterWithFallback(model || "openrouter/auto", (candidateModel) =>
+    return await callOpenRouterWithFallback(
+      model || DEFAULT_MODELS.openrouter,
+      (candidateModel) =>
         suggestPhotoWithOpenAICompatible(request, "openrouter", trimmedKey, candidateModel)
-      )
-    } catch (err) {
-      if (apiKeys.gemini) {
-        console.warn("OpenRouter vision failed. Falling back to direct Google Gemini API...")
-        try {
-          return await suggestPhotoWithGemini(request, apiKeys.gemini, GEMINI_VISION_MODEL)
-        } catch (geminiErr) {
-          const isQuota =
-            (geminiErr instanceof ApiError && geminiErr.isQuotaExceeded) ||
-            (geminiErr instanceof Error && geminiErr.message.includes("429"))
-          if (isQuota || (geminiErr instanceof ApiError && geminiErr.status === 404)) {
-            return await suggestPhotoWithGemini(request, apiKeys.gemini, GEMINI_FALLBACK_MODEL)
-          }
-          throw geminiErr
-        }
-      }
-      throw err
-    }
+    )
   }
 
   return await suggestPhotoWithOpenAICompatible(
@@ -1300,12 +1272,11 @@ function mockGenerateVideoContent(
   }
 }
 
-const OPENROUTER_VIDEO_MODEL = "google/gemini-2.5-flash"
-
 async function generateVideoWithOpenRouter(
   mediaParts: Array<{ inlineData: { mimeType: string; data: string } }>,
   prompt: string,
   apiKey: string,
+  model: string,
   analysisMode: "direct" | "keyframes",
   frameCount?: number
 ): Promise<VideoContentResult> {
@@ -1316,7 +1287,9 @@ async function generateVideoWithOpenRouter(
     },
   }))
 
-  return await callOpenRouterWithFallback(OPENROUTER_VIDEO_MODEL, async (candidateModel) => {
+  return await callOpenRouterWithFallback(
+    model || DEFAULT_MODELS.openrouter,
+    async (candidateModel) => {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -1376,9 +1349,10 @@ async function extractKeyframeMedia(params: GenerateVideoContentParams): Promise
 export async function generateVideoContent(
   params: GenerateVideoContentParams
 ): Promise<VideoContentResult> {
-  const { provider, apiKeys } = getAiConfig()
+  const { provider, apiKeys, models } = getAiConfig()
   const openRouterKey = apiKeys.openrouter.trim()
   const geminiKey = apiKeys.gemini.trim()
+  const openRouterModel = models.openrouter || DEFAULT_MODELS.openrouter
   const useOpenRouterDirectly = provider === "openrouter"
 
   const isDirectMode =
@@ -1423,6 +1397,7 @@ export async function generateVideoContent(
       mediaParts,
       orPrompt,
       key,
+      openRouterModel,
       analysisMode,
       frameCount
     )
@@ -1472,21 +1447,10 @@ export async function generateVideoContent(
 
   if (useOpenRouterDirectly) {
     if (!openRouterKey) {
-      if (geminiKey) {
-        return await runDirectGemini()
-      }
       await delay(900)
       return mockGenerateVideoContent(params, analysisMode, frameCount)
     }
-    try {
-      return await routeViaOpenRouter(openRouterKey)
-    } catch (err) {
-      if (geminiKey) {
-        console.warn("OpenRouter video analysis failed. Falling back to direct Google Gemini API...")
-        return await runDirectGemini()
-      }
-      throw err
-    }
+    return await routeViaOpenRouter(openRouterKey)
   }
 
   if (!geminiKey) {

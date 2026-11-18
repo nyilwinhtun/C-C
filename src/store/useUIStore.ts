@@ -56,7 +56,7 @@ export const MODEL_STORAGE_KEYS: Record<AIProvider, string> = {
 export const DEFAULT_MODELS: ProviderMap = {
   gemini: "gemini-3.5-flash-lite",
   groq: "llama-3.3-70b-versatile",
-  openrouter: "openrouter/auto",
+  openrouter: "google/gemma-3-27b-it:free",
 }
 
 function readLocalKey(storageKey: string): string {
@@ -89,6 +89,13 @@ function migrateGeminiModel(model: string | undefined): string {
   return model.trim()
 }
 
+function migrateOpenRouterModel(model: string | undefined): string {
+  if (!model || !model.trim() || model.trim() === "openrouter/auto") {
+    return DEFAULT_MODELS.openrouter
+  }
+  return model.trim()
+}
+
 function resolveInitialApiKey(provider: AIProvider): string {
   const current = readLocalKey(API_KEY_STORAGE_KEYS[provider])
   if (current) return current
@@ -108,6 +115,9 @@ function resolveInitialModel(provider: AIProvider): string {
   const stored = readLocalKey(MODEL_STORAGE_KEYS[provider])
   if (provider === "gemini") {
     return migrateGeminiModel(stored)
+  }
+  if (provider === "openrouter") {
+    return migrateOpenRouterModel(stored)
   }
   return stored || DEFAULT_MODELS[provider]
 }
@@ -183,7 +193,7 @@ export const useUIStore = create<UIState>()(
         aiProvider: state.aiProvider ?? "gemini",
         models: {
           gemini: migrateGeminiModel(state.models?.gemini),
-          openrouter: state.models?.openrouter?.trim() || DEFAULT_MODELS.openrouter,
+          openrouter: migrateOpenRouterModel(state.models?.openrouter),
           groq: state.models?.groq?.trim() || DEFAULT_MODELS.groq,
         },
       }),
@@ -249,7 +259,12 @@ export const useUIStore = create<UIState>()(
           const fromPersistedMap = persisted.models?.[p]?.trim() ?? ""
           const fromLegacySingle = p === provider ? (persisted.aiModel?.trim() ?? "") : ""
           const raw = fromStorage || fromPersistedMap || fromLegacySingle || DEFAULT_MODELS[p]
-          const resolved = p === "gemini" ? migrateGeminiModel(raw) : raw
+          const resolved =
+            p === "gemini"
+              ? migrateGeminiModel(raw)
+              : p === "openrouter"
+                ? migrateOpenRouterModel(raw)
+                : raw
           writeLocalKey(MODEL_STORAGE_KEYS[p], resolved)
           return resolved
         }
@@ -271,6 +286,9 @@ export const useUIStore = create<UIState>()(
       onRehydrateStorage: () => (state) => {
         if (state && state.models?.gemini === "gemini-2.5-flash-lite") {
           state.setProviderModel("gemini", DEFAULT_MODELS.gemini)
+        }
+        if (state && state.models?.openrouter === "openrouter/auto") {
+          state.setProviderModel("openrouter", DEFAULT_MODELS.openrouter)
         }
       },
     }

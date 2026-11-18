@@ -1203,7 +1203,7 @@ export function GeneratorPage() {
                 </div>
               )}
             </CardContent>
-            <CardFooter className="sticky bottom-2 z-20 lg:static border-t border-border/60 bg-card/95 lg:bg-muted/10 backdrop-blur-md lg:backdrop-blur-none pt-3 pb-3 lg:pt-4 flex-col gap-2.5 shadow-lg lg:shadow-none">
+            <CardFooter className="sticky bottom-20 z-20 lg:static border-t border-border/60 bg-card/95 lg:bg-muted/10 backdrop-blur-md lg:backdrop-blur-none pt-3 pb-3 lg:pt-4 flex-col gap-2.5 shadow-lg lg:shadow-none">
               <div className="flex flex-wrap items-center gap-2 w-full">
                 <ReadAloudButton
                   text={contentToShow}

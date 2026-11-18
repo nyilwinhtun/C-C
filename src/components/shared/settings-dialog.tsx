@@ -34,12 +34,18 @@ const PRESET_MODELS: Record<AIProvider, string[]> = {
     "mixtral-8x7b-32768",
   ],
   openrouter: [
-    "openrouter/auto",
     "google/gemma-3-27b-it:free",
+    "qwen/qwen2.5-vl-72b-instruct:free",
+    "meta-llama/llama-3.2-11b-vision-instruct:free",
     "google/gemini-2.5-flash",
     "anthropic/claude-3.5-sonnet",
     "meta-llama/llama-3.1-405b-instruct",
   ],
+}
+
+const MODEL_LABELS: Record<string, string> = {
+  "google/gemma-3-27b-it:free": "Gemma 3 27B (Free - No VPN)",
+  "qwen/qwen2.5-vl-72b-instruct:free": "Qwen 2.5 VL 72B (Free - Vision)",
 }
 
 interface SettingsDialogProps {
@@ -255,7 +261,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <Select value={selectedModelValue} onChange={(e) => handleModelSelect((e.target as HTMLSelectElement).value)}>
               {currentPresets.map((preset) => (
                 <option key={preset} value={preset}>
-                  {preset}
+                  {MODEL_LABELS[preset] ?? preset}
                 </option>
               ))}
               <option value="custom">Custom model...</option>
