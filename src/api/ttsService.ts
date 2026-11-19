@@ -1,8 +1,41 @@
 import { sanitizeSpeechText } from "@/components/shared/read-aloud-button"
+import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
 
 export type BurmeseVoiceType = "female" | "male"
 export type VoiceoverSpeed = 0.9 | 1.0 | 1.1 | 1.2
+export type VoiceDeliveryTone = "promo" | "storytelling" | "educational"
+
+export interface VoiceDeliveryPreset {
+  id: VoiceDeliveryTone
+  label: string
+  labelMy: string
+  styleInstruction: string
+}
+
+export const VOICE_DELIVERY_PRESETS: Record<VoiceDeliveryTone, VoiceDeliveryPreset> = {
+  promo: {
+    id: "promo",
+    label: "Energetic Promo",
+    labelMy: "တက်ကြွသော အရောင်းဟန်",
+    styleInstruction:
+      "Deliver with an upbeat, energetic, persuasive Myanmar commercial promo tone—crisp articulation, enthusiastic warmth, and punchy emphasis on key offers.",
+  },
+  storytelling: {
+    id: "storytelling",
+    label: "Warm Storytelling",
+    labelMy: "နွေးထွေးသော စကားပြောဟန်",
+    styleInstruction:
+      "Deliver with a warm, friendly, conversational Myanmar storytelling tone—natural emotional flow, engaging warmth, and smooth pacing.",
+  },
+  educational: {
+    id: "educational",
+    label: "Calm Educational",
+    labelMy: "တည်ငြိမ်သော ပညာပေးဟန်",
+    styleInstruction:
+      "Deliver with a calm, confident, clear Myanmar educational presenter tone—steady measured pacing, articulate pronunciation, and trustworthy clarity.",
+  },
+}
 
 export interface BurmeseVoicePreset {
   id: BurmeseVoiceType
@@ -186,14 +219,51 @@ const ENGLISH_TO_BURMESE_PHONETICS: ReadonlyArray<[RegExp, string]> = [
   [/\bcod\b/gi, "စီအိုဒီ"],
 ]
 
+export interface PronunciationRule {
+  word: string
+  phonetic: string
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+export function applyCustomPronunciations(
+  text: string,
+  rules: ReadonlyArray<PronunciationRule>
+): string {
+  if (!text || rules.length === 0) return text
+
+  const sorted = [...rules]
+    .filter((r) => r.word.trim() && r.phonetic.trim())
+    .sort((a, b) => b.word.trim().length - a.word.trim().length)
+
+  let result = text
+  for (const rule of sorted) {
+    const word = rule.word.trim()
+    const phonetic = rule.phonetic.trim()
+    const escaped = escapeRegExp(word)
+    const isAsciiWord = /^[\x20-\x7E]+$/.test(word) && /[a-zA-Z0-9]/.test(word)
+    const pattern = isAsciiWord
+      ? new RegExp(`(?<![a-zA-Z0-9])${escaped}(?![a-zA-Z0-9])`, "gi")
+      : new RegExp(escaped, "g")
+    result = result.replace(pattern, phonetic)
+  }
+  return result
+}
+
 /**
  * Normalize Burmese script text for clear, natural TTS pronunciation:
  * - Strips markdown, emojis, and bracketed timestamps/section tags
+ * - Applies user's custom pronunciation dictionary
  * - Transliterates common English e-commerce/tech terms to phonetic Burmese
  * - Converts Arabic numbers, prices, currencies, and percentages to spoken Burmese
  * - Converts slashes, pipes, and hyphens into natural Burmese pauses
  */
-export function normalizeBurmeseForTTS(rawText: string): string {
+export function normalizeBurmeseForTTS(
+  rawText: string,
+  customRules?: ReadonlyArray<PronunciationRule>
+): string {
   if (!rawText || !rawText.trim()) return ""
 
   let text = rawText
@@ -207,6 +277,12 @@ export function normalizeBurmeseForTTS(rawText: string): string {
     // Remove bullet symbols and leading list dashes
     .replace(/^\s*[-•–—]+\s+/gm, "")
     .replace(/•/g, " ")
+
+  const rulesToApply =
+    customRules ?? useContentStore.getState().customPronunciations ?? []
+  if (rulesToApply.length > 0) {
+    text = applyCustomPronunciations(text, rulesToApply)
+  }
 
   // Transliterate common English e-commerce & tech terms before hyphen-to-pause conversion
   for (const [pattern, phonetic] of ENGLISH_TO_BURMESE_PHONETICS) {
@@ -382,20 +458,149 @@ function getSpeedPromptInstruction(speed: VoiceoverSpeed): string {
 
 export const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 
-async function synthesizeWithGemini(
-  cleanedText: string,
+/**
+ * Split long scripts cleanly at sentence boundaries (`။` / newlines / punctuation)
+ * so each TTS chunk synthesizes reliably without timeouts or clipping.
+ */
+export function splitScriptIntoChunks(text: string, maxChunkChars = 360): string[] {
+  const normalized = text.trim()
+  if (!normalized) return []
+  if (normalized.length <= maxChunkChars) return [normalized]
+
+  const lines = normalized
+    .split(/\r?\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  const sentences: string[] = []
+  for (const line of lines) {
+    // Split on Burmese full stop (။) or standard sentence terminators while keeping delimiter
+    const parts = line.split(/(?<=[။.!?])\s*/)
+    for (const part of parts) {
+      const trimmed = part.trim()
+      if (!trimmed) continue
+      if (trimmed.length <= maxChunkChars) {
+        sentences.push(trimmed)
+      } else {
+        // Fallback split at Burmese comma (၊), comma, or whitespace
+        const subParts = trimmed.split(/(?<=[၊,])\s+/)
+        let subCurrent = ""
+        for (const sub of subParts) {
+          if (subCurrent && subCurrent.length + sub.length + 1 > maxChunkChars) {
+            sentences.push(subCurrent.trim())
+            subCurrent = sub
+          } else {
+            subCurrent = subCurrent ? `${subCurrent} ${sub}` : sub
+          }
+        }
+        if (subCurrent.trim()) {
+          sentences.push(subCurrent.trim())
+        }
+      }
+    }
+  }
+
+  const chunks: string[] = []
+  let current = ""
+  for (const sentence of sentences) {
+    if (current && current.length + sentence.length + 1 > maxChunkChars) {
+      chunks.push(current.trim())
+      current = sentence
+    } else {
+      current = current ? `${current} ${sentence}` : sentence
+    }
+  }
+  if (current.trim()) {
+    chunks.push(current.trim())
+  }
+  return chunks
+}
+
+function encodeAudioBufferToWavBlob(audioBuffer: AudioBuffer): Blob {
+  const numChannels = 1
+  const sampleRate = audioBuffer.sampleRate
+  const length = audioBuffer.length
+  const pcmBytes = new Uint8Array(length * 2)
+  const view = new DataView(pcmBytes.buffer)
+
+  // Mix down to mono 16-bit signed PCM
+  const channelCount = audioBuffer.numberOfChannels
+  for (let i = 0; i < length; i += 1) {
+    let sample = 0
+    for (let ch = 0; ch < channelCount; ch += 1) {
+      sample += audioBuffer.getChannelData(ch)[i] ?? 0
+    }
+    sample /= Math.max(1, channelCount)
+    const clamped = Math.max(-1, Math.min(1, sample))
+    view.setInt16(i * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true)
+  }
+
+  return pcmToWavBlob(pcmBytes, sampleRate, numChannels, 16)
+}
+
+async function concatenateAudioBlobsToWav(blobs: Blob[]): Promise<Blob> {
+  if (blobs.length === 1) return blobs[0]
+
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+  if (!AudioCtx) {
+    throw new TtsError("Web Audio API is not supported in this browser.")
+  }
+
+  const ctx = new AudioCtx()
+  try {
+    const buffers: AudioBuffer[] = []
+    for (const blob of blobs) {
+      const arrayBuffer = await blob.arrayBuffer()
+      buffers.push(await ctx.decodeAudioData(arrayBuffer))
+    }
+
+    const sampleRate = buffers[0].sampleRate
+    const gapSamples = Math.floor(sampleRate * 0.12)
+    const totalLength =
+      buffers.reduce((sum, b) => sum + b.length, 0) + gapSamples * Math.max(0, buffers.length - 1)
+
+    const merged = ctx.createBuffer(1, totalLength, sampleRate)
+    const out = merged.getChannelData(0)
+    let offset = 0
+
+    for (let idx = 0; idx < buffers.length; idx += 1) {
+      const buf = buffers[idx]
+      const ch0 = buf.getChannelData(0)
+      out.set(ch0, offset)
+      offset += buf.length
+      if (idx < buffers.length - 1) {
+        offset += gapSamples
+      }
+    }
+
+    return encodeAudioBufferToWavBlob(merged)
+  } finally {
+    await ctx.close().catch(() => {})
+  }
+}
+
+async function synthesizeGeminiChunk(
+  chunkText: string,
   preset: BurmeseVoicePreset,
   speed: VoiceoverSpeed,
+  deliveryTone: VoiceDeliveryTone,
   apiKey: string
-): Promise<{ blob: Blob; mimeType: string; fileExtension: "wav" | "mp3" }> {
+): Promise<
+  | { kind: "pcm"; pcmBytes: Uint8Array; sampleRate: number }
+  | { kind: "blob"; blob: Blob; mimeType: string; fileExtension: "wav" | "mp3" }
+> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TTS_MODEL}:generateContent?key=${apiKey}`
+  const tonePreset = VOICE_DELIVERY_PRESETS[deliveryTone]
 
   const prompt = [
     "You are a professional Burmese (Myanmar) commercial voiceover artist.",
-    `Read aloud in warm, clear, natural spoken Myanmar with smooth pacing and brief pauses at commas and periods. ${getSpeedPromptInstruction(speed)}`,
+    tonePreset.styleInstruction,
+    `Read aloud in clear, natural spoken Myanmar with smooth pacing and brief pauses at commas and periods. ${getSpeedPromptInstruction(speed)}`,
     "Read ONLY the following Burmese script aloud. Do not add any intro, commentary, or extra words.",
     "",
-    cleanedText,
+    chunkText,
   ].join("\n")
 
   const response = await fetch(url, {
@@ -442,7 +647,7 @@ async function synthesizeWithGemini(
 
   if (rawMime.includes("mp3") || rawMime.includes("mpeg")) {
     const mp3Blob = new Blob([bytes.buffer as ArrayBuffer], { type: "audio/mpeg" })
-    return { blob: mp3Blob, mimeType: "audio/mpeg", fileExtension: "mp3" }
+    return { kind: "blob", blob: mp3Blob, mimeType: "audio/mpeg", fileExtension: "mp3" }
   }
 
   const hasRiffHeader =
@@ -454,13 +659,71 @@ async function synthesizeWithGemini(
 
   if (hasRiffHeader && rawMime.includes("wav")) {
     const wavBlob = new Blob([bytes.buffer as ArrayBuffer], { type: "audio/wav" })
-    return { blob: wavBlob, mimeType: "audio/wav", fileExtension: "wav" }
+    return { kind: "blob", blob: wavBlob, mimeType: "audio/wav", fileExtension: "wav" }
   }
 
-  // Wrap raw PCM (e.g. audio/L16;rate=24000 or audio/pcm) with a 44-byte RIFF/WAV header
   const sampleRate = parsePcmSampleRate(rawMime)
-  const wavBlob = pcmToWavBlob(bytes, sampleRate, 1, 16)
-  return { blob: wavBlob, mimeType: "audio/wav", fileExtension: "wav" }
+  return { kind: "pcm", pcmBytes: bytes, sampleRate }
+}
+
+async function synthesizeWithGemini(
+  cleanedText: string,
+  preset: BurmeseVoicePreset,
+  speed: VoiceoverSpeed,
+  deliveryTone: VoiceDeliveryTone,
+  apiKey: string
+): Promise<{ blob: Blob; mimeType: string; fileExtension: "wav" | "mp3" }> {
+  const chunks = splitScriptIntoChunks(cleanedText, 360)
+  const chunkResults = []
+  for (const chunk of chunks) {
+    chunkResults.push(await synthesizeGeminiChunk(chunk, preset, speed, deliveryTone, apiKey))
+  }
+
+  if (chunkResults.length === 1) {
+    const single = chunkResults[0]
+    if (single.kind === "pcm") {
+      return {
+        blob: pcmToWavBlob(single.pcmBytes, single.sampleRate, 1, 16),
+        mimeType: "audio/wav",
+        fileExtension: "wav",
+      }
+    }
+    return { blob: single.blob, mimeType: single.mimeType, fileExtension: single.fileExtension }
+  }
+
+  const allPcmSameRate =
+    chunkResults.every((r) => r.kind === "pcm") &&
+    new Set(chunkResults.map((r) => (r.kind === "pcm" ? r.sampleRate : 0))).size === 1
+
+  if (allPcmSameRate) {
+    const sampleRate = chunkResults[0].kind === "pcm" ? chunkResults[0].sampleRate : 24000
+    const gapBytes = Math.floor(sampleRate * 0.12) * 2
+    const totalBytes =
+      chunkResults.reduce((sum, r) => sum + (r.kind === "pcm" ? r.pcmBytes.byteLength : 0), 0) +
+      gapBytes * (chunkResults.length - 1)
+    const mergedPcm = new Uint8Array(totalBytes)
+    let offset = 0
+    for (let i = 0; i < chunkResults.length; i += 1) {
+      const r = chunkResults[i]
+      if (r.kind !== "pcm") continue
+      mergedPcm.set(r.pcmBytes, offset)
+      offset += r.pcmBytes.byteLength
+      if (i < chunkResults.length - 1) {
+        offset += gapBytes
+      }
+    }
+    return {
+      blob: pcmToWavBlob(mergedPcm, sampleRate, 1, 16),
+      mimeType: "audio/wav",
+      fileExtension: "wav",
+    }
+  }
+
+  const blobs = chunkResults.map((r) =>
+    r.kind === "pcm" ? pcmToWavBlob(r.pcmBytes, r.sampleRate, 1, 16) : r.blob
+  )
+  const mergedWav = await concatenateAudioBlobsToWav(blobs)
+  return { blob: mergedWav, mimeType: "audio/wav", fileExtension: "wav" }
 }
 
 function escapeXml(text: string): string {
@@ -659,6 +922,11 @@ function synthesizeWithSpeechSynthesis(
   return { blob: wavBlob, mimeType: "audio/wav", fileExtension: "wav" }
 }
 
+export interface GenerateVoiceoverOptions {
+  deliveryTone?: VoiceDeliveryTone
+  customPronunciations?: ReadonlyArray<PronunciationRule>
+}
+
 /**
  * Generate a playable Burmese AI voiceover from a timed or markdown script.
  * Tier 1: Gemini dedicated TTS (`gemini-2.5-flash-preview-tts`) when an API key is configured.
@@ -668,9 +936,11 @@ function synthesizeWithSpeechSynthesis(
 export async function generateBurmeseVoiceover(
   scriptText: string,
   voiceType: BurmeseVoiceType = "female",
-  speed: VoiceoverSpeed = 1.0
+  speed: VoiceoverSpeed = 1.0,
+  options: GenerateVoiceoverOptions = {}
 ): Promise<VoiceoverResult> {
-  const cleanedText = normalizeBurmeseForTTS(scriptText)
+  const deliveryTone = options.deliveryTone ?? "storytelling"
+  const cleanedText = normalizeBurmeseForTTS(scriptText, options.customPronunciations)
   if (!cleanedText) {
     throw new TtsError("Voiceover script is empty after removing timestamps and formatting.")
   }
@@ -680,7 +950,13 @@ export async function generateBurmeseVoiceover(
 
   if (geminiKey) {
     try {
-      const geminiResult = await synthesizeWithGemini(cleanedText, preset, speed, geminiKey)
+      const geminiResult = await synthesizeWithGemini(
+        cleanedText,
+        preset,
+        speed,
+        deliveryTone,
+        geminiKey
+      )
       const audioBuffer = await decodeBlobToAudioBuffer(geminiResult.blob)
       const audioUrl = URL.createObjectURL(geminiResult.blob)
       return {
@@ -700,15 +976,35 @@ export async function generateBurmeseVoiceover(
   }
 
   try {
-    const neuralResult = await synthesizeWithNeuralTts(cleanedText, preset, speed)
-    const audioBuffer = await decodeBlobToAudioBuffer(neuralResult.blob)
-    const audioUrl = URL.createObjectURL(neuralResult.blob)
+    const neuralChunks = splitScriptIntoChunks(cleanedText, 450)
+    let neuralBlob: Blob
+    let neuralMime = "audio/mpeg"
+    let neuralExt: "mp3" | "wav" = "mp3"
+
+    if (neuralChunks.length <= 1) {
+      const single = await synthesizeWithNeuralTts(cleanedText, preset, speed)
+      neuralBlob = single.blob
+      neuralMime = single.mimeType
+      neuralExt = single.fileExtension
+    } else {
+      const chunkBlobs: Blob[] = []
+      for (const chunk of neuralChunks) {
+        const res = await synthesizeWithNeuralTts(chunk, preset, speed)
+        chunkBlobs.push(res.blob)
+      }
+      neuralBlob = await concatenateAudioBlobsToWav(chunkBlobs)
+      neuralMime = "audio/wav"
+      neuralExt = "wav"
+    }
+
+    const audioBuffer = await decodeBlobToAudioBuffer(neuralBlob)
+    const audioUrl = URL.createObjectURL(neuralBlob)
     return {
       audioUrl,
-      blob: neuralResult.blob,
+      blob: neuralBlob,
       audioBuffer,
-      mimeType: neuralResult.mimeType,
-      fileExtension: neuralResult.fileExtension,
+      mimeType: neuralMime,
+      fileExtension: neuralExt,
       durationSeconds: audioBuffer.duration,
       voiceName: `${preset.label} · ${preset.neuralVoice}`,
       provider: "neural-tts",

@@ -49,6 +49,12 @@ export interface PosterDraft {
   caption: string
 }
 
+export interface CustomPronunciation {
+  id: string
+  word: string
+  phonetic: string
+}
+
 interface ContentState {
   draftInput: GeneratorFormValues
   generatedHistory: GeneratedItem[]
@@ -64,6 +70,7 @@ interface ContentState {
   videoProductNote: string
   generatedVideoResult: VideoContentResult | null
   voiceoverDraftScript: string
+  customPronunciations: CustomPronunciation[]
   isSyncing: boolean
   setDraftInput: (input: Partial<GeneratorFormValues>) => void
   addGeneratedItem: (item: Omit<GeneratedItem, "id" | "createdAt">) => void
@@ -77,6 +84,8 @@ interface ContentState {
   setVideoProductNote: (note: string) => void
   setGeneratedVideoResult: (result: VideoContentResult | null) => void
   setVoiceoverDraftScript: (script: string) => void
+  addCustomPronunciation: (word: string, phonetic: string) => void
+  removeCustomPronunciation: (id: string) => void
   clearUploadedVideo: () => void
   saveToVault: (
     item: Omit<SavedVaultItem, "id" | "status"> & {
@@ -118,6 +127,7 @@ export const useContentStore = create<ContentState>()(
       videoProductNote: "",
       generatedVideoResult: null,
       voiceoverDraftScript: "",
+      customPronunciations: [],
       isSyncing: false,
 
       setDraftInput: (input) =>
@@ -156,6 +166,25 @@ export const useContentStore = create<ContentState>()(
       setGeneratedVideoResult: (generatedVideoResult) =>
         set({ generatedVideoResult }),
       setVoiceoverDraftScript: (voiceoverDraftScript) => set({ voiceoverDraftScript }),
+      addCustomPronunciation: (word, phonetic) =>
+        set((state) => {
+          const cleanWord = word.trim()
+          const cleanPhonetic = phonetic.trim()
+          if (!cleanWord || !cleanPhonetic) return state
+          const filtered = state.customPronunciations.filter(
+            (item) => item.word.toLowerCase() !== cleanWord.toLowerCase()
+          )
+          return {
+            customPronunciations: [
+              { id: crypto.randomUUID(), word: cleanWord, phonetic: cleanPhonetic },
+              ...filtered,
+            ],
+          }
+        }),
+      removeCustomPronunciation: (id) =>
+        set((state) => ({
+          customPronunciations: state.customPronunciations.filter((item) => item.id !== id),
+        })),
       clearUploadedVideo: () =>
         set((state) => {
           if (state.videoPreviewUrl) {
@@ -292,6 +321,7 @@ export const useContentStore = create<ContentState>()(
         customNiche: state.customNiche ?? "",
         autoAppendShopCta: state.autoAppendShopCta ?? false,
         shopLogoDataUrl: state.shopLogoDataUrl ?? null,
+        customPronunciations: state.customPronunciations ?? [],
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState as Partial<ContentState> | undefined) ?? {}

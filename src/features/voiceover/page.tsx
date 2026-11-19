@@ -2,12 +2,19 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
+  BookOpen,
+  Captions,
+  ChevronDown,
   Download,
   Film,
   Loader2,
   Mic,
+  Plus,
+  Repeat,
+  Scissors,
   Share2,
   Sparkles,
+  Tag,
   Upload,
   Volume2,
   VolumeX,
@@ -18,11 +25,13 @@ import { useShallow } from "zustand/react/shallow"
 import { isSupportedVideoFile } from "@/api/aiService"
 import {
   BURMESE_VOICE_PRESETS,
+  VOICE_DELIVERY_PRESETS,
   VOICEOVER_SPEEDS,
   cleanVoiceoverText,
   generateBurmeseVoiceover,
   normalizeBurmeseForTTS,
   type BurmeseVoiceType,
+  type VoiceDeliveryTone,
   type VoiceoverResult,
   type VoiceoverSpeed,
 } from "@/api/ttsService"
@@ -30,6 +39,7 @@ import {
   mergeVideoWithVoiceover,
   type MergeVideoAudioResult,
   type OriginalAudioVolume,
+  type VideoDurationSyncMode,
 } from "@/lib/videoAudioMerger"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
@@ -42,6 +52,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 
@@ -82,6 +93,10 @@ export function VoiceoverPage() {
     videoPreviewUrl,
     setUploadedVideo,
     clearUploadedVideo,
+    brandSignature,
+    customPronunciations,
+    addCustomPronunciation,
+    removeCustomPronunciation,
   } = useContentStore(
     useShallow((state) => ({
       voiceoverDraftScript: state.voiceoverDraftScript,
@@ -90,12 +105,26 @@ export function VoiceoverPage() {
       videoPreviewUrl: state.videoPreviewUrl,
       setUploadedVideo: state.setUploadedVideo,
       clearUploadedVideo: state.clearUploadedVideo,
+      brandSignature: state.brandSignature,
+      customPronunciations: state.customPronunciations,
+      addCustomPronunciation: state.addCustomPronunciation,
+      removeCustomPronunciation: state.removeCustomPronunciation,
     }))
   )
 
   const [voiceType, setVoiceType] = useState<BurmeseVoiceType>("female")
+  const [deliveryTone, setDeliveryTone] = useState<VoiceDeliveryTone>("promo")
   const [speed, setSpeed] = useState<VoiceoverSpeed>(1.0)
   const [originalVolume, setOriginalVolume] = useState<OriginalAudioVolume>(0.15)
+
+  const [isDictOpen, setIsDictOpen] = useState(false)
+  const [newDictWord, setNewDictWord] = useState("")
+  const [newDictPhonetic, setNewDictPhonetic] = useState("")
+
+  const [enableSubtitles, setEnableSubtitles] = useState(true)
+  const [enableWatermark, setEnableWatermark] = useState(false)
+  const [videoDuration, setVideoDuration] = useState<number | null>(null)
+  const [durationSyncMode, setDurationSyncMode] = useState<VideoDurationSyncMode>("loop_video")
 
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false)
   const [voiceoverResult, setVoiceoverResult] = useState<VoiceoverResult | null>(null)
@@ -142,12 +171,30 @@ export function VoiceoverPage() {
     }
     const url = URL.createObjectURL(file)
     setUploadedVideo(file, url)
+    setVideoDuration(null)
     revokeMergedUrl()
     setMergedVideo(null)
   }
 
+  const handleAddPronunciation = () => {
+    const word = newDictWord.trim()
+    const phonetic = newDictPhonetic.trim()
+    if (!word || !phonetic) {
+      toast.error(
+        isMy
+          ? "စကားလုံးနှင့် မြန်မာအသံထွက် နှစ်ခုလုံး ထည့်ပါ။"
+          : "Enter both the word and its Burmese phonetic spelling."
+      )
+      return
+    }
+    addCustomPronunciation(word, phonetic)
+    setNewDictWord("")
+    setNewDictPhonetic("")
+    toast.success(isMy ? "အသံထွက်မှတ်စု ထည့်ပြီးပါပြီ။" : "Custom pronunciation saved!")
+  }
+
   const handleOptimizeSpeechText = () => {
-    const optimized = normalizeBurmeseForTTS(voiceoverDraftScript)
+    const optimized = normalizeBurmeseForTTS(voiceoverDraftScript, customPronunciations)
     if (!optimized) {
       toast.error(
         isMy
@@ -177,12 +224,18 @@ export function VoiceoverPage() {
 
     setIsGeneratingVoice(true)
     try {
-      const result = await generateBurmeseVoiceover(trimmed, voiceType, speed)
+      const result = await generateBurmeseVoiceover(trimmed, voiceType, speed, {
+        deliveryTone,
+        customPronunciations,
+      })
       revokeVoiceUrl()
       revokeMergedUrl()
       voiceUrlRef.current = result.audioUrl
       setVoiceoverResult(result)
       setMergedVideo(null)
+      if (videoDuration !== null) {
+        setDurationSyncMode(result.durationSeconds > videoDuration ? "loop_video" : "fit_video")
+      }
       toast.success(
         isMy ? "AI အသံနမူနာ ဖန်တီးပြီးပါပြီ။" : "Burmese AI voiceover generated!"
       )
@@ -202,6 +255,36 @@ export function VoiceoverPage() {
       voiceoverResult.audioUrl,
       `burmese-voiceover-${voiceType}-${timestamp}.${voiceoverResult.fileExtension}`
     )
+  }
+
+  const handleShareAudio = async () => {
+    if (!voiceoverResult) return
+    const timestamp = new Date().toISOString().slice(0, 10)
+    const filename = `burmese-voiceover-${voiceType}-${timestamp}.${voiceoverResult.fileExtension}`
+    const file = new File([voiceoverResult.blob], filename, {
+      type: voiceoverResult.mimeType,
+    })
+
+    if (
+      typeof navigator !== "undefined" &&
+      typeof navigator.share === "function" &&
+      typeof navigator.canShare === "function" &&
+      navigator.canShare({ files: [file] })
+    ) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: "Burmese AI Voiceover",
+        })
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return
+        toast.error("Could not open share sheet. Use Download instead.")
+      }
+      return
+    }
+
+    triggerBlobDownload(voiceoverResult.audioUrl, filename)
+    toast.info("Direct sharing is not supported on this browser; downloading audio instead.")
   }
 
   const handleMergeVideo = async () => {
@@ -235,6 +318,10 @@ export function VoiceoverPage() {
         voiceoverAudio: voiceoverResult.audioBuffer,
         originalVolume,
         voiceoverVolume: 1.0,
+        durationSyncMode,
+        enableSubtitles,
+        subtitleScript: voiceoverDraftScript,
+        watermarkText: enableWatermark ? brandSignature : "",
         onProgress: setMergeProgress,
         signal: controller.signal,
       })
@@ -369,8 +456,40 @@ export function VoiceoverPage() {
             />
           </div>
 
-          {/* Voice, Speed, Original Audio */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Voice Delivery Preset Pills */}
+          <div className="space-y-1.5">
+            <Label className="text-[11px] font-medium text-muted-foreground font-myanmar">
+              {isMy ? "အသံဟန် (Voice Style)" : "Voice Delivery Style"}
+            </Label>
+            <div className="grid grid-cols-3 gap-1.5">
+              {(["promo", "storytelling", "educational"] as VoiceDeliveryTone[]).map((tone) => {
+                const preset = VOICE_DELIVERY_PRESETS[tone]
+                const active = deliveryTone === tone
+                return (
+                  <button
+                    key={tone}
+                    type="button"
+                    onClick={() => setDeliveryTone(tone)}
+                    className={`rounded-lg border px-2 py-2 text-left transition-colors cursor-pointer ${
+                      active
+                        ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
+                        : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                    }`}
+                  >
+                    <div className="text-[11px] font-semibold leading-tight truncate">
+                      {preset.label}
+                    </div>
+                    <div className="text-[10px] opacity-80 truncate font-myanmar mt-0.5">
+                      {preset.labelMy}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Voice & Speed */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
                 <Mic className="h-3 w-3" aria-hidden="true" />
@@ -428,37 +547,102 @@ export function VoiceoverPage() {
                 })}
               </div>
             </div>
+          </div>
 
-            <div className="space-y-1.5">
-              <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
-                {originalVolume === 0 ? (
-                  <VolumeX className="h-3 w-3" aria-hidden="true" />
-                ) : (
-                  <Volume2 className="h-3 w-3" aria-hidden="true" />
+          {/* Collapsible Custom Pronunciation Dictionary */}
+          <div className="rounded-xl border border-border/60 bg-muted/20 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setIsDictOpen((prev) => !prev)}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-foreground hover:bg-muted/40 transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5 font-myanmar">
+                <BookOpen className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
+                <span>📖 အသံထွက်မှတ်စု (Custom Words)</span>
+                {customPronunciations.length > 0 && (
+                  <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
+                    {customPronunciations.length}
+                  </Badge>
                 )}
-                {isMy ? "မူရင်းဗီဒီယိုအသံ" : "Original Audio"}
-              </Label>
-              <div className="grid grid-cols-3 gap-1">
-                {VOLUME_OPTIONS.map((opt) => {
-                  const active = originalVolume === opt.value
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setOriginalVolume(opt.value)}
-                      title={isMy ? opt.labelMy : opt.label}
-                      className={`rounded-lg border px-1 py-2.5 text-[11px] font-semibold transition-colors truncate cursor-pointer ${
-                        active
-                          ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
-                          : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  )
-                })}
+              </span>
+              <ChevronDown
+                className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${
+                  isDictOpen ? "rotate-180" : ""
+                }`}
+                aria-hidden="true"
+              />
+            </button>
+
+            {isDictOpen && (
+              <div className="px-3 pb-3 pt-1.5 border-t border-border/50 space-y-2.5">
+                <div className="flex flex-col sm:flex-row gap-1.5">
+                  <Input
+                    value={newDictWord}
+                    onChange={(e) => setNewDictWord(e.target.value)}
+                    placeholder={isMy ? "စကားလုံး (ဥပမာ - GlowSkin)" : "Word (e.g. GlowSkin)"}
+                    className="h-8 text-xs bg-background/80"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        handleAddPronunciation()
+                      }
+                    }}
+                  />
+                  <Input
+                    value={newDictPhonetic}
+                    onChange={(e) => setNewDictPhonetic(e.target.value)}
+                    placeholder={isMy ? "မြန်မာအသံထွက် (ဥပမာ - ဂလိုးစကင်း)" : "Burmese Phonetic (e.g. ဂလိုးစကင်း)"}
+                    className="h-8 text-xs font-myanmar bg-background/80"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        handleAddPronunciation()
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleAddPronunciation}
+                    className="h-8 px-3 text-xs shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white"
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
+                    {isMy ? "ထည့်မည်" : "Add"}
+                  </Button>
+                </div>
+
+                {customPronunciations.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {customPronunciations.map((entry) => (
+                      <span
+                        key={entry.id}
+                        className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/80 px-2.5 py-0.5 text-[11px]"
+                      >
+                        <span className="font-medium">{entry.word}</span>
+                        <span className="text-muted-foreground">→</span>
+                        <span className="font-myanmar text-indigo-700 dark:text-indigo-300">
+                          {entry.phonetic}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeCustomPronunciation(entry.id)}
+                          aria-label={`Remove ${entry.word}`}
+                          className="ml-0.5 text-muted-foreground hover:text-destructive cursor-pointer"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground font-myanmar">
+                    {isMy
+                      ? "အမှတ်တံဆိပ်အမည်များ သို့မဟုတ် အထူးစကားလုံးများကို မြန်မာအသံထွက်အဖြစ် သိမ်းဆည်းထားနိုင်ပါသည်။"
+                      : "Save brand names or special terms with custom Burmese phonetics—applied automatically before TTS."}
+                  </p>
+                )}
               </div>
-            </div>
+            )}
           </div>
 
           {/* Generate Audio CTA (Desktop) */}
@@ -496,7 +680,7 @@ export function VoiceoverPage() {
                 </span>
               </div>
               <audio controls src={voiceoverResult.audioUrl} className="w-full h-10" />
-              <div className="flex items-center justify-end">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <Button
                   type="button"
                   variant="outline"
@@ -505,7 +689,17 @@ export function VoiceoverPage() {
                   className="h-8 px-3 text-xs border-border/60"
                 >
                   <Download className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                  {isMy ? "အသံဖိုင် ဒေါင်းလုဒ်ဆွဲမည်" : "Download Audio"} (.{voiceoverResult.fileExtension})
+                  {isMy ? "အသံဖိုင် ဒေါင်းလုဒ်" : "Download Audio"} (.{voiceoverResult.fileExtension})
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleShareAudio}
+                  className="h-8 px-3 text-xs border-indigo-500/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/10"
+                >
+                  <Share2 className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                  {canShareFiles ? (isMy ? "အသံမျှဝေမည်" : "Share Audio") : (isMy ? "သိမ်းဆည်းမည်" : "Save Audio")}
                 </Button>
               </div>
             </div>
@@ -566,17 +760,157 @@ export function VoiceoverPage() {
                     controls
                     playsInline
                     muted
+                    onLoadedMetadata={(e) => {
+                      const dur = e.currentTarget.duration
+                      if (Number.isFinite(dur) && dur > 0) {
+                        setVideoDuration(dur)
+                        if (voiceoverResult) {
+                          setDurationSyncMode(
+                            voiceoverResult.durationSeconds > dur ? "loop_video" : "fit_video"
+                          )
+                        }
+                      }
+                    }}
                     className="w-full max-h-[160px] rounded-lg bg-black/90 object-contain"
                   />
                 )}
                 <div className="flex items-center justify-between gap-2 text-xs">
                   <span className="font-medium truncate">{videoFile.name}</span>
-                  <Badge variant="secondary" className="text-[11px] shrink-0">
-                    {formatFileSize(videoFile.size)}
-                  </Badge>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {videoDuration !== null && (
+                      <Badge variant="outline" className="text-[11px]">
+                        {videoDuration.toFixed(1)}s
+                      </Badge>
+                    )}
+                    <Badge variant="secondary" className="text-[11px]">
+                      {formatFileSize(videoFile.size)}
+                    </Badge>
+                  </div>
                 </div>
               </div>
             )}
+
+            {/* Compact Video Export Options (Pills) */}
+            <div className="space-y-2.5 rounded-xl border border-border/60 bg-muted/15 p-3">
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setEnableSubtitles((prev) => !prev)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors cursor-pointer font-myanmar ${
+                    enableSubtitles
+                      ? "border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                      : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                  }`}
+                >
+                  <Captions className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>{isMy ? "စာတန်းထိုး ထည့်မည်" : "Auto Subtitles"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!brandSignature.trim()) {
+                      toast.info(
+                        isMy
+                          ? "Watermark ထည့်ရန် Settings တွင် Brand Signature အရင်သတ်မှတ်ပါ။"
+                          : "Set your Brand Signature in Settings to enable watermark."
+                      )
+                      return
+                    }
+                    setEnableWatermark((prev) => !prev)
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors cursor-pointer ${
+                    enableWatermark && brandSignature.trim()
+                      ? "border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                      : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                  }`}
+                >
+                  <Tag className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span className="truncate max-w-[160px]">
+                    {brandSignature.trim()
+                      ? `Watermark: ${brandSignature.trim()}`
+                      : isMy
+                        ? "Brand Watermark (မရှိသေးပါ)"
+                        : "Brand Watermark"}
+                  </span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 border-t border-border/50">
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1 font-myanmar">
+                    <Repeat className="h-3 w-3" aria-hidden="true" />
+                    {isMy ? "အချိန်ကိုက်ညှိမှု (Duration Sync)" : "Duration Sync"}
+                  </Label>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setDurationSyncMode("loop_video")}
+                      className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-colors text-left cursor-pointer font-myanmar ${
+                        durationSyncMode === "loop_video"
+                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                          : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                      }`}
+                    >
+                      <div className="truncate font-semibold">
+                        {isMy ? "အသံဆုံးထိ ပြန်ကျော့" : "Loop Video"}
+                      </div>
+                      <div className="text-[10px] opacity-80 truncate">
+                        {isMy ? "အသံမပြတ်စေရန်" : "Match voice"}
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDurationSyncMode("fit_video")}
+                      className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-colors text-left cursor-pointer font-myanmar ${
+                        durationSyncMode === "fit_video"
+                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                          : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                      }`}
+                    >
+                      <div className="truncate font-semibold flex items-center gap-1">
+                        <Scissors className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+                        {isMy ? "ဗီဒီယိုအတိုင်း ဖြတ်" : "Fit Video"}
+                      </div>
+                      <div className="text-[10px] opacity-80 truncate">
+                        {isMy ? "မူရင်းအရှည်" : "Stop at video end"}
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1 font-myanmar">
+                    {originalVolume === 0 ? (
+                      <VolumeX className="h-3 w-3" aria-hidden="true" />
+                    ) : (
+                      <Volume2 className="h-3 w-3" aria-hidden="true" />
+                    )}
+                    {isMy ? "မူရင်းဗီဒီယိုအသံ" : "Original Audio"}
+                  </Label>
+                  <div className="grid grid-cols-3 gap-1">
+                    {VOLUME_OPTIONS.map((opt) => {
+                      const active = originalVolume === opt.value
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setOriginalVolume(opt.value)}
+                          title={isMy ? opt.labelMy : opt.label}
+                          className={`rounded-lg border px-1 py-2 text-[11px] font-semibold transition-colors truncate cursor-pointer ${
+                            active
+                              ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
+                              : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <div className="flex flex-col sm:flex-row gap-2">
               <Button

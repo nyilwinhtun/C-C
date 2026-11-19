@@ -1,10 +1,21 @@
 export type OriginalAudioVolume = 0 | 0.15 | 0.5
+export type VideoDurationSyncMode = "loop_video" | "fit_video"
+
+export interface SubtitleSegment {
+  text: string
+  startTime: number
+  endTime: number
+}
 
 export interface MergeVideoAudioOptions {
   videoFile: File
   voiceoverAudio: AudioBuffer | Blob
   originalVolume: OriginalAudioVolume
   voiceoverVolume?: number
+  durationSyncMode?: VideoDurationSyncMode
+  enableSubtitles?: boolean
+  subtitleScript?: string
+  watermarkText?: string
   onProgress?: (percent: number) => void
   signal?: AbortSignal
 }
@@ -53,6 +64,212 @@ function computeCanvasSize(videoWidth: number, videoHeight: number): { width: nu
   }
 }
 
+function cleanCaptionScript(raw: string): string {
+  return raw
+    .replace(/\[\s*\d+(?::\d+)?\s*s?(?:\s*[-–—]\s*\d+(?::\d+)?\s*s?)?[^\]]*\]/gi, " ")
+    .replace(/\[(hook|body|cta|intro|outro|scene\s*\d*)[^\]]*\]/gi, " ")
+    .replace(/[*#`_~]/g, "")
+    .replace(/\r?\n+/g, "\n")
+    .trim()
+}
+
+function splitLongPhrase(phrase: string, maxChars = 42): string[] {
+  const trimmed = phrase.trim()
+  if (trimmed.length <= maxChars) return [trimmed]
+
+  const words = trimmed.split(/\s+/)
+  if (words.length > 1) {
+    const lines: string[] = []
+    let current = ""
+    for (const word of words) {
+      if (current && current.length + word.length + 1 > maxChars) {
+        lines.push(current)
+        current = word
+      } else {
+        current = current ? `${current} ${word}` : word
+      }
+    }
+    if (current) lines.push(current)
+    return lines
+  }
+
+  // Fallback for continuous Myanmar text without spaces
+  const chunks: string[] = []
+  const chars = Array.from(trimmed)
+  for (let i = 0; i < chars.length; i += maxChars) {
+    chunks.push(chars.slice(i, i + maxChars).join(""))
+  }
+  return chunks
+}
+
+export function buildSubtitleSegments(script: string, totalDuration: number): SubtitleSegment[] {
+  const cleaned = cleanCaptionScript(script)
+  if (!cleaned || totalDuration <= 0) return []
+
+  const rawLines = cleaned
+    .split(/\n+/)
+    .flatMap((line) => line.split(/(?<=[။။.!?])\s*/))
+    .flatMap((part) => part.split(/(?<=[၊,])\s*/))
+    .map((p) => p.trim())
+    .filter(Boolean)
+
+  const phrases = rawLines.flatMap((line) => splitLongPhrase(line, 44)).filter(Boolean)
+  if (phrases.length === 0) return []
+
+  const weights = phrases.map((p) => Math.max(4, Array.from(p).length))
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0)
+
+  const segments: SubtitleSegment[] = []
+  let cursor = 0
+  for (let i = 0; i < phrases.length; i += 1) {
+    const sliceDuration = (weights[i] / totalWeight) * totalDuration
+    const endTime = i === phrases.length - 1 ? totalDuration : cursor + sliceDuration
+    segments.push({
+      text: phrases[i],
+      startTime: cursor,
+      endTime,
+    })
+    cursor = endTime
+  }
+  return segments
+}
+
+function drawRoundedRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  const radius = Math.min(r, w / 2, h / 2)
+  ctx.beginPath()
+  ctx.moveTo(x + radius, y)
+  ctx.arcTo(x + w, y, x + w, y + h, radius)
+  ctx.arcTo(x + w, y + h, x, y + h, radius)
+  ctx.arcTo(x, y + h, x, y, radius)
+  ctx.arcTo(x, y, x + w, y, radius)
+  ctx.closePath()
+}
+
+function wrapCanvasText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  if (ctx.measureText(text).width <= maxWidth) return [text]
+
+  const words = text.split(/\s+/)
+  if (words.length > 1) {
+    const lines: string[] = []
+    let current = ""
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word
+      if (current && ctx.measureText(candidate).width > maxWidth) {
+        lines.push(current)
+        current = word
+      } else {
+        current = candidate
+      }
+    }
+    if (current) lines.push(current)
+    return lines.slice(0, 2)
+  }
+
+  const chars = Array.from(text)
+  const lines: string[] = []
+  let current = ""
+  for (const ch of chars) {
+    const candidate = current + ch
+    if (current && ctx.measureText(candidate).width > maxWidth) {
+      lines.push(current)
+      current = ch
+      if (lines.length >= 2) break
+    } else {
+      current = candidate
+    }
+  }
+  if (current && lines.length < 2) lines.push(current)
+  return lines
+}
+
+function drawSubtitleOverlay(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  text: string
+) {
+  const minSide = Math.min(width, height)
+  const fontSize = Math.max(18, Math.min(42, Math.round(minSide * 0.042)))
+  const lineHeight = Math.round(fontSize * 1.38)
+  const maxTextWidth = width * 0.84
+
+  ctx.save()
+  ctx.font = `700 ${fontSize}px "Noto Sans Myanmar", "Padauk", "Myanmar Text", system-ui, -apple-system, sans-serif`
+  ctx.textAlign = "center"
+  ctx.textBaseline = "middle"
+
+  const lines = wrapCanvasText(ctx, text, maxTextWidth)
+  const measuredWidths = lines.map((l) => ctx.measureText(l).width)
+  const blockWidth = Math.min(maxTextWidth, Math.max(...measuredWidths))
+
+  const padX = Math.round(fontSize * 0.85)
+  const padY = Math.round(fontSize * 0.45)
+  const boxWidth = blockWidth + padX * 2
+  const boxHeight = lines.length * lineHeight + padY * 2
+  const boxX = (width - boxWidth) / 2
+  const bottomMargin = Math.round(height * 0.085)
+  const boxY = height - bottomMargin - boxHeight
+
+  // Dark translucent rounded pill background
+  drawRoundedRectPath(ctx, boxX, boxY, boxWidth, boxHeight, Math.round(fontSize * 0.55))
+  ctx.fillStyle = "rgba(10, 12, 18, 0.76)"
+  ctx.fill()
+  ctx.lineWidth = 1.5
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.16)"
+  ctx.stroke()
+
+  // High-contrast bold white text
+  ctx.fillStyle = "#ffffff"
+  ctx.shadowColor = "rgba(0, 0, 0, 0.5)"
+  ctx.shadowBlur = 4
+  for (let i = 0; i < lines.length; i += 1) {
+    const lineY = boxY + padY + lineHeight * (i + 0.5)
+    ctx.fillText(lines[i], width / 2, lineY)
+  }
+  ctx.restore()
+}
+
+function drawWatermarkOverlay(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  watermarkText: string
+) {
+  const clean = watermarkText.trim()
+  if (!clean) return
+
+  const minSide = Math.min(width, height)
+  const fontSize = Math.max(13, Math.min(24, Math.round(minSide * 0.025)))
+  const padX = Math.round(fontSize * 0.7)
+  const padY = Math.round(fontSize * 0.38)
+  const margin = Math.round(minSide * 0.035)
+
+  ctx.save()
+  ctx.font = `600 ${fontSize}px "Noto Sans Myanmar", "Padauk", system-ui, -apple-system, sans-serif`
+  ctx.textAlign = "left"
+  ctx.textBaseline = "middle"
+
+  const maxW = width * 0.55
+  const textWidth = Math.min(maxW, ctx.measureText(clean).width)
+  const boxWidth = textWidth + padX * 2
+  const boxHeight = fontSize * 1.35 + padY * 2
+
+  drawRoundedRectPath(ctx, margin, margin, boxWidth, boxHeight, Math.round(boxHeight / 2))
+  ctx.fillStyle = "rgba(15, 18, 25, 0.45)"
+  ctx.fill()
+
+  ctx.fillStyle = "rgba(255, 255, 255, 0.85)"
+  ctx.fillText(clean, margin + padX, margin + boxHeight / 2, maxW)
+  ctx.restore()
+}
+
 /**
  * Merge a video file with a synthesized voiceover track entirely on the client
  * using <video>, <canvas>, AudioContext, and MediaRecorder (no backend or
@@ -63,6 +280,10 @@ export async function mergeVideoWithVoiceover({
   voiceoverAudio,
   originalVolume,
   voiceoverVolume = 1.0,
+  durationSyncMode,
+  enableSubtitles = false,
+  subtitleScript = "",
+  watermarkText = "",
   onProgress,
   signal,
 }: MergeVideoAudioOptions): Promise<MergeVideoAudioResult> {
@@ -109,6 +330,7 @@ export async function mergeVideoWithVoiceover({
     }
     try {
       video.pause()
+      video.loop = false
       video.removeAttribute("src")
       video.load()
     } catch {
@@ -149,7 +371,8 @@ export async function mergeVideoWithVoiceover({
       throw new DOMException("Merge cancelled.", "AbortError")
     }
 
-    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 1
+    const videoDuration =
+      Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 1
     const { width, height } = computeCanvasSize(
       video.videoWidth || 720,
       video.videoHeight || 1280
@@ -171,6 +394,26 @@ export async function mergeVideoWithVoiceover({
       voiceoverAudio instanceof AudioBuffer
         ? voiceoverAudio
         : await audioCtx.decodeAudioData(await voiceoverAudio.arrayBuffer())
+
+    const voiceDuration =
+      Number.isFinite(voiceoverBuffer.duration) && voiceoverBuffer.duration > 0
+        ? voiceoverBuffer.duration
+        : videoDuration
+
+    const resolvedSyncMode: VideoDurationSyncMode =
+      durationSyncMode ?? (voiceDuration > videoDuration ? "loop_video" : "fit_video")
+
+    const targetDuration =
+      resolvedSyncMode === "loop_video" ? voiceDuration : videoDuration
+
+    if (resolvedSyncMode === "loop_video" && voiceDuration > videoDuration) {
+      video.loop = true
+    }
+
+    const subtitles =
+      enableSubtitles && subtitleScript.trim()
+        ? buildSubtitleSegments(subtitleScript, voiceDuration)
+        : []
 
     const streamDestination = audioCtx.createMediaStreamDestination()
 
@@ -272,17 +515,48 @@ export async function mergeVideoWithVoiceover({
         reject(new Error("MediaRecorder encountered an error while exporting video."))
       }
 
-      video.addEventListener("ended", finishRecording, { once: true })
+      if (resolvedSyncMode === "fit_video") {
+        video.addEventListener("ended", finishRecording, { once: true })
+      }
+
+      let startPerfMs = 0
+
+      const drawOverlays = (elapsedSec: number) => {
+        if (watermarkText.trim()) {
+          drawWatermarkOverlay(ctx, width, height, watermarkText)
+        }
+        if (subtitles.length > 0) {
+          const active = subtitles.find(
+            (seg) => elapsedSec >= seg.startTime && elapsedSec <= seg.endTime
+          )
+          if (active) {
+            drawSubtitleOverlay(ctx, width, height, active.text)
+          }
+        }
+      }
 
       const renderFrame = () => {
         if (finished || signal?.aborted) return
+        const elapsedSec = startPerfMs > 0 ? (performance.now() - startPerfMs) / 1000 : 0
+
         if (!video.paused && !video.ended) {
           ctx.drawImage(video, 0, 0, width, height)
-          const pct = Math.min(99, Math.max(1, Math.round((video.currentTime / duration) * 100)))
+          drawOverlays(elapsedSec)
+          const pct = Math.min(
+            99,
+            Math.max(1, Math.round((elapsedSec / targetDuration) * 100))
+          )
           onProgress?.(pct)
         }
-        if (video.ended || video.currentTime >= duration - 0.02) {
+
+        const reachedEnd =
+          resolvedSyncMode === "fit_video"
+            ? video.ended || elapsedSec >= targetDuration - 0.02
+            : elapsedSec >= targetDuration - 0.02
+
+        if (reachedEnd) {
           ctx.drawImage(video, 0, 0, width, height)
+          drawOverlays(elapsedSec)
           finishRecording()
           return
         }
@@ -290,6 +564,7 @@ export async function mergeVideoWithVoiceover({
       }
 
       recorder.start(250)
+      startPerfMs = performance.now()
       voiceoverSource?.start(0)
       video
         .play()
@@ -317,7 +592,7 @@ export async function mergeVideoWithVoiceover({
       videoUrl,
       mimeType: finalMime,
       fileExtension,
-      durationSeconds: duration,
+      durationSeconds: targetDuration,
     }
   } finally {
     cleanup()
