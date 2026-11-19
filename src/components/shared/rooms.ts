@@ -11,6 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import type { Language } from "@/store/useUIStore"
+import type { SquircleTone } from "@/components/shared/squircle-icon"
 
 export interface RoomTab {
   key: string
@@ -24,8 +25,11 @@ export interface WorkspaceRoom {
   emoji: string
   titleMy: string
   titleEn: string
+  shortMy: string
+  shortEn: string
   defaultPageKey: string
   icon: LucideIcon
+  tone: SquircleTone
   tabs: RoomTab[]
 }
 
@@ -35,8 +39,11 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
     emoji: "✍️",
     titleMy: "စာနှင့် ဇာတ်ညွှန်း",
     titleEn: "Writing & Scripts",
+    shortMy: "စာရေးမည်",
+    shortEn: "Write",
     defaultPageKey: "text",
     icon: PenLine,
+    tone: "blue",
     tabs: [
       { key: "text", labelMy: "Post ရေးမည်", labelEn: "Text Post", icon: FileText },
       { key: "video", labelMy: "Video Script", labelEn: "Video Script", icon: Video },
@@ -47,8 +54,11 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
     emoji: "🎙️",
     titleMy: "AI အသံနှင့် စာပြောင်းစက်",
     titleEn: "AI Voice & Transcriber",
+    shortMy: "အသံစတူဒီယို",
+    shortEn: "Audio",
     defaultPageKey: "voiceover",
     icon: Mic,
+    tone: "indigo",
     tabs: [
       { key: "voiceover", labelMy: "AI အသံထည့်မည်", labelEn: "AI Voiceover", icon: Mic },
       { key: "transcriber", labelMy: "အသံမှ စာပြောင်းမည်", labelEn: "Voice-to-Text", icon: AudioLines },
@@ -60,8 +70,11 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
     emoji: "🎬",
     titleMy: "ဗီဒီယို Auto-Cut & ပုံဒီဇိုင်း",
     titleEn: "Video Auto-Cut & Studio",
+    shortMy: "မီဒီယာ",
+    shortEn: "Media",
     defaultPageKey: "autocut",
     icon: Scissors,
+    tone: "amber",
     tabs: [
       { key: "autocut", labelMy: "ဗီဒီယို Auto-Cut", labelEn: "Video Auto-Cut", icon: Scissors },
       { key: "studio", labelMy: "ပုံဒီဇိုင်း Studio", labelEn: "Photo Studio", icon: Camera },
@@ -72,8 +85,11 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
     emoji: "📁",
     titleMy: "မှတ်စုနှင့် အချိန်ဇယား",
     titleEn: "Vault & Calendar",
+    shortMy: "မှတ်စု",
+    shortEn: "Vault",
     defaultPageKey: "vault",
     icon: FolderKanban,
+    tone: "emerald",
     tabs: [{ key: "vault", labelMy: "Idea Vault & Calendar", labelEn: "Idea Vault & Calendar", icon: FolderKanban }],
   },
 ]
@@ -86,5 +102,5 @@ export function getRoomForPageKey(pageKey: string): WorkspaceRoom {
 }
 
 export function getRoomTitle(room: WorkspaceRoom, language: Language): string {
-  return language === "my" ? `${room.emoji} ${room.titleMy}` : `${room.emoji} ${room.titleEn}`
+  return language === "my" ? room.titleMy : room.titleEn
 }

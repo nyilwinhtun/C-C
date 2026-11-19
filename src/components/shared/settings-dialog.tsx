@@ -12,8 +12,10 @@ import {
   type BusinessCategory,
 } from "@/types"
 import { useShallow } from "zustand/react/shallow"
-import { Download, Eye, EyeOff, Link, ShieldAlert, Upload } from "lucide-react"
+import { Download, Eye, EyeOff, Link, Settings, ShieldAlert, Upload } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
+import { SquircleIcon } from "@/components/shared/squircle-icon"
+import { triggerHaptic } from "@/lib/utils"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -292,10 +294,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
-          <DialogTitle>{t(language, "settings.title")}</DialogTitle>
-          <DialogDescription>{t(language, "settings.description")}</DialogDescription>
+      <DialogContent className="sm:max-w-md max-h-[90dvh] overflow-y-auto">
+        <div className="flex items-center gap-2.5 pr-8">
+          <SquircleIcon icon={Settings} tone="slate" size="md" />
+          <div className="min-w-0">
+            <DialogTitle>{t(language, "settings.title")}</DialogTitle>
+            <DialogDescription>{t(language, "settings.description")}</DialogDescription>
+          </div>
         </div>
         <div className="space-y-5 pt-2">
           <div className="space-y-2">
@@ -467,7 +472,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               {t(language, "settings.brandSignatureHint")}
             </p>
           </div>
-          <div className="rounded-xl border border-border/60 bg-muted/30 p-3 space-y-2">
+          <div className="rounded-[16px] border-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-[#F2F2F7]/70 dark:bg-[#2C2C2E]/70 p-3.5 space-y-2.5">
             <div className="flex items-center justify-between gap-3">
               <div className="space-y-0.5">
                 <p className="text-sm font-medium font-myanmar">
@@ -482,20 +487,23 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 role="switch"
                 aria-checked={autoCtaInput}
                 aria-label={t(language, "settings.autoAppendCta")}
-                onClick={() => setAutoCtaInput((prev) => !prev)}
+                onClick={() => {
+                  triggerHaptic(10)
+                  setAutoCtaInput((prev) => !prev)
+                }}
                 disabled={loading}
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                  autoCtaInput ? "bg-blue-600" : "bg-muted-foreground/30"
+                className={`relative inline-flex h-[30px] w-[50px] shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  autoCtaInput ? "bg-[#34C759]" : "bg-neutral-300 dark:bg-neutral-600"
                 }`}
               >
                 <span
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform ${
+                  className={`pointer-events-none inline-block h-[26px] w-[26px] transform rounded-full bg-white shadow-md transition-transform duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] ${
                     autoCtaInput ? "translate-x-5" : "translate-x-0"
                   }`}
                 />
               </button>
             </div>
-            <p className="text-[11px] text-muted-foreground font-myanmar rounded-lg bg-background/70 px-2.5 py-1.5 border border-border/50">
+            <p className="text-[11px] text-muted-foreground font-myanmar rounded-[12px] bg-white/80 dark:bg-[#1C1C1E]/80 px-3 py-2 border-[0.5px] border-[rgba(60,60,67,0.1)] dark:border-[rgba(84,84,88,0.3)]">
               {DEFAULT_ONLINE_SHOP_CTA_MY}
             </p>
           </div>

@@ -13,10 +13,11 @@ import { Header } from "@/components/shared/header"
 import { Sidebar } from "@/components/shared/sidebar"
 import { SettingsDialog } from "@/components/shared/settings-dialog"
 import { PWAInstallBanner } from "@/components/shared/pwa-install-banner"
-import { getRoomForPageKey, getRoomTitle } from "@/components/shared/rooms"
+import { IosSegmentedControl } from "@/components/shared/ios-segmented-control"
+import { WORKSPACE_ROOMS, getRoomForPageKey, getRoomTitle } from "@/components/shared/rooms"
 import { useUIStore } from "@/store/useUIStore"
 import { useShallow } from "zustand/react/shallow"
-import { cn } from "@/lib/utils"
+import { cn, triggerHaptic } from "@/lib/utils"
 
 const pages: Record<string, React.FC> = {
   text: GeneratorPage,
@@ -65,7 +66,7 @@ export function Layout() {
       <div
         className={cn(
           "flex-1 flex flex-col min-w-0 transition-[padding] duration-200",
-          sidebarCollapsed ? "md:pl-16" : "md:pl-60"
+          sidebarCollapsed ? "md:pl-[68px]" : "md:pl-[248px]"
         )}
       >
         <Header
@@ -73,42 +74,62 @@ export function Layout() {
           onMenuToggle={() => setMobileOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
         />
-        <main className="flex-1 overflow-y-auto bg-background text-foreground p-3.5 sm:p-6 pb-8">
+        <main className="flex-1 overflow-y-auto bg-background text-foreground p-3.5 sm:p-6 pb-24 md:pb-8">
           <div className="mx-auto max-w-6xl space-y-4">
             {activeRoom.tabs.length > 1 && (
-              <div
-                role="tablist"
-                aria-label={roomTitle}
-                className="inline-flex w-full sm:w-auto flex-wrap items-center gap-1 rounded-xl border border-border/60 bg-muted/40 p-1"
-              >
-                {activeRoom.tabs.map((tab) => {
-                  const Icon = tab.icon
-                  const isActive = activePageKey === tab.key
-                  return (
-                    <button
-                      key={tab.key}
-                      type="button"
-                      role="tab"
-                      aria-selected={isActive}
-                      onClick={() => setActivePageKey(tab.key)}
-                      className={cn(
-                        "flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs sm:text-sm font-medium transition-all cursor-pointer font-myanmar whitespace-nowrap",
-                        isActive
-                          ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm"
-                          : "text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                      <span>{language === "my" ? tab.labelMy : tab.labelEn}</span>
-                    </button>
-                  )
-                })}
-              </div>
+              <IosSegmentedControl
+                ariaLabel={roomTitle}
+                value={activePageKey}
+                onChange={setActivePageKey}
+                options={activeRoom.tabs.map((tab) => ({
+                  value: tab.key,
+                  label: language === "my" ? tab.labelMy : tab.labelEn,
+                  icon: tab.icon,
+                }))}
+              />
             )}
             <Page />
           </div>
         </main>
       </div>
+
+      {/* Mobile iOS Frosted Glass Bottom Tab Bar */}
+      <nav
+        aria-label="Primary sections"
+        className="md:hidden fixed bottom-0 inset-x-0 z-30 border-t-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-white/80 dark:bg-black/80 ios-glass pb-safe"
+      >
+        <div className="grid grid-cols-4 h-[54px] px-1">
+          {WORKSPACE_ROOMS.map((room) => {
+            const Icon = room.icon
+            const isActive = activeRoom.id === room.id
+            return (
+              <button
+                key={room.id}
+                type="button"
+                onClick={() => {
+                  triggerHaptic(8)
+                  setActivePageKey(room.defaultPageKey)
+                }}
+                className={cn(
+                  "flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 cursor-pointer",
+                  isActive
+                    ? "text-[#007AFF] dark:text-[#0A84FF]"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Icon
+                  className="h-5 w-5"
+                  strokeWidth={isActive ? 2.1 : 1.75}
+                  aria-hidden="true"
+                />
+                <span className="text-[10px] font-medium leading-none font-myanmar truncate max-w-[76px]">
+                  {language === "my" ? room.shortMy : room.shortEn}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </nav>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <PWAInstallBanner />

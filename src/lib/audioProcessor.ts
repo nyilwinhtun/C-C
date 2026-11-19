@@ -138,3 +138,4 @@ export async function prepareAudioForGemini(blob: Blob): Promise<ProcessedAudioR
     mimeType: "audio/wav",
   }
 }
+

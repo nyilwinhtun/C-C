@@ -17,7 +17,7 @@ const Sheet = React.forwardRef<HTMLDivElement, SheetProps>(
       <>
         {open && (
           <div
-            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm transition-opacity duration-200"
+            className="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm transition-opacity duration-200"
             onClick={handleClose}
             aria-hidden="true"
           />
@@ -25,10 +25,16 @@ const Sheet = React.forwardRef<HTMLDivElement, SheetProps>(
         <div
           ref={ref}
           className={cn(
-            "fixed inset-y-0 z-50 h-full w-full max-w-[82vw] flex flex-col bg-card text-foreground shadow-2xl transform transition-transform duration-250 ease-out",
+            "fixed inset-y-0 z-50 h-full w-full max-w-[82vw] flex flex-col bg-white/85 dark:bg-[#1C1C1E]/90 ios-glass text-foreground shadow-2xl transform transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
             side === "left"
-              ? cn("left-0 border-r border-border", open ? "translate-x-0" : "-translate-x-full pointer-events-none")
-              : cn("right-0 border-l border-border", open ? "translate-x-0" : "translate-x-full pointer-events-none"),
+              ? cn(
+                  "left-0 border-r-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)]",
+                  open ? "translate-x-0" : "-translate-x-full pointer-events-none"
+                )
+              : cn(
+                  "right-0 border-l-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)]",
+                  open ? "translate-x-0" : "translate-x-full pointer-events-none"
+                ),
             className
           )}
           role="dialog"
@@ -47,7 +53,7 @@ const SheetContent = React.forwardRef<HTMLDivElement, SheetContentProps>(
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn("flex-1 flex flex-col p-4 border-b border-border", className)}
+      className={cn("flex-1 flex flex-col p-4 border-b-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)]", className)}
       {...props}
     />
   )
@@ -70,7 +76,7 @@ const SheetTitle = React.forwardRef<
   HTMLHeadingElement,
   React.HTMLAttributes<HTMLHeadingElement>
 >(({ className, ...props }, ref) => (
-  <h2 ref={ref} className={cn("text-lg font-semibold", className)} {...props} />
+  <h2 ref={ref} className={cn("text-lg font-semibold tracking-tight", className)} {...props} />
 ))
 SheetTitle.displayName = "SheetTitle"
 
@@ -89,12 +95,12 @@ const SheetClose = React.forwardRef<
   <button
     ref={ref}
     className={cn(
-      "rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+      "rounded-full w-7 h-7 flex items-center justify-center bg-neutral-200/70 dark:bg-neutral-700/70 text-muted-foreground transition-all hover:text-foreground active:scale-95 focus:outline-none focus:ring-2 focus:ring-ring",
       className
     )}
     {...props}
   >
-    <X className="h-4 w-4" />
+    <X className="h-3.5 w-3.5" strokeWidth={2} />
   </button>
 ))
 SheetClose.displayName = "SheetClose"

@@ -156,30 +156,30 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50/70 dark:bg-slate-950 flex flex-col items-center justify-center p-4 relative overflow-hidden">
+    <div className="min-h-screen bg-[#F2F2F7] dark:bg-black flex flex-col items-center justify-center p-4 relative overflow-hidden">
       {/* Subtle ambient brand glow */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 h-96 w-96 rounded-full bg-gradient-to-tr from-blue-500/15 via-indigo-500/15 to-amber-500/10 blur-3xl"
+        className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 h-96 w-96 rounded-full bg-gradient-to-tr from-[#007AFF]/15 via-indigo-500/12 to-amber-500/10 blur-3xl"
       />
 
       {/* Top right language & theme controls */}
-      <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
+      <div className="absolute top-4 right-4 flex items-center gap-2 z-10 pt-safe">
         <Button
           variant="outline"
           size="sm"
           type="button"
           onClick={() => setLanguage(language === "en" ? "my" : "en")}
-          className="h-9 px-3 text-xs font-medium flex items-center gap-1.5 border-border/60 bg-background/80 backdrop-blur-md"
+          className="h-9 px-3 text-xs font-medium flex items-center gap-1.5 rounded-full bg-white/80 dark:bg-[#1C1C1E]/80 ios-glass"
           aria-label={t(language, "header.language")}
           title={t(language, "header.language")}
         >
-          <Globe className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-          <span className={language === "en" ? "font-bold text-blue-600 dark:text-blue-400" : "text-muted-foreground"}>
+          <Globe className="h-4 w-4 text-muted-foreground" strokeWidth={1.75} aria-hidden="true" />
+          <span className={language === "en" ? "font-bold text-[#007AFF] dark:text-[#0A84FF]" : "text-muted-foreground"}>
             EN
           </span>
           <span className="text-muted-foreground/60">|</span>
-          <span className={language === "my" ? "font-bold text-blue-600 dark:text-blue-400" : "text-muted-foreground"}>
+          <span className={language === "my" ? "font-bold text-[#007AFF] dark:text-[#0A84FF]" : "text-muted-foreground"}>
             MY
           </span>
         </Button>
@@ -187,9 +187,9 @@ export function LoginPage() {
       </div>
 
       <div className="w-full max-w-md relative z-10">
-        <div className="rounded-2xl border border-border/60 bg-card/90 backdrop-blur-md p-8 shadow-xl">
+        <div className="rounded-[24px] border-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-white/90 dark:bg-[#1C1C1E]/95 ios-glass p-7 sm:p-8 shadow-xl">
           <div className="flex flex-col items-center text-center mb-6">
-            <CCLogo size={56} className="h-14 w-14 mb-3 rounded-2xl shadow-lg ring-1 ring-border/60" />
+            <CCLogo size={56} className="h-14 w-14 mb-3 rounded-[16px] shadow-md ring-1 ring-black/5 dark:ring-white/10" />
             <h1 className="text-2xl font-bold tracking-tight text-foreground leading-relaxed">
               {t(language, "auth.title")}
             </h1>
@@ -199,7 +199,7 @@ export function LoginPage() {
           </div>
 
           {error && (
-            <div className="mb-5 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive leading-relaxed">
+            <div className="mb-5 rounded-[14px] border-[0.5px] border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive leading-relaxed">
               {error}
             </div>
           )}
@@ -216,7 +216,6 @@ export function LoginPage() {
                 required
                 autoComplete="email"
                 disabled={loading}
-                className="border-border/60"
               />
             </div>
 
@@ -230,14 +229,13 @@ export function LoginPage() {
                 required
                 autoComplete="current-password"
                 disabled={loading}
-                className="border-border/60"
               />
             </div>
 
             <Button
               type="submit"
               disabled={loading}
-              className="w-full mt-2 font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 border-0"
+              className="w-full mt-2 font-semibold"
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">

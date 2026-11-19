@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react"
 import {
   Check,
   Copy,
-  FileAudio,
   Loader2,
   Mic,
   Send,
@@ -35,6 +34,7 @@ import { toast } from "@/components/ui/sonner"
 import { Textarea } from "@/components/ui/textarea"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
+import { IosAudioPlayer } from "@/components/shared/IosAudioPlayer"
 
 function pickSupportedRecorderMime(): string {
   if (typeof MediaRecorder === "undefined") return ""
@@ -455,13 +455,12 @@ export function TranscriberPage() {
 
           {/* Audio Preview */}
           {audioPreviewUrl && (
-            <div className="rounded-lg border border-border/60 bg-background/60 p-2.5 space-y-1.5">
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <FileAudio className="h-3.5 w-3.5" />
-                <span className="truncate">{audioLabel}</span>
-              </div>
-              <audio controls src={audioPreviewUrl} className="w-full h-9" />
-            </div>
+            <IosAudioPlayer
+              src={audioPreviewUrl}
+              title={audioLabel ?? undefined}
+              compact
+              accentColor="blue"
+            />
           )}
 
           {/* Transcribed Text + 1-Tap Action Pills */}

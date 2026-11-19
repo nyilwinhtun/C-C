@@ -2,7 +2,7 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --radius: 0.5rem;
+  --radius: 1.25rem;
 
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
@@ -27,47 +27,59 @@
 
 @layer base {
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    /* Apple iOS Light Mode System Palette */
+    --background: 240 20% 96%; /* #F2F2F7 */
+    --foreground: 240 6% 10%;  /* #1C1C1E */
+    --card: 0 0% 100%;         /* #FFFFFF */
+    --card-foreground: 240 6% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
+    --popover-foreground: 240 6% 10%;
+    --primary: 211 100% 50%;   /* #007AFF Apple System Blue */
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 214 32% 94%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 90%;
-    --input: 214.3 31.8% 89%;
-    --ring: 221.2 83.2% 53.3%;
+    --secondary: 240 11% 91%;  /* #E5E5EA */
+    --secondary-foreground: 240 6% 10%;
+    --muted: 240 11% 91%;      /* #E5E5EA */
+    --muted-foreground: 240 4% 46%;
+    --accent: 240 12% 93%;
+    --accent-foreground: 240 6% 10%;
+    --destructive: 3 100% 59%; /* #FF3B30 Apple System Red */
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 6% 86%;
+    --input: 240 6% 88%;
+    --ring: 211 100% 50%;
+
+    --ios-hairline: rgba(60, 60, 67, 0.12);
+    --ios-grouped-bg: #F2F2F7;
+    --ios-card-bg: #FFFFFF;
+    --ios-secondary-fill: #E5E5EA;
   }
 
   .dark {
-    --background: 222.2 47.4% 11.2%;
-    --foreground: 210 40% 98%;
-    --card: 217.2 32.6% 17.5%;
-    --card-foreground: 210 40% 98%;
-    --popover: 217.2 32.6% 17.5%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
+    /* Apple iOS True OLED Dark Mode Palette */
+    --background: 0 0% 0%;     /* #000000 Pure Pitch Black */
+    --foreground: 0 0% 98%;    /* #FAFAFA */
+    --card: 240 4% 11%;        /* #1C1C1E Elevated Dark Grouped */
+    --card-foreground: 0 0% 98%;
+    --popover: 240 4% 11%;     /* #1C1C1E */
+    --popover-foreground: 0 0% 98%;
+    --primary: 210 100% 52%;   /* #0A84FF Apple Dark System Blue */
     --primary-foreground: 0 0% 100%;
-    --secondary: 217.2 32.6% 22%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 22%;
-    --muted-foreground: 215 20.2% 70%;
-    --accent: 217.2 32.6% 24%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 25%;
-    --input: 217.2 32.6% 25%;
-    --ring: 224.3 76.3% 48%;
+    --secondary: 240 4% 18%;   /* #2C2C2E Secondary Grouped Fill */
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 4% 18%;       /* #2C2C2E */
+    --muted-foreground: 240 5% 60%;
+    --accent: 240 4% 22%;      /* #3A3A3C */
+    --accent-foreground: 0 0% 98%;
+    --destructive: 4 100% 60%; /* #FF453A Apple Dark Red */
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 4% 22%;
+    --input: 240 4% 20%;
+    --ring: 210 100% 52%;
+
+    --ios-hairline: rgba(84, 84, 88, 0.36);
+    --ios-grouped-bg: #000000;
+    --ios-card-bg: #1C1C1E;
+    --ios-secondary-fill: #2C2C2E;
   }
 }
 
@@ -79,19 +91,26 @@
   body {
     overscroll-behavior-y: contain;
     touch-action: pan-x pan-y;
+    -webkit-tap-highlight-color: transparent;
   }
   body {
     @apply bg-background text-foreground antialiased;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
-    font-family: "Plus Jakarta Sans", "Inter", "Noto Sans Myanmar", system-ui, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Plus Jakarta Sans", "Inter", "Noto Sans Myanmar", system-ui, sans-serif;
+  }
+  h1, h2, h3, h4, .ios-heading {
+    letter-spacing: -0.02em;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Plus Jakarta Sans", "Inter", "Noto Sans Myanmar", system-ui, sans-serif;
   }
   .font-myanmar {
-    font-family: "Noto Sans Myanmar", "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
+    font-family: "Noto Sans Myanmar", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
     line-height: 1.75;
   }
   :root[lang="my"] body {
-    font-family: "Noto Sans Myanmar", "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
+    font-family: "Noto Sans Myanmar", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
     line-height: 1.75;
   }
   :root[lang="my"] button,
@@ -112,6 +131,27 @@
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* iOS Hairline Separators & Glass Surfaces */
+.ios-hairline {
+  border-color: var(--ios-hairline);
+}
+
+.ios-glass {
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+.ios-press {
+  transition: transform 150ms cubic-bezier(0.32, 0.72, 0, 1), opacity 150ms ease;
+}
+.ios-press:active {
+  transform: scale(0.97);
+}
+
 @keyframes shimmer {
   0% {
     background-position: -200% 0;
@@ -130,4 +170,55 @@
   );
   background-size: 200% 100%;
   animation: shimmer 1.6s infinite linear;
+}
+
+@keyframes ios-sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ios-modal-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.animate-ios-sheet {
+  animation: ios-sheet-up 0.32s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+
+@media (min-width: 640px) {
+  .animate-ios-sheet {
+    animation: ios-modal-in 0.24s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+  }
+}
+
+@keyframes dynamic-island-expand {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scaleX(0.55) scaleY(0.75);
+  }
+  65% {
+    opacity: 1;
+    transform: translateX(-50%) scaleX(1.03) scaleY(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(-50%) scaleX(1) scaleY(1);
+  }
+}
+
+.animate-dynamic-island {
+  animation: dynamic-island-expand 0.34s cubic-bezier(0.32, 0.72, 0, 1) forwards;
 }

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Clock,
-  Download,
   Film,
   Loader2,
   Mic,
@@ -38,6 +37,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
+import { IosAudioPlayer } from "@/components/shared/IosAudioPlayer"
 import { Textarea } from "@/components/ui/textarea"
 
 interface VoiceoverStudioCardProps {
@@ -437,34 +437,17 @@ export function VoiceoverStudioCard({
           </Button>
 
           {voiceoverResult && (
-            <div className="rounded-xl border border-border/60 bg-background/80 p-2.5 space-y-2">
-              <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                <span className="font-medium text-foreground truncate">
-                  {voiceoverResult.voiceName}
-                </span>
-                <span className="shrink-0">
-                  {voiceoverResult.durationSeconds.toFixed(1)}s ·{" "}
-                  {voiceoverResult.fileExtension.toUpperCase()}
-                </span>
-              </div>
-              <audio
-                controls
-                src={voiceoverResult.audioUrl}
-                className="w-full h-9"
-              />
-              <div className="flex items-center justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDownloadAudio}
-                  className="h-7 px-2.5 text-[11px] border-border/60"
-                >
-                  <Download className="h-3 w-3 mr-1" aria-hidden="true" />
-                  Download Audio (.{voiceoverResult.fileExtension})
-                </Button>
-              </div>
-            </div>
+            <IosAudioPlayer
+              src={voiceoverResult.audioUrl}
+              title={voiceoverResult.voiceName}
+              subtitle={`${voiceoverResult.durationSeconds.toFixed(1)}s`}
+              initialDuration={voiceoverResult.durationSeconds}
+              fileExtension={voiceoverResult.fileExtension}
+              onDownload={handleDownloadAudio}
+              downloadLabel={`Download (.${voiceoverResult.fileExtension})`}
+              compact
+              accentColor="blue"
+            />
           )}
         </div>
 

@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import {
   BookOpen,
   Clock,
-  Download,
   FileText,
   Headphones,
   Loader2,
@@ -38,6 +37,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
+import { IosAudioPlayer } from "@/components/shared/IosAudioPlayer"
 import { toast } from "@/components/ui/sonner"
 import { Textarea } from "@/components/ui/textarea"
 import { useUIStore } from "@/store/useUIStore"
@@ -571,18 +571,22 @@ export function AudiobookPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            <audio controls src={fullAudio.audioUrl} className="w-full h-10" />
-            <Button
-              type="button"
-              onClick={() =>
+            <IosAudioPlayer
+              src={fullAudio.audioUrl}
+              title={fullAudio.title}
+              subtitle={
+                isMy
+                  ? `စုစုပေါင်း အသံကြာချိန်: ${formatAudioClockDuration(fullAudio.durationSeconds)}`
+                  : `Total Duration: ${formatAudioClockDuration(fullAudio.durationSeconds)}`
+              }
+              initialDuration={fullAudio.durationSeconds}
+              fileExtension={fullAudio.fileExtension}
+              onDownload={() =>
                 handleDownload(fullAudio.audioUrl, fullAudio.title, fullAudio.fileExtension)
               }
-              className="w-full sm:w-auto gap-2"
-              size="sm"
-            >
-              <Download className="h-4 w-4" />
-              <span>{isMy ? "အသံဖိုင် ဒေါင်းလုဒ်လုပ်မည်" : "Download Audio File"}</span>
-            </Button>
+              downloadLabel={isMy ? "အသံဖိုင် ဒေါင်းလုဒ်" : "Download Audio"}
+              accentColor="emerald"
+            />
           </CardContent>
         </Card>
       )}

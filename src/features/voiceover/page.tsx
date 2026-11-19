@@ -6,7 +6,6 @@ import {
   Captions,
   ChevronDown,
   Clock,
-  Download,
   FileText,
   Film,
   ImagePlus,
@@ -78,6 +77,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
+import { IosAudioPlayer } from "@/components/shared/IosAudioPlayer"
+import { SquircleIcon } from "@/components/shared/squircle-icon"
 
 const VOLUME_OPTIONS: Array<{
   value: OriginalAudioVolume
@@ -1274,38 +1276,47 @@ export function VoiceoverPage() {
                   </div>
                 </div>
 
-                {/* Custom Pronunciation Dictionary */}
-                <div className="rounded-lg border border-border/60 bg-background/60 overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => setIsDictOpen((prev) => !prev)}
-                    className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-foreground hover:bg-muted/40 transition-colors cursor-pointer"
-                  >
-                    <span className="flex items-center gap-1.5 font-myanmar">
-                      <BookOpen className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
-                      <span>📖 {isMy ? "အသံထွက်မှတ်စု (Custom Words)" : "Custom Pronunciations"}</span>
-                      {customPronunciations.length > 0 && (
-                        <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
-                          {customPronunciations.length}
-                        </Badge>
-                      )}
-                    </span>
-                    <ChevronDown
-                      className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${
-                        isDictOpen ? "rotate-180" : ""
-                      }`}
-                      aria-hidden="true"
-                    />
-                  </button>
+                {/* Custom Pronunciation Dictionary Trigger -> Opens iOS Bottom Sheet */}
+                <button
+                  type="button"
+                  onClick={() => setIsDictOpen(true)}
+                  className="w-full flex items-center justify-between gap-2 rounded-[14px] border-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-white/80 dark:bg-[#2C2C2E]/80 px-3 py-2.5 text-xs font-medium text-foreground hover:bg-white dark:hover:bg-[#3A3A3C] transition-all active:scale-[0.99] cursor-pointer"
+                >
+                  <span className="flex items-center gap-2 font-myanmar">
+                    <SquircleIcon icon={BookOpen} tone="indigo" size="sm" />
+                    <span>{isMy ? "အသံထွက်မှတ်စု (Custom Words)" : "Custom Pronunciations"}</span>
+                    {customPronunciations.length > 0 && (
+                      <Badge variant="secondary" className="text-[10px] h-4 px-1.5 tabular-nums">
+                        {customPronunciations.length}
+                      </Badge>
+                    )}
+                  </span>
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground -rotate-90" strokeWidth={1.75} aria-hidden="true" />
+                </button>
 
-                  {isDictOpen && (
-                    <div className="px-3 pb-3 pt-1.5 border-t border-border/50 space-y-2">
-                      <div className="flex flex-col sm:flex-row gap-1.5">
+                <Dialog open={isDictOpen} onOpenChange={setIsDictOpen}>
+                  <DialogContent className="sm:max-w-md">
+                    <div className="flex items-center gap-2.5 pr-8">
+                      <SquircleIcon icon={BookOpen} tone="indigo" size="md" />
+                      <div className="min-w-0">
+                        <DialogTitle className="text-base font-semibold font-myanmar">
+                          {isMy ? "အသံထွက်မှတ်စု (Custom Words)" : "Custom Pronunciations"}
+                        </DialogTitle>
+                        <DialogDescription className="text-xs font-myanmar">
+                          {isMy
+                            ? "အင်္ဂလိပ်စကားလုံးများကို မြန်မာအသံထွက်အဖြစ် မှတ်သားထားပါ"
+                            : "Map brand names or English words to Burmese phonetics"}
+                        </DialogDescription>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 pt-2">
+                      <div className="flex flex-col sm:flex-row gap-2">
                         <Input
                           value={newDictWord}
                           onChange={(e) => setNewDictWord(e.target.value)}
                           placeholder={isMy ? "စကားလုံး (GlowSkin)" : "Word (e.g. GlowSkin)"}
-                          className="h-8 text-xs bg-background/80"
+                          className="h-9 text-xs"
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
                               e.preventDefault()
@@ -1317,7 +1328,7 @@ export function VoiceoverPage() {
                           value={newDictPhonetic}
                           onChange={(e) => setNewDictPhonetic(e.target.value)}
                           placeholder={isMy ? "မြန်မာအသံထွက်" : "Burmese Phonetic"}
-                          className="h-8 text-xs font-myanmar bg-background/80"
+                          className="h-9 text-xs font-myanmar"
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
                               e.preventDefault()
@@ -1329,23 +1340,23 @@ export function VoiceoverPage() {
                           type="button"
                           size="sm"
                           onClick={handleAddPronunciation}
-                          className="h-8 px-3 text-xs shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white"
+                          className="h-9 px-3.5 text-xs shrink-0"
                         >
-                          <Plus className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
+                          <Plus className="h-3.5 w-3.5 mr-1" strokeWidth={2} aria-hidden="true" />
                           {isMy ? "ထည့်" : "Add"}
                         </Button>
                       </div>
 
-                      {customPronunciations.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
+                      {customPronunciations.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto pt-1">
                           {customPronunciations.map((entry) => (
                             <span
                               key={entry.id}
-                              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/80 px-2.5 py-0.5 text-[11px]"
+                              className="inline-flex items-center gap-1.5 rounded-full border-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-[#F2F2F7] dark:bg-[#2C2C2E] px-3 py-1 text-xs"
                             >
                               <span className="font-medium">{entry.word}</span>
                               <span className="text-muted-foreground">→</span>
-                              <span className="font-myanmar text-indigo-700 dark:text-indigo-300">
+                              <span className="font-myanmar text-[#007AFF] dark:text-[#0A84FF] font-medium">
                                 {entry.phonetic}
                               </span>
                               <button
@@ -1359,10 +1370,14 @@ export function VoiceoverPage() {
                             </span>
                           ))}
                         </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground text-center py-3 font-myanmar">
+                          {isMy ? "မှတ်စု မရှိသေးပါ" : "No custom pronunciations yet"}
+                        </p>
                       )}
                     </div>
-                  )}
-                </div>
+                  </DialogContent>
+                </Dialog>
                   </>
                 )}
               </div>
@@ -1959,71 +1974,43 @@ export function VoiceoverPage() {
 
           {/* Audio Preview Player (AI TTS Mode) */}
           {audioSourceMode === "ai" && voiceoverResult && (
-            <div className="rounded-xl border border-border/60 bg-background/80 p-3 space-y-2.5">
-              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground truncate">
-                  {voiceoverResult.voiceName}
-                </span>
-                <span className="shrink-0 font-medium text-foreground">
-                  {isMy
-                    ? `စုစုပေါင်း အသံကြာချိန်: ${formatAudioClockDuration(voiceoverResult.durationSeconds)}`
-                    : `Total Duration: ${formatAudioClockDuration(voiceoverResult.durationSeconds)}`}{" "}
-                  · {voiceoverResult.fileExtension.toUpperCase()}
-                </span>
-              </div>
-              <audio controls src={voiceoverResult.audioUrl} className="w-full h-10" />
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDownloadAudio}
-                  className="h-8 px-3 text-xs border-border/60"
-                >
-                  <Download className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                  {isMy ? "အသံဖိုင် ဒေါင်းလုဒ်" : "Download Audio"} (.{voiceoverResult.fileExtension})
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleShareAudio}
-                  className="h-8 px-3 text-xs border-indigo-500/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/10"
-                >
-                  <Share2 className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                  {canShareFiles ? (isMy ? "အသံမျှဝေမည်" : "Share Audio") : (isMy ? "သိမ်းဆည်းမည်" : "Save Audio")}
-                </Button>
-              </div>
-            </div>
+            <IosAudioPlayer
+              src={voiceoverResult.audioUrl}
+              title={voiceoverResult.voiceName}
+              subtitle={
+                isMy
+                  ? `စုစုပေါင်း အသံကြာချိန်: ${formatAudioClockDuration(voiceoverResult.durationSeconds)}`
+                  : `Total Duration: ${formatAudioClockDuration(voiceoverResult.durationSeconds)}`
+              }
+              initialDuration={voiceoverResult.durationSeconds}
+              fileExtension={voiceoverResult.fileExtension}
+              onDownload={handleDownloadAudio}
+              onShare={handleShareAudio}
+              downloadLabel={isMy ? "ဒေါင်းလုဒ်" : "Download"}
+              shareLabel={canShareFiles ? (isMy ? "မျှဝေမည်" : "Share") : (isMy ? "သိမ်းမည်" : "Save")}
+              accentColor="blue"
+            />
           )}
 
           {/* Recorded / Uploaded Voice Preview Player (My Voice Mode) */}
           {audioSourceMode === "original" && (
             recordedVoice ? (
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.04] p-3 space-y-2.5">
-                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span className="font-medium text-emerald-700 dark:text-emerald-300 truncate font-myanmar">
-                    🎙️ {recordedVoice.label}
-                  </span>
-                  <span className="shrink-0 font-medium text-foreground">
-                    {isMy
+              <div className="space-y-2">
+                <IosAudioPlayer
+                  src={recordedVoice.audioUrl}
+                  title={`🎙️ ${recordedVoice.label}`}
+                  subtitle={
+                    isMy
                       ? `ကြာချိန်: ${formatAudioClockDuration(recordedVoice.durationSeconds)}`
-                      : `Duration: ${formatAudioClockDuration(recordedVoice.durationSeconds)}`}{" "}
-                    · {recordedVoice.fileExtension.toUpperCase()}
-                  </span>
-                </div>
-                <audio controls src={recordedVoice.audioUrl} className="w-full h-10" />
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleDownloadRecordedVoice}
-                    className="h-8 px-3 text-xs border-border/60"
-                  >
-                    <Download className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                    {isMy ? "အသံဖိုင် ဒေါင်းလုဒ်" : "Download Audio"} (.{recordedVoice.fileExtension})
-                  </Button>
+                      : `Duration: ${formatAudioClockDuration(recordedVoice.durationSeconds)}`
+                  }
+                  initialDuration={recordedVoice.durationSeconds}
+                  fileExtension={recordedVoice.fileExtension}
+                  onDownload={handleDownloadRecordedVoice}
+                  downloadLabel={isMy ? "ဒေါင်းလုဒ်" : "Download"}
+                  accentColor="emerald"
+                />
+                <div className="flex justify-end">
                   <Button
                     type="button"
                     variant="ghost"

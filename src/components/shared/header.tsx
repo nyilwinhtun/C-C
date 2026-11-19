@@ -7,6 +7,8 @@ import { Menu, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useUIStore } from "@/store/useUIStore"
 import { SettingsDialog } from "@/components/shared/settings-dialog"
+import { SquircleIcon } from "@/components/shared/squircle-icon"
+import { getRoomForPageKey } from "@/components/shared/rooms"
 
 interface HeaderProps {
   title: string
@@ -15,8 +17,14 @@ interface HeaderProps {
 }
 
 export function Header({ title, onMenuToggle, onOpenSettings }: HeaderProps) {
-  const language = useUIStore(useShallow((state) => state.language))
+  const { language, activePageKey } = useUIStore(
+    useShallow((state) => ({
+      language: state.language,
+      activePageKey: state.activePageKey,
+    }))
+  )
   const [internalSettingsOpen, setInternalSettingsOpen] = useState(false)
+  const activeRoom = getRoomForPageKey(activePageKey)
 
   const handleOpenSettings = () => {
     if (onOpenSettings) {
@@ -27,21 +35,24 @@ export function Header({ title, onMenuToggle, onOpenSettings }: HeaderProps) {
   }
 
   return (
-    <header className="flex items-center justify-between gap-3 px-3.5 sm:px-6 min-h-14 py-2 border-b border-border/60 bg-background/80 backdrop-blur-md sticky top-0 z-20">
+    <header className="flex items-center justify-between gap-3 px-3.5 sm:px-6 min-h-14 py-2 border-b-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-white/80 dark:bg-black/80 ios-glass sticky top-0 z-20 pt-safe">
       <Button
         type="button"
-        variant="outline"
+        variant="ghost"
         size="icon"
         onClick={onMenuToggle}
-        className="md:hidden h-9 w-9 border-border/60 shrink-0"
+        className="md:hidden h-9 w-9 shrink-0 rounded-full bg-black/[0.04] dark:bg-white/[0.08]"
         aria-label={t(language, "sidebar.mobile_nav_title")}
       >
-        <Menu className="h-4 w-4" aria-hidden="true" />
+        <Menu className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden="true" />
       </Button>
 
-      <h2 className="flex-1 min-w-0 text-sm sm:text-base font-semibold tracking-tight leading-snug font-myanmar">
-        {title}
-      </h2>
+      <div className="flex-1 min-w-0 flex items-center gap-2.5">
+        <SquircleIcon icon={activeRoom.icon} tone={activeRoom.tone} size="sm" />
+        <h2 className="min-w-0 text-[15px] sm:text-base font-semibold tracking-tight leading-snug font-myanmar truncate">
+          {title}
+        </h2>
+      </div>
 
       <Button
         type="button"
@@ -49,9 +60,9 @@ export function Header({ title, onMenuToggle, onOpenSettings }: HeaderProps) {
         size="icon"
         onClick={handleOpenSettings}
         aria-label={t(language, "header.settings")}
-        className="h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground"
+        className="h-9 w-9 shrink-0 rounded-full bg-black/[0.04] dark:bg-white/[0.08] text-foreground/80 hover:text-foreground"
       >
-        <Settings className="h-4 w-4" aria-hidden="true" />
+        <Settings className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden="true" />
       </Button>
 
       {!onOpenSettings && (

@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Mic, MicOff, Plus } from "lucide-react"
+import { Lightbulb, Mic, MicOff, Plus } from "lucide-react"
+import { SquircleIcon } from "@/components/shared/squircle-icon"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
 import { useContentStore } from "@/store/useContentStore"
@@ -176,12 +177,17 @@ export function QuickIdeaDialog({ open, onOpenChange }: QuickIdeaDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md p-5">
-        <DialogTitle className="text-base font-semibold font-myanmar">
-          {t(language, "quickIdea.title")}
-        </DialogTitle>
-        <DialogDescription className="text-xs text-muted-foreground font-myanmar">
-          {t(language, "quickIdea.desc")}
-        </DialogDescription>
+        <div className="flex items-center gap-2.5 pr-8">
+          <SquircleIcon icon={Lightbulb} tone="amber" size="md" />
+          <div className="min-w-0">
+            <DialogTitle className="text-base font-semibold font-myanmar">
+              {t(language, "quickIdea.title")}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground font-myanmar">
+              {t(language, "quickIdea.desc")}
+            </DialogDescription>
+          </div>
+        </div>
 
         <form onSubmit={handleSave} className="space-y-3 mt-2">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -255,9 +261,9 @@ export function QuickIdeaDialog({ open, onOpenChange }: QuickIdeaDialogProps) {
             <Button
               type="submit"
               size="sm"
-              className="h-9 px-4 text-xs font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-0 font-myanmar"
+              className="h-9 px-4 text-xs font-semibold font-myanmar"
             >
-              <Plus className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+              <Plus className="h-3.5 w-3.5 mr-1.5" strokeWidth={2} aria-hidden="true" />
               {t(language, "quickIdea.save")}
             </Button>
           </div>

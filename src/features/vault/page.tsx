@@ -25,8 +25,8 @@ import { Select, SelectItem } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
+import { IosSegmentedControl } from "@/components/shared/ios-segmented-control"
 import { vaultItemSchema, type VaultItemFormValues } from "@/features/vault/schema"
 import { PlannerPage } from "@/features/planner/page"
 
@@ -433,17 +433,15 @@ export function VaultPage() {
       </div>
 
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <Tabs
+        <IosSegmentedControl
+          ariaLabel={t(language, "vault.filterPlatform")}
           value={platformFilter}
-          onValueChange={(value) => setPlatformFilter(value as PlatformFilter)}
-        >
-          <TabsList className="flex-wrap h-auto max-w-full justify-start">
-            <TabsTrigger value="all">{t(language, "vault.filterPlatform")}</TabsTrigger>
-            {PLATFORMS.map((p) => (
-              <TabsTrigger key={p.value} value={p.value}>{p.label}</TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+          onChange={(value) => setPlatformFilter(value as PlatformFilter)}
+          options={[
+            { value: "all", label: t(language, "vault.filterPlatform") },
+            ...PLATFORMS.map((p) => ({ value: p.value, label: p.label })),
+          ]}
+        />
 
         <div className="flex flex-wrap items-center gap-1.5">
           {(

@@ -43,6 +43,7 @@ import {
   DEFAULT_ONLINE_SHOP_CTA_MY,
 } from "@/types"
 import { t } from "@/locales/translations"
+import { IosSegmentedControl } from "@/components/shared/ios-segmented-control"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -898,49 +899,29 @@ export function VideoToContentSection() {
               </Button>
             </div>
 
-            <div className="flex items-center gap-1.5">
-              <div
-                role="tablist"
-                aria-label="Video output sections"
-                className="grid grid-cols-4 flex-1 rounded-xl bg-muted/60 p-1 border border-border/60 gap-1"
-              >
-                {outputTabs.map((tab) => {
-                  const isSelected = !showAllTabs && activeTab === tab.id
-                  const TabIcon = tab.icon
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={isSelected}
-                      onClick={() => {
-                        setShowAllTabs(false)
-                        setActiveTab(tab.id)
-                      }}
-                      className={`inline-flex items-center justify-center gap-1 rounded-lg px-1.5 sm:px-2 py-1.5 text-[11px] sm:text-xs font-medium transition-all cursor-pointer font-myanmar ${
-                        isSelected
-                          ? "bg-background text-foreground shadow-xs border border-border/60"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      <TabIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
-                      <span className="truncate">{tab.label}</span>
-                    </button>
-                  )
-                })}
-              </div>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <IosSegmentedControl
+                ariaLabel="Video output sections"
+                value={showAllTabs ? ("" as typeof activeTab) : activeTab}
+                onChange={(nextTab) => {
+                  setShowAllTabs(false)
+                  setActiveTab(nextTab)
+                }}
+                options={outputTabs.map((tab) => ({
+                  value: tab.id,
+                  label: tab.label,
+                  icon: tab.icon,
+                }))}
+                className="flex-1"
+              />
               <Button
                 type="button"
                 variant={showAllTabs ? "default" : "outline"}
                 size="sm"
                 onClick={() => setShowAllTabs((prev) => !prev)}
-                className={`h-8 px-2.5 text-[11px] sm:text-xs shrink-0 font-myanmar ${
-                  showAllTabs
-                    ? "bg-blue-600 hover:bg-blue-700 text-white border-0"
-                    : "border-border/60"
-                }`}
+                className="h-9 px-3 text-xs shrink-0 font-myanmar"
               >
-                <LayoutList className="h-3.5 w-3.5 mr-1 shrink-0" aria-hidden="true" />
+                <LayoutList className="h-3.5 w-3.5 mr-1 shrink-0" strokeWidth={1.75} aria-hidden="true" />
                 <span>{t(language, "generator.viewAll")}</span>
               </Button>
             </div>

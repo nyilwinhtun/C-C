@@ -155,8 +155,8 @@ export function PWAInstallBanner() {
       aria-label={t(language, "pwa.installTitle")}
       className={cn(
         "fixed bottom-20 md:bottom-4 left-4 right-4 md:left-auto md:right-6 md:max-w-md z-50",
-        "rounded-2xl border border-border/80 bg-card/95 backdrop-blur-xl p-4 shadow-2xl text-card-foreground",
-        "animate-in fade-in slide-in-from-bottom-5 duration-300 ring-1 ring-primary/20"
+        "rounded-[22px] border-[0.5px] border-[rgba(60,60,67,0.16)] dark:border-[rgba(84,84,88,0.42)] bg-white/90 dark:bg-[#1C1C1E]/90 ios-glass p-4 shadow-2xl text-card-foreground",
+        "animate-in fade-in slide-in-from-bottom-5 duration-300"
       )}
     >
       {/* Header bar */}
