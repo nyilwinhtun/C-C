@@ -147,6 +147,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [autoCtaInput, setAutoCtaInput] = useState<boolean>(autoAppendShopCta)
   const [showKey, setShowKey] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const currentPresets = PRESET_MODELS[selectedProvider]
@@ -256,6 +257,36 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       if (fileInputRef.current) {
         fileInputRef.current.value = ""
       }
+    }
+  }
+
+  const handleCheckForUpdate = async () => {
+    setCheckingUpdate(true)
+    try {
+      if ("serviceWorker" in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations()
+        await Promise.all(
+          registrations.map(async (registration) => {
+            try {
+              await registration.update()
+            } catch {
+              // Proceed to unregister even if update check fails offline
+            }
+            await registration.unregister()
+          })
+        )
+      }
+      if ("caches" in window) {
+        const cacheKeys = await caches.keys()
+        await Promise.all(cacheKeys.map((key) => caches.delete(key)))
+      }
+      toast.success("ဗားရှင်းအသစ် ရယူပြီး ပြန်လည်စတင်နေပါသည်...")
+      setTimeout(() => {
+        window.location.reload()
+      }, 400)
+    } catch {
+      setCheckingUpdate(false)
+      window.location.reload()
     }
   }
 
@@ -510,6 +541,19 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 aria-label={t(language, "settings.restoreBackup")}
               />
             </div>
+          </div>
+          <Separator />
+          <div className="space-y-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleCheckForUpdate}
+              disabled={loading || checkingUpdate}
+              className="w-full font-myanmar"
+            >
+              {checkingUpdate ? "စစ်ဆေးနေပါသည်..." : "🔄 ဗားရှင်းအသစ် စစ်ဆေးမည်"}
+            </Button>
           </div>
           <Separator />
           <div className="flex gap-2">
