@@ -5,19 +5,27 @@ import {
   BookOpen,
   Captions,
   ChevronDown,
+  Clock,
   Download,
+  FileText,
   Film,
+  ImagePlus,
   Loader2,
   Mic,
+  Music,
+  Play,
   Plus,
+  RectangleVertical,
   Repeat,
   Scissors,
   Share2,
   Sparkles,
+  Square,
   Tag,
   Upload,
   Volume2,
   VolumeX,
+  Wand2,
   X,
 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
@@ -25,23 +33,32 @@ import { useShallow } from "zustand/react/shallow"
 import { isSupportedVideoFile } from "@/api/aiService"
 import {
   BURMESE_VOICE_PRESETS,
+  SOUND_EFFECT_PRESETS,
   VOICE_DELIVERY_PRESETS,
   VOICEOVER_SPEEDS,
   cleanVoiceoverText,
   generateBurmeseVoiceover,
-  normalizeBurmeseForTTS,
+  optimizeScriptPreservingPauses,
+  playSoundEffectPreview,
   type BurmeseVoiceType,
+  type SoundEffectType,
   type VoiceDeliveryTone,
   type VoiceoverResult,
   type VoiceoverSpeed,
 } from "@/api/ttsService"
 import {
+  generateSrtContent,
   mergeVideoWithVoiceover,
+  previewBackgroundMusic,
+  stopBackgroundMusicPreview,
+  type BackgroundMusicPreset,
   type MergeVideoAudioResult,
   type OriginalAudioVolume,
+  type SubtitleStylePreset,
+  type VideoAspectRatio,
   type VideoDurationSyncMode,
 } from "@/lib/videoAudioMerger"
-import { useContentStore } from "@/store/useContentStore"
+import { useContentStore, type UploadedPhotoItem } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -66,6 +83,57 @@ const VOLUME_OPTIONS: Array<{
   { value: 0.5, label: "Normal 50%", labelMy: "ပုံမှန် 50%" },
 ]
 
+const PAUSE_PILLS = [
+  { tag: "[pause 0.5s]", label: "+0.5s" },
+  { tag: "[pause 1s]", label: "+1s" },
+  { tag: "[pause 2s]", label: "+2s" },
+] as const
+
+const ASPECT_RATIO_OPTIONS: Array<{
+  id: VideoAspectRatio
+  label: string
+  sub: string
+}> = [
+  { id: "9:16", label: "9:16", sub: "TikTok/Reels" },
+  { id: "1:1", label: "1:1", sub: "Square" },
+  { id: "16:9", label: "16:9", sub: "YouTube" },
+  { id: "original", label: "Original", sub: "Source" },
+]
+
+const MUSIC_PRESET_OPTIONS: Array<{
+  id: BackgroundMusicPreset
+  label: string
+  labelMy: string
+}> = [
+  { id: "none", label: "None", labelMy: "မထည့်ပါ" },
+  { id: "upbeat_promo", label: "Upbeat Promo", labelMy: "တက်ကြွ" },
+  { id: "soft_vlog", label: "Soft Vlog", labelMy: "နူးညံ့" },
+  { id: "calm_lofi", label: "Calm Lo-Fi", labelMy: "Lo-Fi" },
+  { id: "custom", label: "Upload MP3", labelMy: "ကိုယ်ပိုင်ဖိုင်" },
+]
+
+const SUBTITLE_STYLE_OPTIONS: Array<{
+  id: SubtitleStylePreset
+  label: string
+  previewClass: string
+}> = [
+  {
+    id: "dark_pill",
+    label: "Classic Dark Pill",
+    previewClass: "bg-slate-900/90 text-white border-white/20",
+  },
+  {
+    id: "yellow_box",
+    label: "Viral Yellow Box",
+    previewClass: "bg-yellow-400 text-slate-950 border-yellow-500 font-bold",
+  },
+  {
+    id: "bold_outline",
+    label: "Bold White Outline",
+    previewClass: "bg-slate-700/80 text-white border-black font-extrabold [text-shadow:0_1px_2px_#000]",
+  },
+]
+
 function triggerBlobDownload(url: string, filename: string) {
   const link = document.createElement("a")
   link.href = url
@@ -82,6 +150,8 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+type AccordionSection = "voice" | "media" | "music"
+
 export function VoiceoverPage() {
   const language = useUIStore(useShallow((state) => state.language))
   const isMy = language === "my"
@@ -93,6 +163,9 @@ export function VoiceoverPage() {
     videoPreviewUrl,
     setUploadedVideo,
     clearUploadedVideo,
+    uploadedPhotos,
+    setUploadedPhotos,
+    clearUploadedPhotos,
     brandSignature,
     customPronunciations,
     addCustomPronunciation,
@@ -105,6 +178,9 @@ export function VoiceoverPage() {
       videoPreviewUrl: state.videoPreviewUrl,
       setUploadedVideo: state.setUploadedVideo,
       clearUploadedVideo: state.clearUploadedVideo,
+      uploadedPhotos: state.uploadedPhotos,
+      setUploadedPhotos: state.setUploadedPhotos,
+      clearUploadedPhotos: state.clearUploadedPhotos,
       brandSignature: state.brandSignature,
       customPronunciations: state.customPronunciations,
       addCustomPronunciation: state.addCustomPronunciation,
@@ -112,16 +188,30 @@ export function VoiceoverPage() {
     }))
   )
 
+  const [openSection, setOpenSection] = useState<AccordionSection | null>("voice")
+  const [mediaMode, setMediaMode] = useState<"video" | "photos">(
+    uploadedPhotos.length > 0 && !videoFile ? "photos" : "video"
+  )
+
   const [voiceType, setVoiceType] = useState<BurmeseVoiceType>("female")
   const [deliveryTone, setDeliveryTone] = useState<VoiceDeliveryTone>("promo")
   const [speed, setSpeed] = useState<VoiceoverSpeed>(1.0)
+  const [introSfx, setIntroSfx] = useState<SoundEffectType>("none")
   const [originalVolume, setOriginalVolume] = useState<OriginalAudioVolume>(0.15)
+
+  const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>("9:16")
+  const [enableBlurredBackground, setEnableBlurredBackground] = useState(true)
+
+  const [musicPreset, setMusicPreset] = useState<BackgroundMusicPreset>("none")
+  const [customMusicFile, setCustomMusicFile] = useState<File | null>(null)
+  const [isPreviewingMusic, setIsPreviewingMusic] = useState(false)
 
   const [isDictOpen, setIsDictOpen] = useState(false)
   const [newDictWord, setNewDictWord] = useState("")
   const [newDictPhonetic, setNewDictPhonetic] = useState("")
 
   const [enableSubtitles, setEnableSubtitles] = useState(true)
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStylePreset>("dark_pill")
   const [enableWatermark, setEnableWatermark] = useState(false)
   const [videoDuration, setVideoDuration] = useState<number | null>(null)
   const [durationSyncMode, setDurationSyncMode] = useState<VideoDurationSyncMode>("loop_video")
@@ -133,6 +223,8 @@ export function VoiceoverPage() {
   const [mergeProgress, setMergeProgress] = useState(0)
   const [mergedVideo, setMergedVideo] = useState<MergeVideoAudioResult | null>(null)
 
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const customMusicInputRef = useRef<HTMLInputElement | null>(null)
   const mergeAbortRef = useRef<AbortController | null>(null)
   const voiceUrlRef = useRef<string | null>(null)
   const mergedUrlRef = useRef<string | null>(null)
@@ -154,10 +246,40 @@ export function VoiceoverPage() {
   useEffect(() => {
     return () => {
       mergeAbortRef.current?.abort()
+      stopBackgroundMusicPreview()
       revokeVoiceUrl()
       revokeMergedUrl()
     }
   }, [revokeVoiceUrl, revokeMergedUrl])
+
+  const toggleSection = (section: AccordionSection) => {
+    setOpenSection((prev) => (prev === section ? null : section))
+  }
+
+  const handleInsertPauseTag = (tag: string) => {
+    const el = textareaRef.current
+    if (!el) {
+      const next = voiceoverDraftScript.trim()
+        ? `${voiceoverDraftScript.trim()} ${tag} `
+        : `${tag} `
+      setVoiceoverDraftScript(next)
+      return
+    }
+    const start = el.selectionStart ?? voiceoverDraftScript.length
+    const end = el.selectionEnd ?? voiceoverDraftScript.length
+    const before = voiceoverDraftScript.slice(0, start)
+    const after = voiceoverDraftScript.slice(end)
+    const padBefore = before && !/\s$/.test(before) ? " " : ""
+    const padAfter = after && !/^\s/.test(after) ? " " : ""
+    const inserted = `${padBefore}${tag}${padAfter}`
+    const next = `${before}${inserted}${after}`
+    setVoiceoverDraftScript(next)
+    window.requestAnimationFrame(() => {
+      el.focus()
+      const cursor = start + inserted.length
+      el.setSelectionRange(cursor, cursor)
+    })
+  }
 
   const handleSelectVideoFile = (file?: File | null) => {
     if (!file) return
@@ -171,9 +293,73 @@ export function VoiceoverPage() {
     }
     const url = URL.createObjectURL(file)
     setUploadedVideo(file, url)
+    setMediaMode("video")
     setVideoDuration(null)
     revokeMergedUrl()
     setMergedVideo(null)
+  }
+
+  const handleSelectPhotoFiles = (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return
+    const incoming = Array.from(fileList).filter((f) => f.type.startsWith("image/"))
+    if (incoming.length === 0) {
+      toast.error(
+        isMy
+          ? "ပံ့ပိုးထားသော ပုံဖိုင်များ (JPG, PNG, WebP) ရွေးချယ်ပါ။"
+          : "Please choose valid image files (JPG, PNG, WebP)."
+      )
+      return
+    }
+    const combined: UploadedPhotoItem[] = [
+      ...uploadedPhotos,
+      ...incoming.map((file) => ({
+        id: crypto.randomUUID(),
+        file,
+        previewUrl: URL.createObjectURL(file),
+      })),
+    ].slice(0, 10)
+
+    if (uploadedPhotos.length + incoming.length > 10) {
+      toast.info(isMy ? "အများဆုံး ပုံ ၁၀ ပုံအထိသာ ထည့်နိုင်ပါသည်။" : "Maximum 10 photos allowed.")
+    }
+
+    setUploadedPhotos(combined)
+    setMediaMode("photos")
+    revokeMergedUrl()
+    setMergedVideo(null)
+  }
+
+  const handleRemovePhoto = (id: string) => {
+    setUploadedPhotos(uploadedPhotos.filter((p) => p.id !== id))
+    revokeMergedUrl()
+    setMergedVideo(null)
+  }
+
+  const handleSelectSfx = (sfx: SoundEffectType) => {
+    setIntroSfx(sfx)
+    if (sfx !== "none") {
+      void playSoundEffectPreview(sfx)
+    }
+  }
+
+  const handleToggleMusicPreview = async () => {
+    if (isPreviewingMusic) {
+      stopBackgroundMusicPreview()
+      setIsPreviewingMusic(false)
+      return
+    }
+    if (musicPreset === "none") return
+    if (musicPreset === "custom" && !customMusicFile) {
+      toast.info(isMy ? "အရင်ဆုံး .mp3/.m4a ဖိုင်ရွေးပါ။" : "Select an .mp3/.m4a file first.")
+      return
+    }
+    setIsPreviewingMusic(true)
+    try {
+      await previewBackgroundMusic(musicPreset, customMusicFile)
+      window.setTimeout(() => setIsPreviewingMusic(false), 8000)
+    } catch {
+      setIsPreviewingMusic(false)
+    }
   }
 
   const handleAddPronunciation = () => {
@@ -194,7 +380,10 @@ export function VoiceoverPage() {
   }
 
   const handleOptimizeSpeechText = () => {
-    const optimized = normalizeBurmeseForTTS(voiceoverDraftScript, customPronunciations)
+    const optimized = optimizeScriptPreservingPauses(
+      voiceoverDraftScript,
+      customPronunciations
+    )
     if (!optimized) {
       toast.error(
         isMy
@@ -227,6 +416,7 @@ export function VoiceoverPage() {
       const result = await generateBurmeseVoiceover(trimmed, voiceType, speed, {
         deliveryTone,
         customPronunciations,
+        introSfx,
       })
       revokeVoiceUrl()
       revokeMergedUrl()
@@ -287,12 +477,33 @@ export function VoiceoverPage() {
     toast.info("Direct sharing is not supported on this browser; downloading audio instead.")
   }
 
+  const handleDownloadSrt = () => {
+    const duration = voiceoverResult?.durationSeconds ?? 15
+    const srt = generateSrtContent(voiceoverDraftScript, duration)
+    if (!srt) {
+      toast.error(isMy ? ".SRT ထုတ်ရန် စာသားအရင်ထည့်ပါ။" : "Enter script text to export .SRT.")
+      return
+    }
+    const blob = new Blob([srt], { type: "text/plain;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    triggerBlobDownload(url, `subtitles-${new Date().toISOString().slice(0, 10)}.srt`)
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    toast.success(isMy ? ".SRT စာတန်းဖိုင် ဒေါင်းလုဒ်ဆွဲပြီးပါပြီ။" : "Downloaded .SRT subtitle file!")
+  }
+
+  const hasReadyMedia =
+    mediaMode === "video" ? Boolean(videoFile) : uploadedPhotos.length >= 2
+
   const handleMergeVideo = async () => {
-    if (!videoFile) {
+    if (!hasReadyMedia) {
       toast.error(
-        isMy
-          ? "ဗီဒီယိုဖိုင် မရှိသေးပါ။ ဗီဒီယိုတစ်ခု တင်ပေးပါ။"
-          : "No video file loaded. Upload a video below first."
+        mediaMode === "photos"
+          ? isMy
+            ? "အနည်းဆုံး ပုံ ၂ ပုံ (၂–၁၀ ပုံ) ရွေးချယ်ပါ။"
+            : "Please upload 2–10 photos for the slideshow."
+          : isMy
+            ? "ဗီဒီယိုဖိုင် မရှိသေးပါ။ ဗီဒီယိုတစ်ခု တင်ပေးပါ။"
+            : "No video file loaded. Upload a video first."
       )
       return
     }
@@ -305,6 +516,9 @@ export function VoiceoverPage() {
       return
     }
 
+    stopBackgroundMusicPreview()
+    setIsPreviewingMusic(false)
+
     mergeAbortRef.current?.abort()
     const controller = new AbortController()
     mergeAbortRef.current = controller
@@ -314,13 +528,21 @@ export function VoiceoverPage() {
 
     try {
       const merged = await mergeVideoWithVoiceover({
-        videoFile,
+        videoFile: mediaMode === "video" ? videoFile : null,
+        imageFiles: mediaMode === "photos" ? uploadedPhotos.map((p) => p.file) : [],
         voiceoverAudio: voiceoverResult.audioBuffer,
         originalVolume,
         voiceoverVolume: 1.0,
         durationSyncMode,
+        aspectRatio: mediaMode === "photos" && aspectRatio === "original" ? "9:16" : aspectRatio,
+        enableBlurredBackground,
+        backgroundMusicPreset: musicPreset,
+        backgroundMusicFile: customMusicFile,
+        backgroundMusicVolume: 0.38,
+        enableAutoDucking: true,
         enableSubtitles,
         subtitleScript: voiceoverDraftScript,
+        subtitleStyle,
         watermarkText: enableWatermark ? brandSignature : "",
         onProgress: setMergeProgress,
         signal: controller.signal,
@@ -330,7 +552,10 @@ export function VoiceoverPage() {
       mergedUrlRef.current = merged.videoUrl
       setMergedVideo(merged)
 
-      const baseName = videoFile.name.replace(/\.[^.]+$/, "") || "video"
+      const baseName =
+        mediaMode === "video" && videoFile
+          ? videoFile.name.replace(/\.[^.]+$/, "")
+          : "photo-slideshow"
       triggerBlobDownload(
         merged.videoUrl,
         `${baseName}-burmese-ai.${merged.fileExtension}`
@@ -339,7 +564,7 @@ export function VoiceoverPage() {
       toast.success(
         isMy
           ? "အသံနှင့် ဗီဒီယို ပေါင်းစပ်ပြီး ဒေါင်းလုဒ်ဆွဲပြီးပါပြီ။"
-          : "Video & AI voiceover merged and downloaded!"
+          : "Video & AI voiceover created and downloaded!"
       )
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -355,7 +580,10 @@ export function VoiceoverPage() {
 
   const handleShareVideo = async () => {
     if (!mergedVideo) return
-    const baseName = videoFile?.name.replace(/\.[^.]+$/, "") || "burmese-ai-video"
+    const baseName =
+      mediaMode === "video" && videoFile
+        ? videoFile.name.replace(/\.[^.]+$/, "")
+        : "burmese-ai-slideshow"
     const filename = `${baseName}-burmese-ai.${mergedVideo.fileExtension}`
     const file = new File([mergedVideo.blob], filename, {
       type: mergedVideo.mimeType,
@@ -386,6 +614,21 @@ export function VoiceoverPage() {
   const canShareFiles =
     typeof navigator !== "undefined" && typeof navigator.share === "function"
 
+  const voiceSummary = `${voiceType === "female" ? "Nilar" : "Thiha"} · ${speed.toFixed(1)}x${
+    introSfx !== "none" ? ` · ${SOUND_EFFECT_PRESETS[introSfx].label}` : ""
+  }`
+
+  const mediaSummary =
+    mediaMode === "photos"
+      ? `${uploadedPhotos.length} Photos · ${aspectRatio === "original" ? "9:16" : aspectRatio}`
+      : videoFile
+        ? `Video · ${aspectRatio}`
+        : `No media · ${aspectRatio}`
+
+  const musicSummary = `${
+    MUSIC_PRESET_OPTIONS.find((m) => m.id === musicPreset)?.label ?? "None"
+  }${enableSubtitles ? ` · ${SUBTITLE_STYLE_OPTIONS.find((s) => s.id === subtitleStyle)?.label ?? "Subtitles"}` : ""}`
+
   return (
     <div className="max-w-3xl mx-auto space-y-4 pb-24 lg:pb-6">
       <Card className="border-indigo-500/30 bg-gradient-to-br from-indigo-500/[0.04] via-card to-blue-500/[0.04] shadow-sm overflow-hidden">
@@ -395,14 +638,14 @@ export function VoiceoverPage() {
               <Sparkles className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span>
                 {isMy
-                  ? "မြန်မာ AI အသံသွင်းနှင့် ဗီဒီယိုပေါင်းစပ်စတူဒီယို"
-                  : "Burmese AI Voiceover & Video Merge Studio"}
+                  ? "မြန်မာ AI အသံသွင်းနှင့် ဗီဒီယိုထုတ်လုပ်ရေး စတူဒီယို"
+                  : "Burmese AI Voiceover & Video Production Studio"}
               </span>
             </CardTitle>
             <CardDescription className="text-xs mt-0.5 font-myanmar">
               {isMy
-                ? "စာသားမှ AI အသံဖန်တီးပြီး ဗီဒီယိုနှင့် တိုက်ရိုက်ပေါင်းစပ်ထုတ်ယူပါ"
-                : "Synthesize Burmese AI voiceover and optionally merge directly into a video"}
+                ? "စာသားမှ AI အသံဖန်တီးပြီး ဗီဒီယို သို့မဟုတ် ဓာတ်ပုံ Slideshow နှင့် ပေါင်းစပ်ထုတ်ယူပါ"
+                : "Synthesize Burmese AI voiceover, mix music, and create 9:16 / 16:9 videos"}
             </CardDescription>
           </div>
           <Badge variant="secondary" className="text-[10px] shrink-0">
@@ -410,8 +653,8 @@ export function VoiceoverPage() {
           </Badge>
         </CardHeader>
 
-        <CardContent className="p-3.5 sm:p-5 space-y-4">
-          {/* Script input */}
+        <CardContent className="p-3.5 sm:p-5 space-y-3.5">
+          {/* Script Input + 1-tap Pause Pills */}
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <Label
@@ -429,224 +672,829 @@ export function VoiceoverPage() {
                   disabled={!voiceoverDraftScript.trim() || isGeneratingVoice}
                   className="h-7 px-2.5 text-[11px] font-medium font-myanmar border-indigo-500/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/10"
                 >
-                  🪄 အသံထွက်စာသား ပြောင်းမည် (Optimize for Voice)
+                  🪄 {isMy ? "အသံထွက်စာသား ပြောင်းမည်" : "Optimize for Voice"}
                 </Button>
                 {voiceoverDraftScript && (
                   <button
                     type="button"
                     onClick={() => setVoiceoverDraftScript("")}
-                    className="text-[11px] text-muted-foreground hover:text-foreground"
+                    className="text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
                   >
                     {isMy ? "ရှင်းမည်" : "Clear"}
                   </button>
                 )}
               </div>
             </div>
+
             <Textarea
+              ref={textareaRef}
               id="voiceover-page-text"
               value={voiceoverDraftScript}
               onChange={(e) => setVoiceoverDraftScript(e.target.value)}
-              rows={5}
+              rows={4}
               placeholder={
                 isMy
-                  ? "အသံပြောင်းလိုသော မြန်မာစာသားကို ရိုက်ထည့်ပါ သို့မဟုတ် စာသားပို့စ်/ဗီဒီယိုမှ ပေးပို့ပါ..."
-                  : "Type or paste Burmese script here, or send from Text Post / Video Script..."
+                  ? "အသံပြောင်းလိုသော မြန်မာစာသားကို ရိုက်ထည့်ပါ... ([pause 1s] များထည့်နိုင်သည်)"
+                  : "Type or paste Burmese script here... Use [pause 1s] pills for dramatic pauses."
               }
               className="text-sm font-myanmar leading-relaxed resize-y bg-background/80 border-border/60"
             />
+
+            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+              <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground mr-0.5">
+                <Clock className="h-3 w-3" aria-hidden="true" />
+                {isMy ? "အသံရပ်နားချိန်:" : "Insert Pause:"}
+              </span>
+              {PAUSE_PILLS.map((pill) => (
+                <button
+                  key={pill.tag}
+                  type="button"
+                  onClick={() => handleInsertPauseTag(pill.tag)}
+                  className="inline-flex items-center rounded-full border border-indigo-500/30 bg-indigo-500/5 hover:bg-indigo-500/15 px-2.5 py-0.5 text-[11px] font-medium text-indigo-700 dark:text-indigo-300 transition-colors cursor-pointer"
+                >
+                  {pill.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Voice Delivery Preset Pills */}
-          <div className="space-y-1.5">
-            <Label className="text-[11px] font-medium text-muted-foreground font-myanmar">
-              {isMy ? "အသံဟန် (Voice Style)" : "Voice Delivery Style"}
-            </Label>
-            <div className="grid grid-cols-3 gap-1.5">
-              {(["promo", "storytelling", "educational"] as VoiceDeliveryTone[]).map((tone) => {
-                const preset = VOICE_DELIVERY_PRESETS[tone]
-                const active = deliveryTone === tone
-                return (
+          {/* Accordion 1: Voice & SFX */}
+          <div className="rounded-xl border border-border/60 bg-muted/15 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => toggleSection("voice")}
+              className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-left hover:bg-muted/30 transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                <Mic className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
+                <span>{isMy ? "Voice & SFX (အသံနှင့် SFX)" : "Voice & SFX"}</span>
+              </span>
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="text-[11px] text-muted-foreground truncate max-w-[160px]">
+                  {voiceSummary}
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform ${
+                    openSection === "voice" ? "rotate-180" : ""
+                  }`}
+                  aria-hidden="true"
+                />
+              </span>
+            </button>
+
+            {openSection === "voice" && (
+              <div className="px-3.5 pb-3.5 pt-2 border-t border-border/50 space-y-3">
+                {/* Delivery Tone */}
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-medium text-muted-foreground font-myanmar">
+                    {isMy ? "အသံဟန် (Voice Style)" : "Voice Delivery Style"}
+                  </Label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(["promo", "storytelling", "educational"] as VoiceDeliveryTone[]).map((tone) => {
+                      const preset = VOICE_DELIVERY_PRESETS[tone]
+                      const active = deliveryTone === tone
+                      return (
+                        <button
+                          key={tone}
+                          type="button"
+                          onClick={() => setDeliveryTone(tone)}
+                          className={`rounded-lg border px-2 py-1.5 text-left transition-colors cursor-pointer ${
+                            active
+                              ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
+                              : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                          }`}
+                        >
+                          <div className="text-[11px] font-semibold leading-tight truncate">
+                            {preset.label}
+                          </div>
+                          <div className="text-[10px] opacity-80 truncate font-myanmar mt-0.5">
+                            {preset.labelMy}
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Voice & Speed */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      {isMy ? "အသံအမျိုးအစား" : "Voice"}
+                    </Label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {(["female", "male"] as BurmeseVoiceType[]).map((type) => {
+                        const preset = BURMESE_VOICE_PRESETS[type]
+                        const active = voiceType === type
+                        return (
+                          <button
+                            key={type}
+                            type="button"
+                            onClick={() => setVoiceType(type)}
+                            className={`rounded-lg border px-2.5 py-1.5 text-left transition-colors cursor-pointer ${
+                              active
+                                ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
+                                : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                            }`}
+                          >
+                            <div className="text-xs font-semibold leading-tight">
+                              {type === "female" ? "Female" : "Male"}
+                            </div>
+                            <div className="text-[10px] opacity-80 truncate font-myanmar">
+                              {type === "female" ? "Nilar" : "Thiha"}
+                            </div>
+                            <span className="sr-only">{preset.labelMy}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] font-medium text-muted-foreground">
+                      {isMy ? "မြန်နှုန်း" : "Speed"}
+                    </Label>
+                    <div className="grid grid-cols-4 gap-1">
+                      {VOICEOVER_SPEEDS.map((option) => {
+                        const active = speed === option
+                        return (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => setSpeed(option)}
+                            className={`rounded-lg border py-2 text-xs font-semibold transition-colors cursor-pointer ${
+                              active
+                                ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
+                                : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                            }`}
+                          >
+                            {option.toFixed(1)}x
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 1-Tap Intro Sound Effects */}
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                    <Wand2 className="h-3 w-3" aria-hidden="true" />
+                    {isMy ? "အဖွင့်အသံ SFX (Intro Accent)" : "Intro Sound Effect (1-Tap Preview)"}
+                  </Label>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {(["none", "pop", "whoosh", "cash_ding"] as SoundEffectType[]).map((sfx) => {
+                      const preset = SOUND_EFFECT_PRESETS[sfx]
+                      const active = introSfx === sfx
+                      return (
+                        <button
+                          key={sfx}
+                          type="button"
+                          onClick={() => handleSelectSfx(sfx)}
+                          className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-colors cursor-pointer truncate ${
+                            active
+                              ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-semibold"
+                              : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                          }`}
+                        >
+                          {isMy ? preset.labelMy : preset.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Custom Pronunciation Dictionary */}
+                <div className="rounded-lg border border-border/60 bg-background/60 overflow-hidden">
                   <button
-                    key={tone}
                     type="button"
-                    onClick={() => setDeliveryTone(tone)}
-                    className={`rounded-lg border px-2 py-2 text-left transition-colors cursor-pointer ${
-                      active
-                        ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
+                    onClick={() => setIsDictOpen((prev) => !prev)}
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-foreground hover:bg-muted/40 transition-colors cursor-pointer"
+                  >
+                    <span className="flex items-center gap-1.5 font-myanmar">
+                      <BookOpen className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
+                      <span>📖 {isMy ? "အသံထွက်မှတ်စု (Custom Words)" : "Custom Pronunciations"}</span>
+                      {customPronunciations.length > 0 && (
+                        <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
+                          {customPronunciations.length}
+                        </Badge>
+                      )}
+                    </span>
+                    <ChevronDown
+                      className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${
+                        isDictOpen ? "rotate-180" : ""
+                      }`}
+                      aria-hidden="true"
+                    />
+                  </button>
+
+                  {isDictOpen && (
+                    <div className="px-3 pb-3 pt-1.5 border-t border-border/50 space-y-2">
+                      <div className="flex flex-col sm:flex-row gap-1.5">
+                        <Input
+                          value={newDictWord}
+                          onChange={(e) => setNewDictWord(e.target.value)}
+                          placeholder={isMy ? "စကားလုံး (GlowSkin)" : "Word (e.g. GlowSkin)"}
+                          className="h-8 text-xs bg-background/80"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault()
+                              handleAddPronunciation()
+                            }
+                          }}
+                        />
+                        <Input
+                          value={newDictPhonetic}
+                          onChange={(e) => setNewDictPhonetic(e.target.value)}
+                          placeholder={isMy ? "မြန်မာအသံထွက်" : "Burmese Phonetic"}
+                          className="h-8 text-xs font-myanmar bg-background/80"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault()
+                              handleAddPronunciation()
+                            }
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={handleAddPronunciation}
+                          className="h-8 px-3 text-xs shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white"
+                        >
+                          <Plus className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
+                          {isMy ? "ထည့်" : "Add"}
+                        </Button>
+                      </div>
+
+                      {customPronunciations.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {customPronunciations.map((entry) => (
+                            <span
+                              key={entry.id}
+                              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/80 px-2.5 py-0.5 text-[11px]"
+                            >
+                              <span className="font-medium">{entry.word}</span>
+                              <span className="text-muted-foreground">→</span>
+                              <span className="font-myanmar text-indigo-700 dark:text-indigo-300">
+                                {entry.phonetic}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => removeCustomPronunciation(entry.id)}
+                                aria-label={`Remove ${entry.word}`}
+                                className="ml-0.5 text-muted-foreground hover:text-destructive cursor-pointer"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Accordion 2: Media & Ratio */}
+          <div className="rounded-xl border border-border/60 bg-muted/15 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => toggleSection("media")}
+              className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-left hover:bg-muted/30 transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                <Film className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                <span>{isMy ? "Media & Ratio (မီဒီယာနှင့် အချိုး)" : "Media & Ratio"}</span>
+              </span>
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="text-[11px] text-muted-foreground truncate max-w-[160px]">
+                  {mediaSummary}
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform ${
+                    openSection === "media" ? "rotate-180" : ""
+                  }`}
+                  aria-hidden="true"
+                />
+              </span>
+            </button>
+
+            {openSection === "media" && (
+              <div className="px-3.5 pb-3.5 pt-2 border-t border-border/50 space-y-3">
+                {/* Video vs Photos Mode Switch */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setMediaMode("video")}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-semibold transition-colors cursor-pointer ${
+                      mediaMode === "video"
+                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
                         : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
                     }`}
                   >
-                    <div className="text-[11px] font-semibold leading-tight truncate">
-                      {preset.label}
-                    </div>
-                    <div className="text-[10px] opacity-80 truncate font-myanmar mt-0.5">
-                      {preset.labelMy}
-                    </div>
+                    <Film className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>{isMy ? "ဗီဒီယိုဖိုင်" : "Video Clip"}</span>
                   </button>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* Voice & Speed */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
-                <Mic className="h-3 w-3" aria-hidden="true" />
-                {isMy ? "အသံအမျိုးအစား" : "Voice"}
-              </Label>
-              <div className="grid grid-cols-2 gap-1.5">
-                {(["female", "male"] as BurmeseVoiceType[]).map((type) => {
-                  const preset = BURMESE_VOICE_PRESETS[type]
-                  const active = voiceType === type
-                  return (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => setVoiceType(type)}
-                      className={`rounded-lg border px-2.5 py-2 text-left transition-colors cursor-pointer ${
-                        active
-                          ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
-                          : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
-                      }`}
-                    >
-                      <div className="text-xs font-semibold leading-tight">
-                        {type === "female" ? "Female" : "Male"}
-                      </div>
-                      <div className="text-[11px] opacity-80 truncate font-myanmar">
-                        {type === "female" ? "Nilar" : "Thiha"}
-                      </div>
-                      <span className="sr-only">{preset.labelMy}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-[11px] font-medium text-muted-foreground">
-                {isMy ? "မြန်နှုန်း" : "Speed"}
-              </Label>
-              <div className="grid grid-cols-4 gap-1">
-                {VOICEOVER_SPEEDS.map((option) => {
-                  const active = speed === option
-                  return (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => setSpeed(option)}
-                      className={`rounded-lg border py-2.5 text-xs font-semibold transition-colors cursor-pointer ${
-                        active
-                          ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
-                          : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
-                      }`}
-                    >
-                      {option.toFixed(1)}x
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-
-          {/* Collapsible Custom Pronunciation Dictionary */}
-          <div className="rounded-xl border border-border/60 bg-muted/20 overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setIsDictOpen((prev) => !prev)}
-              className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-foreground hover:bg-muted/40 transition-colors cursor-pointer"
-            >
-              <span className="flex items-center gap-1.5 font-myanmar">
-                <BookOpen className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
-                <span>📖 အသံထွက်မှတ်စု (Custom Words)</span>
-                {customPronunciations.length > 0 && (
-                  <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
-                    {customPronunciations.length}
-                  </Badge>
-                )}
-              </span>
-              <ChevronDown
-                className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${
-                  isDictOpen ? "rotate-180" : ""
-                }`}
-                aria-hidden="true"
-              />
-            </button>
-
-            {isDictOpen && (
-              <div className="px-3 pb-3 pt-1.5 border-t border-border/50 space-y-2.5">
-                <div className="flex flex-col sm:flex-row gap-1.5">
-                  <Input
-                    value={newDictWord}
-                    onChange={(e) => setNewDictWord(e.target.value)}
-                    placeholder={isMy ? "စကားလုံး (ဥပမာ - GlowSkin)" : "Word (e.g. GlowSkin)"}
-                    className="h-8 text-xs bg-background/80"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault()
-                        handleAddPronunciation()
-                      }
-                    }}
-                  />
-                  <Input
-                    value={newDictPhonetic}
-                    onChange={(e) => setNewDictPhonetic(e.target.value)}
-                    placeholder={isMy ? "မြန်မာအသံထွက် (ဥပမာ - ဂလိုးစကင်း)" : "Burmese Phonetic (e.g. ဂလိုးစကင်း)"}
-                    className="h-8 text-xs font-myanmar bg-background/80"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault()
-                        handleAddPronunciation()
-                      }
-                    }}
-                  />
-                  <Button
+                  <button
                     type="button"
-                    size="sm"
-                    onClick={handleAddPronunciation}
-                    className="h-8 px-3 text-xs shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white"
+                    onClick={() => {
+                      setMediaMode("photos")
+                      if (aspectRatio === "original") setAspectRatio("9:16")
+                    }}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-semibold transition-colors cursor-pointer ${
+                      mediaMode === "photos"
+                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                        : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                    }`}
                   >
-                    <Plus className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
-                    {isMy ? "ထည့်မည်" : "Add"}
-                  </Button>
+                    <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>{isMy ? "ဓာတ်ပုံ Slideshow (၂–၁၀)" : "Photos (2–10)"}</span>
+                  </button>
                 </div>
 
-                {customPronunciations.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {customPronunciations.map((entry) => (
-                      <span
-                        key={entry.id}
-                        className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/80 px-2.5 py-0.5 text-[11px]"
-                      >
-                        <span className="font-medium">{entry.word}</span>
-                        <span className="text-muted-foreground">→</span>
-                        <span className="font-myanmar text-indigo-700 dark:text-indigo-300">
-                          {entry.phonetic}
+                {/* Video Uploader */}
+                {mediaMode === "video" ? (
+                  !videoFile ? (
+                    <div className="relative rounded-xl border-2 border-dashed border-border/70 bg-background/50 hover:bg-muted/40 hover:border-emerald-500/50 p-4 text-center transition-colors cursor-pointer">
+                      <input
+                        type="file"
+                        accept="video/*,.mp4,.mov,.m4v,.webm,.3gp,.mkv"
+                        className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                        onChange={(e) => {
+                          handleSelectVideoFile(e.target.files?.[0])
+                          e.target.value = ""
+                        }}
+                      />
+                      <div className="flex items-center justify-center gap-2 pointer-events-none">
+                        <Upload className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
+                        <span className="text-xs font-medium text-muted-foreground font-myanmar">
+                          {isMy
+                            ? "ဗီဒီယိုဖိုင် ရွေးချယ်ပါ (MP4, MOV)"
+                            : "Tap to upload video (MP4, MOV, WebM)"}
                         </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-border/60 bg-background/60 p-2.5 space-y-2">
+                      {videoPreviewUrl && (
+                        <video
+                          src={videoPreviewUrl}
+                          controls
+                          playsInline
+                          muted
+                          onLoadedMetadata={(e) => {
+                            const dur = e.currentTarget.duration
+                            if (Number.isFinite(dur) && dur > 0) {
+                              setVideoDuration(dur)
+                              if (voiceoverResult) {
+                                setDurationSyncMode(
+                                  voiceoverResult.durationSeconds > dur ? "loop_video" : "fit_video"
+                                )
+                              }
+                            }
+                          }}
+                          className="w-full max-h-[150px] rounded-lg bg-black/90 object-contain"
+                        />
+                      )}
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="font-medium truncate">{videoFile.name}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {videoDuration !== null && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {videoDuration.toFixed(1)}s
+                            </Badge>
+                          )}
+                          <Badge variant="secondary" className="text-[10px]">
+                            {formatFileSize(videoFile.size)}
+                          </Badge>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              clearUploadedVideo()
+                              revokeMergedUrl()
+                              setMergedVideo(null)
+                            }}
+                            className="h-6 px-1.5 text-muted-foreground hover:text-destructive"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                ) : (
+                  /* Photo Slideshow Uploader */
+                  <div className="space-y-2">
+                    <div className="relative rounded-xl border-2 border-dashed border-border/70 bg-background/50 hover:bg-muted/40 hover:border-emerald-500/50 p-3.5 text-center transition-colors cursor-pointer">
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                        onChange={(e) => {
+                          handleSelectPhotoFiles(e.target.files)
+                          e.target.value = ""
+                        }}
+                      />
+                      <div className="flex items-center justify-center gap-2 pointer-events-none">
+                        <ImagePlus className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
+                        <span className="text-xs font-medium text-muted-foreground font-myanmar">
+                          {isMy
+                            ? `ဓာတ်ပုံ ၂–၁၀ ပုံ ရွေးချယ်ပါ (${uploadedPhotos.length}/10)`
+                            : `Tap to add 2–10 photos for Ken Burns slideshow (${uploadedPhotos.length}/10)`}
+                        </span>
+                      </div>
+                    </div>
+
+                    {uploadedPhotos.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                          <span>
+                            {uploadedPhotos.length < 2
+                              ? isMy
+                                ? "အနည်းဆုံး ၂ ပုံ ထပ်ထည့်ပါ"
+                                : "Add at least 1 more photo (min 2)"
+                              : isMy
+                                ? `${uploadedPhotos.length} ပုံ (Crossfade + Zoom)`
+                                : `${uploadedPhotos.length} photos · Auto-synced to voiceover`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              clearUploadedPhotos()
+                              revokeMergedUrl()
+                              setMergedVideo(null)
+                            }}
+                            className="text-destructive hover:underline cursor-pointer"
+                          >
+                            {isMy ? "အားလုံးဖယ်" : "Clear all"}
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-5 gap-1.5">
+                          {uploadedPhotos.map((photo, index) => (
+                            <div
+                              key={photo.id}
+                              className="relative aspect-square rounded-lg overflow-hidden border border-border/60 bg-black/20"
+                            >
+                              <img
+                                src={photo.previewUrl}
+                                alt={`Slide ${index + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                              <span className="absolute bottom-0.5 left-0.5 rounded bg-black/70 px-1 text-[9px] text-white">
+                                {index + 1}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleRemovePhoto(photo.id)}
+                                aria-label={`Remove photo ${index + 1}`}
+                                className="absolute top-0.5 right-0.5 rounded-full bg-black/70 p-0.5 text-white hover:bg-destructive cursor-pointer"
+                              >
+                                <X className="h-2.5 w-2.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Aspect Ratio Selector + Blurred Background Fill */}
+                <div className="space-y-2 pt-1 border-t border-border/50">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                      <RectangleVertical className="h-3 w-3" aria-hidden="true" />
+                      {isMy ? "ဗီဒီယိုအချိုး (Aspect Ratio)" : "Aspect Ratio"}
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => setEnableBlurredBackground((prev) => !prev)}
+                      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10px] font-medium transition-colors cursor-pointer ${
+                        enableBlurredBackground
+                          ? "border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                          : "border-border/60 bg-background/60 text-muted-foreground"
+                      }`}
+                    >
+                      <span>{isMy ? "Blur နောက်ခံဖြည့်" : "Blurred Bg Fill"}</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {ASPECT_RATIO_OPTIONS.filter(
+                      (opt) => mediaMode === "video" || opt.id !== "original"
+                    ).map((opt) => {
+                      const active = aspectRatio === opt.id
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setAspectRatio(opt.id)}
+                          className={`rounded-lg border px-1.5 py-1.5 text-center transition-colors cursor-pointer ${
+                            active
+                              ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                          }`}
+                        >
+                          <div className="text-[11px] font-bold leading-tight">{opt.label}</div>
+                          <div className="text-[9px] opacity-80 truncate">{opt.sub}</div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Video-specific Sync & Original Volume */}
+                {mediaMode === "video" && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 border-t border-border/50">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1 font-myanmar">
+                        <Repeat className="h-3 w-3" aria-hidden="true" />
+                        {isMy ? "အချိန်ကိုက်ညှိမှု" : "Duration Sync"}
+                      </Label>
+                      <div className="grid grid-cols-2 gap-1">
                         <button
                           type="button"
-                          onClick={() => removeCustomPronunciation(entry.id)}
-                          aria-label={`Remove ${entry.word}`}
-                          className="ml-0.5 text-muted-foreground hover:text-destructive cursor-pointer"
+                          onClick={() => setDurationSyncMode("loop_video")}
+                          className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium text-left cursor-pointer ${
+                            durationSyncMode === "loop_video"
+                              ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                          }`}
                         >
-                          <X className="h-3 w-3" />
+                          <div className="truncate font-semibold">
+                            {isMy ? "ပြန်ကျော့" : "Loop Video"}
+                          </div>
                         </button>
-                      </span>
-                    ))}
+                        <button
+                          type="button"
+                          onClick={() => setDurationSyncMode("fit_video")}
+                          className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium text-left cursor-pointer ${
+                            durationSyncMode === "fit_video"
+                              ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                          }`}
+                        >
+                          <div className="truncate font-semibold flex items-center gap-1">
+                            <Scissors className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+                            {isMy ? "ဗီဒီယိုအတိုင်း" : "Fit Video"}
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1 font-myanmar">
+                        {originalVolume === 0 ? (
+                          <VolumeX className="h-3 w-3" aria-hidden="true" />
+                        ) : (
+                          <Volume2 className="h-3 w-3" aria-hidden="true" />
+                        )}
+                        {isMy ? "မူရင်းဗီဒီယိုအသံ" : "Original Audio"}
+                      </Label>
+                      <div className="grid grid-cols-3 gap-1">
+                        {VOLUME_OPTIONS.map((opt) => {
+                          const active = originalVolume === opt.value
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => setOriginalVolume(opt.value)}
+                              className={`rounded-lg border px-1 py-1.5 text-[10px] font-semibold truncate cursor-pointer ${
+                                active
+                                  ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
+                                  : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
                   </div>
-                ) : (
-                  <p className="text-[11px] text-muted-foreground font-myanmar">
-                    {isMy
-                      ? "အမှတ်တံဆိပ်အမည်များ သို့မဟုတ် အထူးစကားလုံးများကို မြန်မာအသံထွက်အဖြစ် သိမ်းဆည်းထားနိုင်ပါသည်။"
-                      : "Save brand names or special terms with custom Burmese phonetics—applied automatically before TTS."}
-                  </p>
                 )}
               </div>
             )}
           </div>
 
+          {/* Accordion 3: Music & Subtitles */}
+          <div className="rounded-xl border border-border/60 bg-muted/15 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => toggleSection("music")}
+              className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-left hover:bg-muted/30 transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                <Music className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                <span>{isMy ? "Music & Subtitles (တေးဂီတနှင့် စာတန်း)" : "Music & Subtitles"}</span>
+              </span>
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="text-[11px] text-muted-foreground truncate max-w-[160px]">
+                  {musicSummary}
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform ${
+                    openSection === "music" ? "rotate-180" : ""
+                  }`}
+                  aria-hidden="true"
+                />
+              </span>
+            </button>
+
+            {openSection === "music" && (
+              <div className="px-3.5 pb-3.5 pt-2 border-t border-border/50 space-y-3">
+                {/* Background Music Mixer */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+                      <Music className="h-3 w-3" aria-hidden="true" />
+                      <span>{isMy ? "နောက်ခံတေးဂီတ" : "Background Music"}</span>
+                      {musicPreset !== "none" && (
+                        <Badge variant="secondary" className="text-[9px] h-4 px-1.5">
+                          Auto-Duck 12%
+                        </Badge>
+                      )}
+                    </Label>
+                    {musicPreset !== "none" && (
+                      <button
+                        type="button"
+                        onClick={handleToggleMusicPreview}
+                        className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-[10px] font-medium hover:bg-muted cursor-pointer"
+                      >
+                        {isPreviewingMusic ? (
+                          <>
+                            <Square className="h-2.5 w-2.5 fill-current" />
+                            <span>Stop</span>
+                          </>
+                        ) : (
+                          <>
+                            <Play className="h-2.5 w-2.5 fill-current" />
+                            <span>Preview</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+                    {MUSIC_PRESET_OPTIONS.map((opt) => {
+                      const active = musicPreset === opt.id
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => {
+                            stopBackgroundMusicPreview()
+                            setIsPreviewingMusic(false)
+                            setMusicPreset(opt.id)
+                            if (opt.id === "custom" && !customMusicFile) {
+                              customMusicInputRef.current?.click()
+                            }
+                          }}
+                          className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-colors cursor-pointer truncate ${
+                            active
+                              ? "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300 font-semibold"
+                              : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                          }`}
+                        >
+                          {isMy ? opt.labelMy : opt.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  <input
+                    ref={customMusicInputRef}
+                    type="file"
+                    accept="audio/*,.mp3,.m4a,.wav,.aac"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) {
+                        setCustomMusicFile(file)
+                        setMusicPreset("custom")
+                      }
+                      e.target.value = ""
+                    }}
+                  />
+
+                  {musicPreset === "custom" && (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-background/60 px-2.5 py-1.5 text-[11px]">
+                      <span className="truncate text-muted-foreground">
+                        {customMusicFile
+                          ? customMusicFile.name
+                          : isMy
+                            ? ".mp3 / .m4a ဖိုင်မရွေးရသေးပါ"
+                            : "No .mp3/.m4a file selected"}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => customMusicInputRef.current?.click()}
+                        className="h-6 px-2 text-[10px] shrink-0"
+                      >
+                        {customMusicFile ? "Change" : "Choose File"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Subtitles & Styles + SRT */}
+                <div className="space-y-2 pt-1 border-t border-border/50">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEnableSubtitles((prev) => !prev)}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium transition-colors cursor-pointer font-myanmar ${
+                          enableSubtitles
+                            ? "border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                            : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                        }`}
+                      >
+                        <Captions className="h-3.5 w-3.5" aria-hidden="true" />
+                        <span>{isMy ? "စာတန်းထိုး ထည့်မည်" : "Auto Subtitles"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!brandSignature.trim()) {
+                            toast.info(
+                              isMy
+                                ? "Watermark ထည့်ရန် Settings တွင် Brand Signature အရင်သတ်မှတ်ပါ။"
+                                : "Set your Brand Signature in Settings to enable watermark."
+                            )
+                            return
+                          }
+                          setEnableWatermark((prev) => !prev)
+                        }}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                          enableWatermark && brandSignature.trim()
+                            ? "border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                            : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
+                        }`}
+                      >
+                        <Tag className="h-3.5 w-3.5" aria-hidden="true" />
+                        <span className="truncate max-w-[120px]">
+                          {brandSignature.trim() ? brandSignature.trim() : "Watermark"}
+                        </span>
+                      </button>
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleDownloadSrt}
+                      disabled={!voiceoverDraftScript.trim()}
+                      className="h-7 px-2.5 text-[11px] border-border/60"
+                    >
+                      <FileText className="h-3 w-3 mr-1" aria-hidden="true" />
+                      Download .SRT
+                    </Button>
+                  </div>
+
+                  {enableSubtitles && (
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {SUBTITLE_STYLE_OPTIONS.map((style) => {
+                        const active = subtitleStyle === style.id
+                        return (
+                          <button
+                            key={style.id}
+                            type="button"
+                            onClick={() => setSubtitleStyle(style.id)}
+                            className={`rounded-lg border p-1.5 text-center transition-colors cursor-pointer ${
+                              active
+                                ? "border-emerald-500 bg-emerald-500/10"
+                                : "border-border/60 bg-background/60 hover:bg-muted/40"
+                            }`}
+                          >
+                            <div
+                              className={`mx-auto mb-1 w-fit rounded px-1.5 py-0.5 text-[9px] border ${style.previewClass}`}
+                            >
+                              Aa မြန်မာ
+                            </div>
+                            <div className="text-[10px] font-medium truncate">
+                              {style.label}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Generate Audio CTA (Desktop) */}
-          <div className="hidden lg:block">
+          <div className="hidden lg:block pt-1">
             <Button
               type="button"
               onClick={handleGenerateVoice}
@@ -705,229 +1553,30 @@ export function VoiceoverPage() {
             </div>
           )}
 
-          {/* Optional Video Upload & Merge Section */}
-          <div className="space-y-3 pt-2 border-t border-border/60">
-            <div className="flex items-center justify-between gap-2">
-              <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5 font-myanmar">
-                <Film className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
-                {isMy
-                  ? "ဗီဒီယိုနှင့် ပေါင်းစပ်မည် (Optional)"
-                  : "Merge with Video (Optional)"}
-              </Label>
-              {videoFile && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    clearUploadedVideo()
-                    revokeMergedUrl()
-                    setMergedVideo(null)
-                  }}
-                  className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-                >
-                  <X className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
-                  {isMy ? "ဖယ်ရှားမည်" : "Remove"}
-                </Button>
-              )}
-            </div>
-
-            {!videoFile ? (
-              <div className="relative rounded-xl border-2 border-dashed border-border/70 bg-muted/20 hover:bg-muted/40 hover:border-indigo-500/50 p-4 text-center transition-colors cursor-pointer">
-                <input
-                  type="file"
-                  accept="video/*,.mp4,.mov,.m4v,.webm,.3gp,.mkv"
-                  className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
-                  onChange={(e) => {
-                    handleSelectVideoFile(e.target.files?.[0])
-                    e.target.value = ""
-                  }}
-                />
-                <div className="flex items-center justify-center gap-2.5 pointer-events-none">
-                  <Upload className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0" aria-hidden="true" />
-                  <span className="text-xs font-medium text-muted-foreground font-myanmar">
-                    {isMy
-                      ? "အသံနှင့်ပေါင်းစပ်ရန် ဗီဒီယိုဖိုင် ရွေးချယ်ပါ (MP4, MOV)"
-                      : "Tap to upload a video (MP4, MOV, WebM) to merge voiceover"}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-border/60 bg-muted/20 p-3 space-y-2.5">
-                {videoPreviewUrl && (
-                  <video
-                    src={videoPreviewUrl}
-                    controls
-                    playsInline
-                    muted
-                    onLoadedMetadata={(e) => {
-                      const dur = e.currentTarget.duration
-                      if (Number.isFinite(dur) && dur > 0) {
-                        setVideoDuration(dur)
-                        if (voiceoverResult) {
-                          setDurationSyncMode(
-                            voiceoverResult.durationSeconds > dur ? "loop_video" : "fit_video"
-                          )
-                        }
-                      }
-                    }}
-                    className="w-full max-h-[160px] rounded-lg bg-black/90 object-contain"
-                  />
-                )}
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <span className="font-medium truncate">{videoFile.name}</span>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {videoDuration !== null && (
-                      <Badge variant="outline" className="text-[11px]">
-                        {videoDuration.toFixed(1)}s
-                      </Badge>
-                    )}
-                    <Badge variant="secondary" className="text-[11px]">
-                      {formatFileSize(videoFile.size)}
-                    </Badge>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Compact Video Export Options (Pills) */}
-            <div className="space-y-2.5 rounded-xl border border-border/60 bg-muted/15 p-3">
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setEnableSubtitles((prev) => !prev)}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors cursor-pointer font-myanmar ${
-                    enableSubtitles
-                      ? "border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                      : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
-                  }`}
-                >
-                  <Captions className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span>{isMy ? "စာတန်းထိုး ထည့်မည်" : "Auto Subtitles"}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!brandSignature.trim()) {
-                      toast.info(
-                        isMy
-                          ? "Watermark ထည့်ရန် Settings တွင် Brand Signature အရင်သတ်မှတ်ပါ။"
-                          : "Set your Brand Signature in Settings to enable watermark."
-                      )
-                      return
-                    }
-                    setEnableWatermark((prev) => !prev)
-                  }}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors cursor-pointer ${
-                    enableWatermark && brandSignature.trim()
-                      ? "border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                      : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
-                  }`}
-                >
-                  <Tag className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span className="truncate max-w-[160px]">
-                    {brandSignature.trim()
-                      ? `Watermark: ${brandSignature.trim()}`
-                      : isMy
-                        ? "Brand Watermark (မရှိသေးပါ)"
-                        : "Brand Watermark"}
-                  </span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 border-t border-border/50">
-                <div className="space-y-1">
-                  <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1 font-myanmar">
-                    <Repeat className="h-3 w-3" aria-hidden="true" />
-                    {isMy ? "အချိန်ကိုက်ညှိမှု (Duration Sync)" : "Duration Sync"}
-                  </Label>
-                  <div className="grid grid-cols-2 gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setDurationSyncMode("loop_video")}
-                      className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-colors text-left cursor-pointer font-myanmar ${
-                        durationSyncMode === "loop_video"
-                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                          : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
-                      }`}
-                    >
-                      <div className="truncate font-semibold">
-                        {isMy ? "အသံဆုံးထိ ပြန်ကျော့" : "Loop Video"}
-                      </div>
-                      <div className="text-[10px] opacity-80 truncate">
-                        {isMy ? "အသံမပြတ်စေရန်" : "Match voice"}
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDurationSyncMode("fit_video")}
-                      className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-colors text-left cursor-pointer font-myanmar ${
-                        durationSyncMode === "fit_video"
-                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                          : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
-                      }`}
-                    >
-                      <div className="truncate font-semibold flex items-center gap-1">
-                        <Scissors className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
-                        {isMy ? "ဗီဒီယိုအတိုင်း ဖြတ်" : "Fit Video"}
-                      </div>
-                      <div className="text-[10px] opacity-80 truncate">
-                        {isMy ? "မူရင်းအရှည်" : "Stop at video end"}
-                      </div>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1 font-myanmar">
-                    {originalVolume === 0 ? (
-                      <VolumeX className="h-3 w-3" aria-hidden="true" />
-                    ) : (
-                      <Volume2 className="h-3 w-3" aria-hidden="true" />
-                    )}
-                    {isMy ? "မူရင်းဗီဒီယိုအသံ" : "Original Audio"}
-                  </Label>
-                  <div className="grid grid-cols-3 gap-1">
-                    {VOLUME_OPTIONS.map((opt) => {
-                      const active = originalVolume === opt.value
-                      return (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => setOriginalVolume(opt.value)}
-                          title={isMy ? opt.labelMy : opt.label}
-                          className={`rounded-lg border px-1 py-2 text-[11px] font-semibold transition-colors truncate cursor-pointer ${
-                            active
-                              ? "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
-                              : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-            </div>
-
+          {/* Create / Merge Video Action */}
+          <div className="space-y-2 pt-1">
             <div className="flex flex-col sm:flex-row gap-2">
               <Button
                 type="button"
                 onClick={handleMergeVideo}
-                disabled={!voiceoverResult || !videoFile || isMergingVideo || isGeneratingVoice}
+                disabled={!voiceoverResult || !hasReadyMedia || isMergingVideo || isGeneratingVoice}
                 className="flex-1 h-10 text-xs sm:text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white border-0 disabled:opacity-50"
               >
                 {isMergingVideo ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-1.5 animate-spin" aria-hidden="true" />
-                    Merging Audio &amp; Video... {mergeProgress}%
+                    Rendering Video... {mergeProgress}%
                   </>
                 ) : (
                   <>
                     <Film className="h-4 w-4 mr-1.5" aria-hidden="true" />
-                    {isMy ? "ဗီဒီယိုနှင့် ပေါင်းစပ်ပြီး ဒေါင်းလုဒ်ဆွဲမည်" : "Merge into Video & Download"}
+                    {mediaMode === "photos"
+                      ? isMy
+                        ? "ဓာတ်ပုံ Slideshow ဗီဒီယို ထုတ်ယူမည်"
+                        : "Create Slideshow Video & Download"
+                      : isMy
+                        ? "ဗီဒီယိုနှင့် ပေါင်းစပ်ပြီး ဒေါင်းလုဒ်ဆွဲမည်"
+                        : "Merge into Video & Download"}
                   </>
                 )}
               </Button>
@@ -948,7 +1597,7 @@ export function VoiceoverPage() {
             {isMergingVideo && (
               <div className="space-y-1">
                 <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span>Merging Audio &amp; Video...</span>
+                  <span>Rendering Video &amp; Audio...</span>
                   <span className="font-semibold text-foreground">{mergeProgress}%</span>
                 </div>
                 <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
@@ -984,7 +1633,7 @@ export function VoiceoverPage() {
               </>
             )}
           </Button>
-          {voiceoverResult && videoFile && (
+          {voiceoverResult && hasReadyMedia && (
             <Button
               type="button"
               onClick={handleMergeVideo}
@@ -992,7 +1641,7 @@ export function VoiceoverPage() {
               className="min-h-[44px] px-3.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white border-0 font-myanmar"
             >
               <Film className="h-4 w-4 mr-1.5" aria-hidden="true" />
-              {isMy ? "ပေါင်းစပ်မည်" : "Merge"}
+              {mediaMode === "photos" ? (isMy ? "ထုတ်ယူမည်" : "Create") : isMy ? "ပေါင်းစပ်မည်" : "Merge"}
             </Button>
           )}
           {mergedVideo && (
@@ -1010,4 +1659,3 @@ export function VoiceoverPage() {
     </div>
   )
 }
-

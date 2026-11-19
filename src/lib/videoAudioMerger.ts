@@ -1,5 +1,8 @@
 export type OriginalAudioVolume = 0 | 0.15 | 0.5
 export type VideoDurationSyncMode = "loop_video" | "fit_video"
+export type VideoAspectRatio = "original" | "9:16" | "1:1" | "16:9"
+export type BackgroundMusicPreset = "none" | "upbeat_promo" | "soft_vlog" | "calm_lofi" | "custom"
+export type SubtitleStylePreset = "dark_pill" | "yellow_box" | "bold_outline"
 
 export interface SubtitleSegment {
   text: string
@@ -8,13 +11,21 @@ export interface SubtitleSegment {
 }
 
 export interface MergeVideoAudioOptions {
-  videoFile: File
+  videoFile?: File | null
+  imageFiles?: File[]
   voiceoverAudio: AudioBuffer | Blob
   originalVolume: OriginalAudioVolume
   voiceoverVolume?: number
   durationSyncMode?: VideoDurationSyncMode
+  aspectRatio?: VideoAspectRatio
+  enableBlurredBackground?: boolean
+  backgroundMusicPreset?: BackgroundMusicPreset
+  backgroundMusicFile?: File | null
+  backgroundMusicVolume?: number
+  enableAutoDucking?: boolean
   enableSubtitles?: boolean
   subtitleScript?: string
+  subtitleStyle?: SubtitleStylePreset
   watermarkText?: string
   onProgress?: (percent: number) => void
   signal?: AbortSignal
@@ -64,8 +75,27 @@ function computeCanvasSize(videoWidth: number, videoHeight: number): { width: nu
   }
 }
 
+function resolveCanvasDimensions(
+  aspectRatio: VideoAspectRatio,
+  sourceWidth: number,
+  sourceHeight: number
+): { width: number; height: number } {
+  switch (aspectRatio) {
+    case "9:16":
+      return { width: 720, height: 1280 }
+    case "1:1":
+      return { width: 720, height: 720 }
+    case "16:9":
+      return { width: 1280, height: 720 }
+    case "original":
+    default:
+      return computeCanvasSize(sourceWidth, sourceHeight)
+  }
+}
+
 function cleanCaptionScript(raw: string): string {
   return raw
+    .replace(/\[pause\s+\d+(?:\.\d+)?\s*s?\]/gi, " ")
     .replace(/\[\s*\d+(?::\d+)?\s*s?(?:\s*[-–—]\s*\d+(?::\d+)?\s*s?)?[^\]]*\]/gi, " ")
     .replace(/\[(hook|body|cta|intro|outro|scene\s*\d*)[^\]]*\]/gi, " ")
     .replace(/[*#`_~]/g, "")
@@ -134,6 +164,27 @@ export function buildSubtitleSegments(script: string, totalDuration: number): Su
   return segments
 }
 
+function formatSrtTimestamp(seconds: number): string {
+  const clamped = Math.max(0, seconds)
+  const hrs = Math.floor(clamped / 3600)
+  const mins = Math.floor((clamped % 3600) / 60)
+  const secs = Math.floor(clamped % 60)
+  const ms = Math.round((clamped - Math.floor(clamped)) * 1000)
+  const pad2 = (n: number) => String(n).padStart(2, "0")
+  const pad3 = (n: number) => String(n).padStart(3, "0")
+  return `${pad2(hrs)}:${pad2(mins)}:${pad2(secs)},${pad3(ms)}`
+}
+
+export function generateSrtContent(script: string, totalDuration: number): string {
+  const segments = buildSubtitleSegments(script, totalDuration)
+  return segments
+    .map(
+      (seg, index) =>
+        `${index + 1}\n${formatSrtTimestamp(seg.startTime)} --> ${formatSrtTimestamp(seg.endTime)}\n${seg.text}`
+    )
+    .join("\n\n")
+}
+
 function drawRoundedRectPath(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -193,10 +244,11 @@ function drawSubtitleOverlay(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
-  text: string
+  text: string,
+  style: SubtitleStylePreset = "dark_pill"
 ) {
   const minSide = Math.min(width, height)
-  const fontSize = Math.max(18, Math.min(42, Math.round(minSide * 0.042)))
+  const fontSize = Math.max(20, Math.min(44, Math.round(minSide * 0.044)))
   const lineHeight = Math.round(fontSize * 1.38)
   const maxTextWidth = width * 0.84
 
@@ -214,18 +266,51 @@ function drawSubtitleOverlay(
   const boxWidth = blockWidth + padX * 2
   const boxHeight = lines.length * lineHeight + padY * 2
   const boxX = (width - boxWidth) / 2
-  const bottomMargin = Math.round(height * 0.085)
+  const bottomMargin = Math.round(height * 0.09)
   const boxY = height - bottomMargin - boxHeight
 
-  // Dark translucent rounded pill background
+  if (style === "bold_outline") {
+    ctx.lineJoin = "round"
+    ctx.miterLimit = 2
+    ctx.lineWidth = Math.max(5, Math.round(fontSize * 0.22))
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.92)"
+    ctx.shadowColor = "rgba(0, 0, 0, 0.7)"
+    ctx.shadowBlur = 8
+    ctx.fillStyle = "#ffffff"
+    for (let i = 0; i < lines.length; i += 1) {
+      const lineY = boxY + padY + lineHeight * (i + 0.5)
+      ctx.strokeText(lines[i], width / 2, lineY)
+      ctx.fillText(lines[i], width / 2, lineY)
+    }
+    ctx.restore()
+    return
+  }
+
+  if (style === "yellow_box") {
+    drawRoundedRectPath(ctx, boxX, boxY, boxWidth, boxHeight, Math.round(fontSize * 0.38))
+    ctx.fillStyle = "rgba(250, 204, 21, 0.96)"
+    ctx.fill()
+    ctx.lineWidth = 2
+    ctx.strokeStyle = "rgba(17, 24, 39, 0.2)"
+    ctx.stroke()
+
+    ctx.fillStyle = "#111827"
+    for (let i = 0; i < lines.length; i += 1) {
+      const lineY = boxY + padY + lineHeight * (i + 0.5)
+      ctx.fillText(lines[i], width / 2, lineY)
+    }
+    ctx.restore()
+    return
+  }
+
+  // Default: dark_pill
   drawRoundedRectPath(ctx, boxX, boxY, boxWidth, boxHeight, Math.round(fontSize * 0.55))
-  ctx.fillStyle = "rgba(10, 12, 18, 0.76)"
+  ctx.fillStyle = "rgba(10, 12, 18, 0.78)"
   ctx.fill()
   ctx.lineWidth = 1.5
   ctx.strokeStyle = "rgba(255, 255, 255, 0.16)"
   ctx.stroke()
 
-  // High-contrast bold white text
   ctx.fillStyle = "#ffffff"
   ctx.shadowColor = "rgba(0, 0, 0, 0.5)"
   ctx.shadowBlur = 4
@@ -270,19 +355,365 @@ function drawWatermarkOverlay(
   ctx.restore()
 }
 
+function computeCoverRect(srcW: number, srcH: number, dstW: number, dstH: number) {
+  const scale = Math.max(dstW / srcW, dstH / srcH)
+  const w = srcW * scale
+  const h = srcH * scale
+  return { x: (dstW - w) / 2, y: (dstH - h) / 2, w, h }
+}
+
+function computeContainRect(srcW: number, srcH: number, dstW: number, dstH: number) {
+  const scale = Math.min(dstW / srcW, dstH / srcH)
+  const w = srcW * scale
+  const h = srcH * scale
+  return { x: (dstW - w) / 2, y: (dstH - h) / 2, w, h }
+}
+
+function drawFramedMedia(
+  ctx: CanvasRenderingContext2D,
+  source: CanvasImageSource,
+  srcW: number,
+  srcH: number,
+  canvasW: number,
+  canvasH: number,
+  options: {
+    blurredBg: boolean
+    preBlurredBg?: HTMLCanvasElement | null
+    zoomScale?: number
+    panX?: number
+    panY?: number
+    alpha?: number
+  }
+) {
+  const { blurredBg, preBlurredBg, zoomScale = 1, panX = 0, panY = 0, alpha = 1 } = options
+  const srcRatio = srcW / Math.max(1, srcH)
+  const dstRatio = canvasW / Math.max(1, canvasH)
+  const sameAspect = Math.abs(srcRatio - dstRatio) < 0.04
+
+  ctx.save()
+  ctx.globalAlpha = alpha
+
+  if (sameAspect) {
+    const cover = computeCoverRect(srcW, srcH, canvasW, canvasH)
+    const zw = cover.w * zoomScale
+    const zh = cover.h * zoomScale
+    const zx = (canvasW - zw) / 2 + panX
+    const zy = (canvasH - zh) / 2 + panY
+    ctx.drawImage(source, zx, zy, zw, zh)
+    ctx.restore()
+    return
+  }
+
+  if (blurredBg) {
+    if (preBlurredBg) {
+      ctx.drawImage(preBlurredBg, 0, 0, canvasW, canvasH)
+    } else {
+      const bg = computeCoverRect(srcW, srcH, canvasW, canvasH)
+      const pad = 1.08
+      const bw = bg.w * pad
+      const bh = bg.h * pad
+      ctx.save()
+      ctx.filter = "blur(22px) brightness(0.6)"
+      ctx.drawImage(source, (canvasW - bw) / 2, (canvasH - bh) / 2, bw, bh)
+      ctx.restore()
+      ctx.fillStyle = "rgba(8, 10, 16, 0.25)"
+      ctx.fillRect(0, 0, canvasW, canvasH)
+    }
+  } else {
+    ctx.fillStyle = "#090b10"
+    ctx.fillRect(0, 0, canvasW, canvasH)
+  }
+
+  const fg = computeContainRect(srcW, srcH, canvasW, canvasH)
+  if (zoomScale !== 1 || panX !== 0 || panY !== 0) {
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(fg.x, fg.y, fg.w, fg.h)
+    ctx.clip()
+    const zw = fg.w * zoomScale
+    const zh = fg.h * zoomScale
+    const zx = fg.x + (fg.w - zw) / 2 + panX
+    const zy = fg.y + (fg.h - zh) / 2 + panY
+    ctx.drawImage(source, zx, zy, zw, zh)
+    ctx.restore()
+  } else {
+    ctx.drawImage(source, fg.x, fg.y, fg.w, fg.h)
+  }
+
+  ctx.restore()
+}
+
+function createPreBlurredPhotoCanvas(
+  img: HTMLImageElement,
+  canvasW: number,
+  canvasH: number
+): HTMLCanvasElement {
+  const offscreen = document.createElement("canvas")
+  offscreen.width = canvasW
+  offscreen.height = canvasH
+  const octx = offscreen.getContext("2d", { alpha: false })
+  if (octx) {
+    const bg = computeCoverRect(img.naturalWidth, img.naturalHeight, canvasW, canvasH)
+    const pad = 1.1
+    const bw = bg.w * pad
+    const bh = bg.h * pad
+    octx.save()
+    octx.filter = "blur(24px) brightness(0.58)"
+    octx.drawImage(img, (canvasW - bw) / 2, (canvasH - bh) / 2, bw, bh)
+    octx.restore()
+    octx.fillStyle = "rgba(8, 10, 16, 0.28)"
+    octx.fillRect(0, 0, canvasW, canvasH)
+  }
+  return offscreen
+}
+
 /**
- * Merge a video file with a synthesized voiceover track entirely on the client
- * using <video>, <canvas>, AudioContext, and MediaRecorder (no backend or
- * SharedArrayBuffer required).
+ * Synthesize a seamless 8-second loopable ambient/promo background music AudioBuffer
+ * using pure Web Audio synthesis (zero external assets).
+ */
+export function synthesizePresetMusicBuffer(
+  audioCtx: BaseAudioContext,
+  preset: Exclude<BackgroundMusicPreset, "none" | "custom">
+): AudioBuffer {
+  const sampleRate = audioCtx.sampleRate
+  const duration = 8.0
+  const length = Math.floor(sampleRate * duration)
+  const buffer = audioCtx.createBuffer(1, length, sampleRate)
+  const data = buffer.getChannelData(0)
+
+  // Chord progressions (Hz)
+  const chords =
+    preset === "upbeat_promo"
+      ? [
+          [261.63, 329.63, 392.0], // C
+          [196.0, 246.94, 293.66], // G
+          [220.0, 261.63, 329.63], // Am
+          [174.61, 220.0, 261.63], // F
+        ]
+      : preset === "soft_vlog"
+        ? [
+            [261.63, 329.63, 392.0, 493.88], // Cmaj7
+            [220.0, 261.63, 329.63, 392.0], // Am7
+            [174.61, 220.0, 261.63, 329.63], // Fmaj7
+            [196.0, 246.94, 293.66, 392.0], // G6
+          ]
+        : [
+            [220.0, 261.63, 329.63, 392.0], // Am7
+            [174.61, 220.0, 261.63, 329.63], // Fmaj7
+            [261.63, 329.63, 392.0, 493.88], // Cmaj7
+            [196.0, 246.94, 293.66, 349.23], // G7
+          ]
+
+  const chordDuration = duration / chords.length
+  const beatDur = preset === "upbeat_promo" ? 0.5 : preset === "soft_vlog" ? 0.6667 : 0.8
+
+  for (let i = 0; i < length; i += 1) {
+    const t = i / sampleRate
+    const chordIdx = Math.min(chords.length - 1, Math.floor(t / chordDuration))
+    const chordLocalT = t - chordIdx * chordDuration
+    const chord = chords[chordIdx]
+
+    // Smooth chord pad envelope
+    const padEnv =
+      Math.min(1, chordLocalT / 0.08) *
+      Math.min(1, (chordDuration - chordLocalT) / 0.08)
+
+    let pad = 0
+    for (let n = 0; n < chord.length; n += 1) {
+      const freq = chord[n]
+      pad += Math.sin(2 * Math.PI * freq * t) * (preset === "calm_lofi" ? 0.16 : 0.14)
+      if (preset === "upbeat_promo") {
+        pad += Math.sin(2 * Math.PI * freq * 2 * t) * 0.03
+      }
+    }
+
+    // Bass root
+    const bassFreq = chord[0] * 0.5
+    const beatLocal = t % beatDur
+    const bassPulse =
+      preset === "upbeat_promo"
+        ? Math.exp(-beatLocal * 6.5) * 0.24
+        : Math.exp(-beatLocal * 3.2) * 0.16
+    const bass = Math.sin(2 * Math.PI * bassFreq * t) * bassPulse
+
+    // Subtle percussive / pluck accent
+    let accent = 0
+    if (preset === "upbeat_promo") {
+      const kickEnv = Math.exp(-beatLocal * 28)
+      const kickFreq = 55 + 85 * Math.exp(-beatLocal * 35)
+      accent = Math.sin(2 * Math.PI * kickFreq * beatLocal) * kickEnv * 0.22
+    } else if (preset === "soft_vlog") {
+      const noteIdx = Math.floor(t / (beatDur * 0.5)) % chord.length
+      const pluckT = t % (beatDur * 0.5)
+      accent =
+        Math.sin(2 * Math.PI * chord[noteIdx] * 2 * t) *
+        Math.exp(-pluckT * 7) *
+        0.09
+    }
+
+    const sample = (pad * padEnv + bass + accent) * 0.72
+    data[i] = Math.max(-0.95, Math.min(0.95, sample))
+  }
+
+  return buffer
+}
+
+/**
+ * Analyze voiceover speech activity and schedule GainNode auto-ducking
+ * so background music dips to ~12% while speaking and rises smoothly during pauses.
+ */
+function scheduleAutoDucking(
+  musicGain: GainNode,
+  voiceoverBuffer: AudioBuffer,
+  startTime: number,
+  baseVolume: number,
+  duckVolume = 0.12
+) {
+  const channelData = voiceoverBuffer.getChannelData(0)
+  const sampleRate = voiceoverBuffer.sampleRate
+  const windowSec = 0.06
+  const windowSamples = Math.max(1, Math.floor(sampleRate * windowSec))
+  const totalWindows = Math.ceil(channelData.length / windowSamples)
+
+  const threshold = 0.015
+  const hangoverWindows = 4 // ~240ms before rising back up
+  let silenceCounter = hangoverWindows
+  let isDucked = false
+
+  musicGain.gain.setValueAtTime(baseVolume, startTime)
+
+  for (let w = 0; w < totalWindows; w += 1) {
+    const startIdx = w * windowSamples
+    const endIdx = Math.min(channelData.length, startIdx + windowSamples)
+    let sumSq = 0
+    for (let i = startIdx; i < endIdx; i += 1) {
+      const s = channelData[i]
+      sumSq += s * s
+    }
+    const rms = Math.sqrt(sumSq / Math.max(1, endIdx - startIdx))
+    const timeAt = startTime + w * windowSec
+
+    if (rms > threshold) {
+      silenceCounter = 0
+      if (!isDucked) {
+        isDucked = true
+        musicGain.gain.setTargetAtTime(Math.min(baseVolume, duckVolume), timeAt, 0.07)
+      }
+    } else {
+      silenceCounter += 1
+      if (isDucked && silenceCounter >= hangoverWindows) {
+        isDucked = false
+        musicGain.gain.setTargetAtTime(baseVolume, timeAt, 0.18)
+      }
+    }
+  }
+}
+
+let activePreviewCleanup: (() => void) | null = null
+
+export function stopBackgroundMusicPreview() {
+  if (activePreviewCleanup) {
+    activePreviewCleanup()
+    activePreviewCleanup = null
+  }
+}
+
+export async function previewBackgroundMusic(
+  preset: BackgroundMusicPreset,
+  customFile?: File | null
+): Promise<void> {
+  stopBackgroundMusicPreview()
+  if (preset === "none" || typeof window === "undefined") return
+
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+  if (!AudioCtx) return
+
+  const ctx = new AudioCtx()
+  if (ctx.state === "suspended") {
+    await ctx.resume()
+  }
+
+  let buffer: AudioBuffer
+  if (preset === "custom") {
+    if (!customFile) {
+      await ctx.close().catch(() => {})
+      return
+    }
+    buffer = await ctx.decodeAudioData(await customFile.arrayBuffer())
+  } else {
+    buffer = synthesizePresetMusicBuffer(ctx, preset)
+  }
+
+  const src = ctx.createBufferSource()
+  src.buffer = buffer
+  src.loop = true
+  const gain = ctx.createGain()
+  gain.gain.value = 0.45
+  src.connect(gain)
+  gain.connect(ctx.destination)
+  src.start(0)
+
+  const timer = window.setTimeout(() => {
+    stopBackgroundMusicPreview()
+  }, 8000)
+
+  activePreviewCleanup = () => {
+    window.clearTimeout(timer)
+    try {
+      src.stop()
+    } catch {
+      // Ignore
+    }
+    ctx.close().catch(() => {})
+  }
+}
+
+async function loadImageElements(files: File[]): Promise<{
+  images: HTMLImageElement[]
+  urls: string[]
+}> {
+  const urls: string[] = []
+  const images: HTMLImageElement[] = []
+
+  for (const file of files) {
+    const url = URL.createObjectURL(file)
+    urls.push(url)
+    const img = new Image()
+    img.crossOrigin = "anonymous"
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve()
+      img.onerror = () => reject(new Error(`Failed to load image: ${file.name}`))
+      img.src = url
+    })
+    images.push(img)
+  }
+
+  return { images, urls }
+}
+
+/**
+ * Merge a video file OR a set of photos (2-10 images) with a synthesized voiceover track
+ * and optional background music (with auto-ducking) entirely on the client using
+ * <canvas>, AudioContext, and MediaRecorder.
  */
 export async function mergeVideoWithVoiceover({
   videoFile,
+  imageFiles = [],
   voiceoverAudio,
   originalVolume,
   voiceoverVolume = 1.0,
   durationSyncMode,
+  aspectRatio,
+  enableBlurredBackground = true,
+  backgroundMusicPreset = "none",
+  backgroundMusicFile = null,
+  backgroundMusicVolume = 0.38,
+  enableAutoDucking = true,
   enableSubtitles = false,
   subtitleScript = "",
+  subtitleStyle = "dark_pill",
   watermarkText = "",
   onProgress,
   signal,
@@ -291,24 +722,20 @@ export async function mergeVideoWithVoiceover({
     throw new Error("Client-side video merging is not supported in this browser.")
   }
 
+  const isPhotoMode = !videoFile && imageFiles.length > 0
+  if (!videoFile && !isPhotoMode) {
+    throw new Error("Please upload a video or photos before creating the video.")
+  }
+
   if (signal?.aborted) {
     throw new DOMException("Merge cancelled.", "AbortError")
   }
 
   const mimeType = pickSupportedVideoMimeType()
-  const videoObjectUrl = URL.createObjectURL(videoFile)
-
-  const video = document.createElement("video")
-  video.src = videoObjectUrl
-  video.playsInline = true
-  video.preload = "auto"
-  video.crossOrigin = "anonymous"
-
   const AudioCtx =
     window.AudioContext ||
     (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
   if (!AudioCtx) {
-    URL.revokeObjectURL(videoObjectUrl)
     throw new Error("Web Audio API is not supported in this browser.")
   }
 
@@ -317,6 +744,10 @@ export async function mergeVideoWithVoiceover({
   let combinedStream: MediaStream | null = null
   let recorder: MediaRecorder | null = null
   let voiceoverSource: AudioBufferSourceNode | null = null
+  let musicSource: AudioBufferSourceNode | null = null
+  let videoObjectUrl: string | null = null
+  let video: HTMLVideoElement | null = null
+  let photoUrls: string[] = []
 
   const cleanup = () => {
     if (rafId) {
@@ -326,15 +757,22 @@ export async function mergeVideoWithVoiceover({
     try {
       voiceoverSource?.stop()
     } catch {
-      // Ignore if already stopped
+      // Ignore
     }
     try {
-      video.pause()
-      video.loop = false
-      video.removeAttribute("src")
-      video.load()
+      musicSource?.stop()
     } catch {
-      // Ignore cleanup errors
+      // Ignore
+    }
+    if (video) {
+      try {
+        video.pause()
+        video.loop = false
+        video.removeAttribute("src")
+        video.load()
+      } catch {
+        // Ignore
+      }
     }
     combinedStream?.getTracks().forEach((track) => {
       try {
@@ -343,48 +781,17 @@ export async function mergeVideoWithVoiceover({
         // Ignore
       }
     })
-    URL.revokeObjectURL(videoObjectUrl)
+    if (videoObjectUrl) {
+      URL.revokeObjectURL(videoObjectUrl)
+    }
+    for (const u of photoUrls) {
+      URL.revokeObjectURL(u)
+    }
     audioCtx.close().catch(() => {})
   }
 
   try {
     onProgress?.(0)
-
-    await new Promise<void>((resolve, reject) => {
-      const onLoaded = () => {
-        cleanupListeners()
-        resolve()
-      }
-      const onError = () => {
-        cleanupListeners()
-        reject(new Error("Could not load video metadata for merging."))
-      }
-      const cleanupListeners = () => {
-        video.removeEventListener("loadedmetadata", onLoaded)
-        video.removeEventListener("error", onError)
-      }
-      video.addEventListener("loadedmetadata", onLoaded)
-      video.addEventListener("error", onError)
-    })
-
-    if (signal?.aborted) {
-      throw new DOMException("Merge cancelled.", "AbortError")
-    }
-
-    const videoDuration =
-      Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 1
-    const { width, height } = computeCanvasSize(
-      video.videoWidth || 720,
-      video.videoHeight || 1280
-    )
-
-    const canvas = document.createElement("canvas")
-    canvas.width = width
-    canvas.height = height
-    const ctx = canvas.getContext("2d", { alpha: false })
-    if (!ctx) {
-      throw new Error("Could not initialize 2D canvas for video rendering.")
-    }
 
     if (audioCtx.state === "suspended") {
       await audioCtx.resume()
@@ -398,15 +805,86 @@ export async function mergeVideoWithVoiceover({
     const voiceDuration =
       Number.isFinite(voiceoverBuffer.duration) && voiceoverBuffer.duration > 0
         ? voiceoverBuffer.duration
-        : videoDuration
+        : 5
 
-    const resolvedSyncMode: VideoDurationSyncMode =
-      durationSyncMode ?? (voiceDuration > videoDuration ? "loop_video" : "fit_video")
+    let sourceWidth = 720
+    let sourceHeight = 1280
+    let videoDuration = voiceDuration
+    let loadedImages: HTMLImageElement[] = []
+
+    if (isPhotoMode) {
+      const loaded = await loadImageElements(imageFiles)
+      loadedImages = loaded.images
+      photoUrls = loaded.urls
+      sourceWidth = loadedImages[0]?.naturalWidth || 720
+      sourceHeight = loadedImages[0]?.naturalHeight || 1280
+    } else if (videoFile) {
+      videoObjectUrl = URL.createObjectURL(videoFile)
+      video = document.createElement("video")
+      video.src = videoObjectUrl
+      video.playsInline = true
+      video.preload = "auto"
+      video.crossOrigin = "anonymous"
+
+      await new Promise<void>((resolve, reject) => {
+        if (!video) {
+          reject(new Error("Video element not initialized."))
+          return
+        }
+        const onLoaded = () => {
+          cleanupListeners()
+          resolve()
+        }
+        const onError = () => {
+          cleanupListeners()
+          reject(new Error("Could not load video metadata for merging."))
+        }
+        const cleanupListeners = () => {
+          video?.removeEventListener("loadedmetadata", onLoaded)
+          video?.removeEventListener("error", onError)
+        }
+        video.addEventListener("loadedmetadata", onLoaded)
+        video.addEventListener("error", onError)
+      })
+
+      videoDuration =
+        Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 1
+      sourceWidth = video.videoWidth || 720
+      sourceHeight = video.videoHeight || 1280
+    }
+
+    if (signal?.aborted) {
+      throw new DOMException("Merge cancelled.", "AbortError")
+    }
+
+    const resolvedAspect: VideoAspectRatio =
+      aspectRatio ?? (isPhotoMode ? "9:16" : "original")
+    const { width, height } = resolveCanvasDimensions(
+      resolvedAspect,
+      sourceWidth,
+      sourceHeight
+    )
+
+    const canvas = document.createElement("canvas")
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext("2d", { alpha: false })
+    if (!ctx) {
+      throw new Error("Could not initialize 2D canvas for video rendering.")
+    }
+
+    const preBlurredPhotos = isPhotoMode && enableBlurredBackground
+      ? loadedImages.map((img) => createPreBlurredPhotoCanvas(img, width, height))
+      : []
+
+    const resolvedSyncMode: VideoDurationSyncMode = isPhotoMode
+      ? "loop_video"
+      : durationSyncMode ?? (voiceDuration > videoDuration ? "loop_video" : "fit_video")
 
     const targetDuration =
       resolvedSyncMode === "loop_video" ? voiceDuration : videoDuration
 
-    if (resolvedSyncMode === "loop_video" && voiceDuration > videoDuration) {
+    if (video && resolvedSyncMode === "loop_video" && voiceDuration > videoDuration) {
       video.loop = true
     }
 
@@ -417,20 +895,43 @@ export async function mergeVideoWithVoiceover({
 
     const streamDestination = audioCtx.createMediaStreamDestination()
 
-    // Route original video audio (do not set video.muted = true, or MediaElementSource outputs silence)
-    const videoAudioSource = audioCtx.createMediaElementSource(video)
-    const originalGain = audioCtx.createGain()
-    originalGain.gain.value = originalVolume
-    videoAudioSource.connect(originalGain)
-    originalGain.connect(streamDestination)
+    // Route original video audio (do not mute video element)
+    if (video) {
+      const videoAudioSource = audioCtx.createMediaElementSource(video)
+      const originalGain = audioCtx.createGain()
+      originalGain.gain.value = originalVolume
+      videoAudioSource.connect(originalGain)
+      originalGain.connect(streamDestination)
+    }
 
-    // Route AI voiceover audio at 100%
+    // Route AI voiceover audio
     voiceoverSource = audioCtx.createBufferSource()
     voiceoverSource.buffer = voiceoverBuffer
     const voiceoverGain = audioCtx.createGain()
     voiceoverGain.gain.value = voiceoverVolume
     voiceoverSource.connect(voiceoverGain)
     voiceoverGain.connect(streamDestination)
+
+    // Route optional Background Music with Auto-Ducking
+    let musicGain: GainNode | null = null
+    if (backgroundMusicPreset !== "none") {
+      let musicBuffer: AudioBuffer | null = null
+      if (backgroundMusicPreset === "custom" && backgroundMusicFile) {
+        musicBuffer = await audioCtx.decodeAudioData(await backgroundMusicFile.arrayBuffer())
+      } else if (backgroundMusicPreset !== "custom") {
+        musicBuffer = synthesizePresetMusicBuffer(audioCtx, backgroundMusicPreset)
+      }
+
+      if (musicBuffer) {
+        musicSource = audioCtx.createBufferSource()
+        musicSource.buffer = musicBuffer
+        musicSource.loop = true
+        musicGain = audioCtx.createGain()
+        musicGain.gain.value = backgroundMusicVolume
+        musicSource.connect(musicGain)
+        musicGain.connect(streamDestination)
+      }
+    }
 
     const canvasStream = canvas.captureStream(30)
     combinedStream = new MediaStream([
@@ -455,9 +956,72 @@ export async function mergeVideoWithVoiceover({
       }
     }
 
+    const drawSlideshowFrame = (elapsedSec: number) => {
+      const count = loadedImages.length
+      if (count === 0) return
+      const sliceDuration = targetDuration / count
+      const fadeDuration = Math.min(0.45, sliceDuration * 0.25)
+      const clampedT = Math.min(Math.max(0, elapsedSec), Math.max(0.001, targetDuration - 0.001))
+      const slideIdx = Math.min(count - 1, Math.floor(clampedT / sliceDuration))
+      const localT = (clampedT - slideIdx * sliceDuration) / sliceDuration
+
+      const getKenBurns = (idx: number, progress: number) => {
+        const mode = idx % 4
+        if (mode === 0) {
+          return { zoomScale: 1 + progress * 0.08, panX: progress * 8, panY: progress * 5 }
+        }
+        if (mode === 1) {
+          return { zoomScale: 1.08 - progress * 0.08, panX: -progress * 8, panY: 0 }
+        }
+        if (mode === 2) {
+          return { zoomScale: 1 + progress * 0.07, panX: -progress * 6, panY: -progress * 6 }
+        }
+        return { zoomScale: 1.07 - progress * 0.07, panX: progress * 6, panY: -progress * 4 }
+      }
+
+      const currentImg = loadedImages[slideIdx]
+      const kb = getKenBurns(slideIdx, localT)
+
+      drawFramedMedia(ctx, currentImg, currentImg.naturalWidth, currentImg.naturalHeight, width, height, {
+        blurredBg: enableBlurredBackground,
+        preBlurredBg: preBlurredPhotos[slideIdx] ?? null,
+        zoomScale: kb.zoomScale,
+        panX: kb.panX,
+        panY: kb.panY,
+        alpha: 1,
+      })
+
+      // Crossfade into next slide near end of slice
+      const timeRemainingInSlide = (slideIdx + 1) * sliceDuration - clampedT
+      if (slideIdx < count - 1 && fadeDuration > 0 && timeRemainingInSlide < fadeDuration) {
+        const nextAlpha = 1 - timeRemainingInSlide / fadeDuration
+        const nextImg = loadedImages[slideIdx + 1]
+        const nextKb = getKenBurns(slideIdx + 1, 0)
+        drawFramedMedia(ctx, nextImg, nextImg.naturalWidth, nextImg.naturalHeight, width, height, {
+          blurredBg: enableBlurredBackground,
+          preBlurredBg: preBlurredPhotos[slideIdx + 1] ?? null,
+          zoomScale: nextKb.zoomScale,
+          panX: nextKb.panX,
+          panY: nextKb.panY,
+          alpha: Math.max(0, Math.min(1, nextAlpha)),
+        })
+      }
+    }
+
+    const drawVideoFrame = () => {
+      if (!video) return
+      drawFramedMedia(ctx, video, video.videoWidth || width, video.videoHeight || height, width, height, {
+        blurredBg: enableBlurredBackground,
+      })
+    }
+
     // Draw initial frame before starting MediaRecorder
-    video.currentTime = 0
-    ctx.drawImage(video, 0, 0, width, height)
+    if (isPhotoMode) {
+      drawSlideshowFrame(0)
+    } else if (video) {
+      video.currentTime = 0
+      drawVideoFrame()
+    }
 
     const resultBlob = await new Promise<Blob>((resolve, reject) => {
       if (!recorder) {
@@ -476,6 +1040,11 @@ export async function mergeVideoWithVoiceover({
         }
         try {
           voiceoverSource?.stop()
+        } catch {
+          // Ignore
+        }
+        try {
+          musicSource?.stop()
         } catch {
           // Ignore
         }
@@ -515,7 +1084,7 @@ export async function mergeVideoWithVoiceover({
         reject(new Error("MediaRecorder encountered an error while exporting video."))
       }
 
-      if (resolvedSyncMode === "fit_video") {
+      if (video && resolvedSyncMode === "fit_video") {
         video.addEventListener("ended", finishRecording, { once: true })
       }
 
@@ -530,7 +1099,7 @@ export async function mergeVideoWithVoiceover({
             (seg) => elapsedSec >= seg.startTime && elapsedSec <= seg.endTime
           )
           if (active) {
-            drawSubtitleOverlay(ctx, width, height, active.text)
+            drawSubtitleOverlay(ctx, width, height, active.text, subtitleStyle)
           }
         }
       }
@@ -539,23 +1108,29 @@ export async function mergeVideoWithVoiceover({
         if (finished || signal?.aborted) return
         const elapsedSec = startPerfMs > 0 ? (performance.now() - startPerfMs) / 1000 : 0
 
-        if (!video.paused && !video.ended) {
-          ctx.drawImage(video, 0, 0, width, height)
+        if (isPhotoMode) {
+          drawSlideshowFrame(elapsedSec)
           drawOverlays(elapsedSec)
-          const pct = Math.min(
-            99,
-            Math.max(1, Math.round((elapsedSec / targetDuration) * 100))
-          )
+          const pct = Math.min(99, Math.max(1, Math.round((elapsedSec / targetDuration) * 100)))
+          onProgress?.(pct)
+        } else if (video && !video.paused && !video.ended) {
+          drawVideoFrame()
+          drawOverlays(elapsedSec)
+          const pct = Math.min(99, Math.max(1, Math.round((elapsedSec / targetDuration) * 100)))
           onProgress?.(pct)
         }
 
         const reachedEnd =
-          resolvedSyncMode === "fit_video"
+          !isPhotoMode && video && resolvedSyncMode === "fit_video"
             ? video.ended || elapsedSec >= targetDuration - 0.02
             : elapsedSec >= targetDuration - 0.02
 
         if (reachedEnd) {
-          ctx.drawImage(video, 0, 0, width, height)
+          if (isPhotoMode) {
+            drawSlideshowFrame(targetDuration)
+          } else {
+            drawVideoFrame()
+          }
           drawOverlays(elapsedSec)
           finishRecording()
           return
@@ -565,21 +1140,39 @@ export async function mergeVideoWithVoiceover({
 
       recorder.start(250)
       startPerfMs = performance.now()
-      voiceoverSource?.start(0)
-      video
-        .play()
-        .then(() => {
-          rafId = requestAnimationFrame(renderFrame)
-        })
-        .catch((playErr) => {
-          reject(
-            new Error(
-              playErr instanceof Error
-                ? `Could not start video playback for merging: ${playErr.message}`
-                : "Could not start video playback for merging."
-            )
+      const audioStartTime = audioCtx.currentTime
+      voiceoverSource?.start(audioStartTime)
+      if (musicSource && musicGain) {
+        if (enableAutoDucking) {
+          scheduleAutoDucking(
+            musicGain,
+            voiceoverBuffer,
+            audioStartTime,
+            backgroundMusicVolume,
+            0.12
           )
-        })
+        }
+        musicSource.start(audioStartTime)
+      }
+
+      if (isPhotoMode) {
+        rafId = requestAnimationFrame(renderFrame)
+      } else if (video) {
+        video
+          .play()
+          .then(() => {
+            rafId = requestAnimationFrame(renderFrame)
+          })
+          .catch((playErr) => {
+            reject(
+              new Error(
+                playErr instanceof Error
+                  ? `Could not start video playback for merging: ${playErr.message}`
+                  : "Could not start video playback for merging."
+              )
+            )
+          })
+      }
     })
 
     onProgress?.(100)
@@ -598,4 +1191,3 @@ export async function mergeVideoWithVoiceover({
     cleanup()
   }
 }
-

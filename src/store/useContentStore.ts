@@ -55,6 +55,12 @@ export interface CustomPronunciation {
   phonetic: string
 }
 
+export interface UploadedPhotoItem {
+  id: string
+  file: File
+  previewUrl: string
+}
+
 interface ContentState {
   draftInput: GeneratorFormValues
   generatedHistory: GeneratedItem[]
@@ -67,6 +73,7 @@ interface ContentState {
   posterDraft: PosterDraft | null
   uploadedVideoFile: File | null
   videoPreviewUrl: string | null
+  uploadedPhotos: UploadedPhotoItem[]
   videoProductNote: string
   generatedVideoResult: VideoContentResult | null
   voiceoverDraftScript: string
@@ -81,6 +88,8 @@ interface ContentState {
   setShopLogoDataUrl: (dataUrl: string | null) => void
   setPosterDraft: (draft: PosterDraft | null) => void
   setUploadedVideo: (file: File | null, previewUrl: string | null) => void
+  setUploadedPhotos: (photos: UploadedPhotoItem[]) => void
+  clearUploadedPhotos: () => void
   setVideoProductNote: (note: string) => void
   setGeneratedVideoResult: (result: VideoContentResult | null) => void
   setVoiceoverDraftScript: (script: string) => void
@@ -124,6 +133,7 @@ export const useContentStore = create<ContentState>()(
       posterDraft: null,
       uploadedVideoFile: null,
       videoPreviewUrl: null,
+      uploadedPhotos: [],
       videoProductNote: "",
       generatedVideoResult: null,
       voiceoverDraftScript: "",
@@ -161,6 +171,23 @@ export const useContentStore = create<ContentState>()(
             URL.revokeObjectURL(state.videoPreviewUrl)
           }
           return { uploadedVideoFile: file, videoPreviewUrl: previewUrl }
+        }),
+      setUploadedPhotos: (photos) =>
+        set((state) => {
+          const nextUrls = new Set(photos.map((p) => p.previewUrl))
+          for (const old of state.uploadedPhotos) {
+            if (!nextUrls.has(old.previewUrl)) {
+              URL.revokeObjectURL(old.previewUrl)
+            }
+          }
+          return { uploadedPhotos: photos }
+        }),
+      clearUploadedPhotos: () =>
+        set((state) => {
+          for (const old of state.uploadedPhotos) {
+            URL.revokeObjectURL(old.previewUrl)
+          }
+          return { uploadedPhotos: [] }
         }),
       setVideoProductNote: (videoProductNote) => set({ videoProductNote }),
       setGeneratedVideoResult: (generatedVideoResult) =>

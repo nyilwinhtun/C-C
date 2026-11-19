@@ -5,6 +5,26 @@ import { useUIStore } from "@/store/useUIStore"
 export type BurmeseVoiceType = "female" | "male"
 export type VoiceoverSpeed = 0.9 | 1.0 | 1.1 | 1.2
 export type VoiceDeliveryTone = "promo" | "storytelling" | "educational"
+export type SoundEffectType = "none" | "pop" | "whoosh" | "cash_ding"
+
+export interface SoundEffectPreset {
+  id: SoundEffectType
+  label: string
+  labelMy: string
+}
+
+export const SOUND_EFFECT_PRESETS: Record<SoundEffectType, SoundEffectPreset> = {
+  none: { id: "none", label: "No SFX", labelMy: "မထည့်ပါ" },
+  pop: { id: "pop", label: "Pop", labelMy: "Pop" },
+  whoosh: { id: "whoosh", label: "Whoosh", labelMy: "Whoosh" },
+  cash_ding: { id: "cash_ding", label: "Cash Ding", labelMy: "Cash Ding" },
+}
+
+export const PAUSE_TAG_REGEX = /\[pause\s+(\d+(?:\.\d+)?)\s*s?\]/gi
+
+export type ScriptSegment =
+  | { kind: "speech"; text: string }
+  | { kind: "pause"; seconds: number }
 
 export interface VoiceDeliveryPreset {
   id: VoiceDeliveryTone
@@ -267,6 +287,8 @@ export function normalizeBurmeseForTTS(
   if (!rawText || !rawText.trim()) return ""
 
   let text = rawText
+    // Remove pause tags so single-segment TTS never reads them aloud
+    .replace(/\[pause\s+\d+(?:\.\d+)?\s*s?\]/gi, " ")
     // Remove bracketed timestamps and timed/section headers like [0-3s], [0-3s Hook], [Hook]
     .replace(/\[\s*\d+(?::\d+)?\s*s?(?:\s*[-–—]\s*\d+(?::\d+)?\s*s?)?[^\]]*\]/gi, " ")
     .replace(/\[(hook|body|cta|intro|outro|scene\s*\d*)[^\]]*\]/gi, " ")
@@ -925,27 +947,164 @@ function synthesizeWithSpeechSynthesis(
 export interface GenerateVoiceoverOptions {
   deliveryTone?: VoiceDeliveryTone
   customPronunciations?: ReadonlyArray<PronunciationRule>
+  introSfx?: SoundEffectType
 }
 
 /**
- * Generate a playable Burmese AI voiceover from a timed or markdown script.
- * Tier 1: Gemini dedicated TTS (`gemini-2.5-flash-preview-tts`) when an API key is configured.
- * Tier 2: Free Myanmar Neural TTS (`my-MM-NilarNeural` / `my-MM-ThihaNeural`).
- * Tier 3: Browser Speech Synthesis fallback.
+ * Parse a script containing `[pause 0.5s]`, `[pause 1s]`, `[pause 2s]` markers
+ * into ordered speech and pause segments.
  */
-export async function generateBurmeseVoiceover(
-  scriptText: string,
-  voiceType: BurmeseVoiceType = "female",
-  speed: VoiceoverSpeed = 1.0,
-  options: GenerateVoiceoverOptions = {}
-): Promise<VoiceoverResult> {
-  const deliveryTone = options.deliveryTone ?? "storytelling"
-  const cleanedText = normalizeBurmeseForTTS(scriptText, options.customPronunciations)
-  if (!cleanedText) {
-    throw new TtsError("Voiceover script is empty after removing timestamps and formatting.")
+export function parseScriptWithPauses(rawText: string): ScriptSegment[] {
+  if (!rawText || !rawText.trim()) return []
+  const regex = /\[pause\s+(\d+(?:\.\d+)?)\s*s?\]/gi
+  const segments: ScriptSegment[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = regex.exec(rawText)) !== null) {
+    const preceding = rawText.slice(lastIndex, match.index).trim()
+    if (preceding) {
+      segments.push({ kind: "speech", text: preceding })
+    }
+    const parsedSec = Number.parseFloat(match[1])
+    if (Number.isFinite(parsedSec) && parsedSec > 0) {
+      segments.push({ kind: "pause", seconds: Math.min(5, Math.max(0.1, parsedSec)) })
+    }
+    lastIndex = match.index + match[0].length
   }
 
-  const preset = BURMESE_VOICE_PRESETS[voiceType]
+  const trailing = rawText.slice(lastIndex).trim()
+  if (trailing) {
+    segments.push({ kind: "speech", text: trailing })
+  }
+  return segments
+}
+
+/**
+ * Normalize Burmese script for TTS while preserving `[pause Xs]` markers
+ * so the user's manual timing tags stay intact in the editor.
+ */
+export function optimizeScriptPreservingPauses(
+  rawText: string,
+  customRules?: ReadonlyArray<PronunciationRule>
+): string {
+  const segments = parseScriptWithPauses(rawText)
+  if (segments.length === 0) return ""
+  return segments
+    .map((seg) => {
+      if (seg.kind === "pause") {
+        const label = Number.isInteger(seg.seconds) ? `${seg.seconds}` : seg.seconds.toFixed(1)
+        return `[pause ${label}s]`
+      }
+      return normalizeBurmeseForTTS(seg.text, customRules)
+    })
+    .filter(Boolean)
+    .join(" ")
+}
+
+/**
+ * Generate procedural mono PCM samples for short intro/accent sound effects
+ * using Web Audio math (zero external audio files required).
+ */
+export function synthesizeSfxSamples(sfx: SoundEffectType, sampleRate: number): Float32Array {
+  if (sfx === "none") return new Float32Array(0)
+
+  if (sfx === "pop") {
+    const duration = 0.11
+    const length = Math.floor(sampleRate * duration)
+    const out = new Float32Array(length)
+    let phase = 0
+    for (let i = 0; i < length; i += 1) {
+      const t = i / sampleRate
+      const progress = t / duration
+      const freq = 580 * Math.pow(0.28, progress)
+      phase += (2 * Math.PI * freq) / sampleRate
+      const env = Math.sin(Math.min(1, t / 0.008) * (Math.PI / 2)) * Math.exp(-progress * 6.5)
+      out[i] = Math.sin(phase) * env * 0.55
+    }
+    return out
+  }
+
+  if (sfx === "whoosh") {
+    const duration = 0.34
+    const length = Math.floor(sampleRate * duration)
+    const out = new Float32Array(length)
+    let lp = 0
+    let hpPrev = 0
+    let hpOut = 0
+    for (let i = 0; i < length; i += 1) {
+      const t = i / sampleRate
+      const progress = t / duration
+      const noise = Math.random() * 2 - 1
+      const cutoff = 350 + Math.sin(progress * Math.PI) * 2100
+      const alpha = Math.min(0.95, (2 * Math.PI * cutoff) / sampleRate)
+      lp = lp + alpha * (noise - lp)
+      hpOut = 0.96 * (hpOut + lp - hpPrev)
+      hpPrev = lp
+      const env = Math.sin(progress * Math.PI)
+      out[i] = Math.max(-1, Math.min(1, hpOut * env * 0.65))
+    }
+    return out
+  }
+
+  // cash_ding: bright dual-harmonic bell chime
+  const duration = 0.48
+  const length = Math.floor(sampleRate * duration)
+  const out = new Float32Array(length)
+  for (let i = 0; i < length; i += 1) {
+    const t = i / sampleRate
+    const attack = Math.min(1, t / 0.005)
+    const decay1 = Math.exp(-t * 7.5)
+    const decay2 = Math.exp(-t * 10.5)
+    const tone1 = Math.sin(2 * Math.PI * 1318.5 * t) * 0.45 * decay1
+    const tone2 = Math.sin(2 * Math.PI * 1975.5 * t) * 0.32 * decay2
+    const tone3 = Math.sin(2 * Math.PI * 2637.0 * t) * 0.18 * decay2
+    out[i] = (tone1 + tone2 + tone3) * attack * 0.55
+  }
+  return out
+}
+
+export async function playSoundEffectPreview(sfx: SoundEffectType): Promise<void> {
+  if (sfx === "none" || typeof window === "undefined") return
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+  if (!AudioCtx) return
+
+  const ctx = new AudioCtx()
+  try {
+    if (ctx.state === "suspended") {
+      await ctx.resume()
+    }
+    const samples = synthesizeSfxSamples(sfx, ctx.sampleRate)
+    if (samples.length === 0) return
+    const buffer = ctx.createBuffer(1, samples.length, ctx.sampleRate)
+    buffer.getChannelData(0).set(samples)
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    src.connect(ctx.destination)
+    src.start(0)
+    await new Promise<void>((resolve) => {
+      src.onended = () => resolve()
+      window.setTimeout(resolve, Math.ceil((samples.length / ctx.sampleRate) * 1000) + 80)
+    })
+  } finally {
+    await ctx.close().catch(() => {})
+  }
+}
+
+async function synthesizeSpeechSegmentBlob(
+  cleanedText: string,
+  preset: BurmeseVoicePreset,
+  speed: VoiceoverSpeed,
+  deliveryTone: VoiceDeliveryTone
+): Promise<{
+  blob: Blob
+  mimeType: string
+  fileExtension: "wav" | "mp3"
+  voiceName: string
+  provider: "gemini" | "neural-tts" | "speech-synthesis"
+}> {
   const geminiKey = getSavedGeminiApiKey()
 
   if (geminiKey) {
@@ -957,21 +1116,13 @@ export async function generateBurmeseVoiceover(
         deliveryTone,
         geminiKey
       )
-      const audioBuffer = await decodeBlobToAudioBuffer(geminiResult.blob)
-      const audioUrl = URL.createObjectURL(geminiResult.blob)
       return {
-        audioUrl,
-        blob: geminiResult.blob,
-        audioBuffer,
-        mimeType: geminiResult.mimeType,
-        fileExtension: geminiResult.fileExtension,
-        durationSeconds: audioBuffer.duration,
+        ...geminiResult,
         voiceName: `${preset.label} · Gemini`,
         provider: "gemini",
-        cleanedText,
       }
     } catch {
-      // Silently fall back to free Myanmar Neural TTS on any Gemini error (400, quota, network, region)
+      // Silently fall back to free Myanmar Neural TTS on any Gemini error
     }
   }
 
@@ -997,35 +1148,210 @@ export async function generateBurmeseVoiceover(
       neuralExt = "wav"
     }
 
-    const audioBuffer = await decodeBlobToAudioBuffer(neuralBlob)
-    const audioUrl = URL.createObjectURL(neuralBlob)
     return {
-      audioUrl,
       blob: neuralBlob,
-      audioBuffer,
       mimeType: neuralMime,
       fileExtension: neuralExt,
-      durationSeconds: audioBuffer.duration,
       voiceName: `${preset.label} · ${preset.neuralVoice}`,
       provider: "neural-tts",
-      cleanedText,
     }
   } catch {
-    // Fall back to browser speech synthesis so the user never hits a dead-end error
     const speechResult = synthesizeWithSpeechSynthesis(cleanedText, preset, speed)
-    const audioBuffer = await decodeBlobToAudioBuffer(speechResult.blob)
-    const audioUrl = URL.createObjectURL(speechResult.blob)
     return {
-      audioUrl,
-      blob: speechResult.blob,
-      audioBuffer,
-      mimeType: speechResult.mimeType,
-      fileExtension: speechResult.fileExtension,
-      durationSeconds: audioBuffer.duration,
+      ...speechResult,
       voiceName: `${preset.label} · Browser Speech`,
       provider: "speech-synthesis",
-      cleanedText,
     }
+  }
+}
+
+async function assembleSegmentsWithPausesAndSfx(
+  timeline: Array<
+    | { kind: "speech"; blob: Blob }
+    | { kind: "pause"; seconds: number }
+  >,
+  introSfx: SoundEffectType
+): Promise<{ blob: Blob; audioBuffer: AudioBuffer }> {
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+  if (!AudioCtx) {
+    throw new TtsError("Web Audio API is not supported in this browser.")
+  }
+
+  const ctx = new AudioCtx()
+  try {
+    const decodedItems: Array<
+      | { kind: "speech"; buffer: AudioBuffer }
+      | { kind: "pause"; seconds: number }
+    > = []
+    let sampleRate = 24000
+
+    for (const item of timeline) {
+      if (item.kind === "pause") {
+        decodedItems.push(item)
+      } else {
+        const buf = await ctx.decodeAudioData(await item.blob.arrayBuffer())
+        sampleRate = buf.sampleRate
+        decodedItems.push({ kind: "speech", buffer: buf })
+      }
+    }
+
+    const sfxSamples = synthesizeSfxSamples(introSfx, sampleRate)
+    const sfxLeadSamples = sfxSamples.length > 0 ? Math.floor(sampleRate * 0.16) : 0
+
+    let speechTotalSamples = 0
+    for (const item of decodedItems) {
+      if (item.kind === "pause") {
+        speechTotalSamples += Math.floor(item.seconds * sampleRate)
+      } else {
+        speechTotalSamples += item.buffer.length
+      }
+    }
+
+    const totalSamples = Math.max(
+      sfxSamples.length,
+      sfxLeadSamples + speechTotalSamples
+    )
+    const merged = ctx.createBuffer(1, Math.max(1, totalSamples), sampleRate)
+    const out = merged.getChannelData(0)
+
+    if (sfxSamples.length > 0) {
+      for (let i = 0; i < sfxSamples.length && i < out.length; i += 1) {
+        out[i] = Math.max(-1, Math.min(1, out[i] + sfxSamples[i]))
+      }
+    }
+
+    let offset = sfxLeadSamples
+    for (const item of decodedItems) {
+      if (item.kind === "pause") {
+        offset += Math.floor(item.seconds * sampleRate)
+        continue
+      }
+      const ch0 = item.buffer.getChannelData(0)
+      for (let i = 0; i < ch0.length && offset + i < out.length; i += 1) {
+        out[offset + i] = Math.max(-1, Math.min(1, out[offset + i] + ch0[i]))
+      }
+      offset += item.buffer.length
+    }
+
+    const wavBlob = encodeAudioBufferToWavBlob(merged)
+    return { blob: wavBlob, audioBuffer: merged }
+  } finally {
+    await ctx.close().catch(() => {})
+  }
+}
+
+/**
+ * Generate a playable Burmese AI voiceover from a timed or markdown script.
+ * Supports `[pause 0.5s]`, `[pause 1s]`, `[pause 2s]` markers and optional
+ * Web Audio intro sound effects (`pop`, `whoosh`, `cash_ding`).
+ * Tier 1: Gemini dedicated TTS (`gemini-2.5-flash-preview-tts`) when an API key is configured.
+ * Tier 2: Free Myanmar Neural TTS (`my-MM-NilarNeural` / `my-MM-ThihaNeural`).
+ * Tier 3: Browser Speech Synthesis fallback.
+ */
+export async function generateBurmeseVoiceover(
+  scriptText: string,
+  voiceType: BurmeseVoiceType = "female",
+  speed: VoiceoverSpeed = 1.0,
+  options: GenerateVoiceoverOptions = {}
+): Promise<VoiceoverResult> {
+  const deliveryTone = options.deliveryTone ?? "storytelling"
+  const introSfx = options.introSfx ?? "none"
+  const preset = BURMESE_VOICE_PRESETS[voiceType]
+
+  const rawSegments = parseScriptWithPauses(scriptText)
+  const normalizedTimeline: Array<
+    | { kind: "speech"; text: string }
+    | { kind: "pause"; seconds: number }
+  > = []
+
+  for (const seg of rawSegments) {
+    if (seg.kind === "pause") {
+      if (normalizedTimeline.length > 0) {
+        normalizedTimeline.push(seg)
+      }
+    } else {
+      const normalized = normalizeBurmeseForTTS(seg.text, options.customPronunciations)
+      if (normalized) {
+        normalizedTimeline.push({ kind: "speech", text: normalized })
+      }
+    }
+  }
+
+  // Trim trailing pauses
+  while (
+    normalizedTimeline.length > 0 &&
+    normalizedTimeline[normalizedTimeline.length - 1].kind === "pause"
+  ) {
+    normalizedTimeline.pop()
+  }
+
+  const speechSegments = normalizedTimeline.filter(
+    (item): item is { kind: "speech"; text: string } => item.kind === "speech"
+  )
+  if (speechSegments.length === 0) {
+    throw new TtsError("Voiceover script is empty after removing timestamps and formatting.")
+  }
+
+  const combinedCleanedText = speechSegments.map((s) => s.text).join(" ")
+  const hasPauses = normalizedTimeline.some((item) => item.kind === "pause")
+
+  // Fast path: single speech segment and no SFX
+  if (!hasPauses && introSfx === "none" && speechSegments.length === 1) {
+    const single = await synthesizeSpeechSegmentBlob(
+      speechSegments[0].text,
+      preset,
+      speed,
+      deliveryTone
+    )
+    const audioBuffer = await decodeBlobToAudioBuffer(single.blob)
+    const audioUrl = URL.createObjectURL(single.blob)
+    return {
+      audioUrl,
+      blob: single.blob,
+      audioBuffer,
+      mimeType: single.mimeType,
+      fileExtension: single.fileExtension,
+      durationSeconds: audioBuffer.duration,
+      voiceName: single.voiceName,
+      provider: single.provider,
+      cleanedText: combinedCleanedText,
+    }
+  }
+
+  // Multi-segment (with pauses) and/or intro SFX path
+  const audioTimeline: Array<
+    | { kind: "speech"; blob: Blob }
+    | { kind: "pause"; seconds: number }
+  > = []
+
+  let lastVoiceName = `${preset.label} · ${preset.neuralVoice}`
+  let lastProvider: VoiceoverResult["provider"] = "neural-tts"
+
+  for (const item of normalizedTimeline) {
+    if (item.kind === "pause") {
+      audioTimeline.push(item)
+    } else {
+      const res = await synthesizeSpeechSegmentBlob(item.text, preset, speed, deliveryTone)
+      lastVoiceName = res.voiceName
+      lastProvider = res.provider
+      audioTimeline.push({ kind: "speech", blob: res.blob })
+    }
+  }
+
+  const assembled = await assembleSegmentsWithPausesAndSfx(audioTimeline, introSfx)
+  const audioUrl = URL.createObjectURL(assembled.blob)
+  return {
+    audioUrl,
+    blob: assembled.blob,
+    audioBuffer: assembled.audioBuffer,
+    mimeType: "audio/wav",
+    fileExtension: "wav",
+    durationSeconds: assembled.audioBuffer.duration,
+    voiceName: lastVoiceName,
+    provider: lastProvider,
+    cleanedText: combinedCleanedText,
   }
 }
 
