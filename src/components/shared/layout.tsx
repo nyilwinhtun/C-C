@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { t } from "@/locales/translations"
 import { GeneratorPage } from "@/features/generator/page"
 import { VideoToContentSection } from "@/features/generator/VideoToContentSection"
 import { TranscriberPage } from "@/features/transcriber/page"
@@ -14,6 +13,7 @@ import { Header } from "@/components/shared/header"
 import { Sidebar } from "@/components/shared/sidebar"
 import { SettingsDialog } from "@/components/shared/settings-dialog"
 import { PWAInstallBanner } from "@/components/shared/pwa-install-banner"
+import { getRoomForPageKey, getRoomTitle } from "@/components/shared/rooms"
 import { useUIStore } from "@/store/useUIStore"
 import { useShallow } from "zustand/react/shallow"
 import { cn } from "@/lib/utils"
@@ -30,22 +30,13 @@ const pages: Record<string, React.FC> = {
 }
 
 export function Layout() {
-  const language = useUIStore(useShallow((state) => state.language))
-  const pageTitles: Record<string, string> = {
-    text: t(language, "page.text"),
-    video: t(language, "page.video"),
-    transcriber: t(language, "page.transcriber"),
-    voiceover: t(language, "page.voiceover"),
-    audiobook: t(language, "page.audiobook"),
-    autocut: t(language, "page.autocut"),
-    studio: t(language, "page.studio"),
-    vault: t(language, "page.vault"),
-  }
   const [mobileOpen, setMobileOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const { activePageKey, sidebarCollapsed } = useUIStore(
+  const { language, activePageKey, setActivePageKey, sidebarCollapsed } = useUIStore(
     useShallow((state) => ({
+      language: state.language,
       activePageKey: state.activePageKey,
+      setActivePageKey: state.setActivePageKey,
       sidebarCollapsed: state.sidebarCollapsed,
     }))
   )
@@ -64,6 +55,8 @@ export function Layout() {
     return () => window.removeEventListener("resize", onResize)
   }, [])
 
+  const activeRoom = getRoomForPageKey(activePageKey)
+  const roomTitle = getRoomTitle(activeRoom, language)
   const Page = pages[activePageKey] ?? GeneratorPage
 
   return (
@@ -76,12 +69,42 @@ export function Layout() {
         )}
       >
         <Header
-          title={pageTitles[activePageKey] ?? t(language, "page.text")}
+          title={roomTitle}
           onMenuToggle={() => setMobileOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
         />
         <main className="flex-1 overflow-y-auto bg-background text-foreground p-3.5 sm:p-6 pb-8">
-          <div className="mx-auto max-w-6xl">
+          <div className="mx-auto max-w-6xl space-y-4">
+            {activeRoom.tabs.length > 1 && (
+              <div
+                role="tablist"
+                aria-label={roomTitle}
+                className="inline-flex w-full sm:w-auto flex-wrap items-center gap-1 rounded-xl border border-border/60 bg-muted/40 p-1"
+              >
+                {activeRoom.tabs.map((tab) => {
+                  const Icon = tab.icon
+                  const isActive = activePageKey === tab.key
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => setActivePageKey(tab.key)}
+                      className={cn(
+                        "flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs sm:text-sm font-medium transition-all cursor-pointer font-myanmar whitespace-nowrap",
+                        isActive
+                          ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span>{language === "my" ? tab.labelMy : tab.labelEn}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
             <Page />
           </div>
         </main>

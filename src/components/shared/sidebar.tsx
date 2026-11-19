@@ -2,18 +2,12 @@
 
 import { useState } from "react"
 import {
-  AudioLines,
-  BookOpen,
-  Camera,
   ChevronRight,
-  FileText,
-  FolderKanban,
   Globe,
-  Mic,
+  LogOut,
   Moon,
-  Scissors,
+  Plus,
   Sun,
-  Video,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -29,108 +23,52 @@ import {
 } from "@/components/ui/sheet"
 import { t } from "@/locales/translations"
 import { CCLogo } from "@/components/shared/cc-logo"
+import { QuickIdeaDialog } from "@/components/shared/quick-idea-dialog"
+import { getRoomForPageKey, WORKSPACE_ROOMS, type WorkspaceRoom } from "@/components/shared/rooms"
 import { useUIStore, type UIState } from "@/store/useUIStore"
 import { useShallow } from "zustand/react/shallow"
-import type { NavItem } from "@/types"
+import { supabase } from "@/lib/supabase"
+import { toast } from "@/components/ui/sonner"
 
-interface NavLinkProps {
-  item: NavItem
+interface RoomNavButtonProps {
+  room: WorkspaceRoom
+  language: "en" | "my"
   active: boolean
-  onSelect: (key: string, isMobile: boolean) => void
+  onSelect: (defaultPageKey: string, isMobile: boolean) => void
   collapsed: boolean
 }
 
-function NavLink({ item, active, onSelect, collapsed }: NavLinkProps) {
-  const Icon = item.icon
+function RoomNavButton({ room, language, active, onSelect, collapsed }: RoomNavButtonProps) {
+  const Icon = room.icon
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768
+  const label = language === "my" ? room.titleMy : room.titleEn
+
   return (
     <button
-      onClick={() => {
-        onSelect(item.key, isMobile)
-      }}
+      type="button"
+      onClick={() => onSelect(room.defaultPageKey, isMobile)}
       className={cn(
-        "flex w-full items-center gap-3 rounded-lg border border-transparent px-3 py-2 text-sm font-medium transition-all duration-150 leading-relaxed",
+        "flex w-full items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 text-sm font-medium transition-all duration-150 leading-relaxed font-myanmar",
         active
           ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm shadow-blue-500/20"
           : "text-muted-foreground hover:text-foreground hover:bg-accent/70"
       )}
       aria-pressed={active}
+      title={collapsed ? `${room.emoji} ${label}` : undefined}
     >
-      <Icon
-        size={18}
-        className={cn("h-[18px] w-[18px] shrink-0", collapsed ? "mx-auto" : "")}
-        aria-hidden="true"
-      />
-      {!collapsed && <span className="flex-1 text-left truncate">{item.title}</span>}
+      {collapsed ? (
+        <Icon size={18} className="h-[18px] w-[18px] shrink-0 mx-auto" aria-hidden="true" />
+      ) : (
+        <>
+          <span className="text-base leading-none shrink-0" aria-hidden="true">
+            {room.emoji}
+          </span>
+          <span className="flex-1 text-left truncate">{label}</span>
+        </>
+      )}
     </button>
   )
 }
-
-interface NavGroup {
-  labelKey: string
-  items: NavItem[]
-}
-
-const navigationGroups: NavGroup[] = [
-  {
-    labelKey: "sidebar.group_create",
-    items: [
-      {
-        key: "text",
-        title: "Text Post",
-        url: "/",
-        icon: FileText,
-      },
-      {
-        key: "video",
-        title: "Video Script",
-        url: "/video",
-        icon: Video,
-      },
-      {
-        key: "transcriber",
-        title: "Voice-to-Text",
-        url: "/transcriber",
-        icon: AudioLines,
-      },
-    ],
-  },
-  {
-    labelKey: "sidebar.group_media_studio",
-    items: [
-      {
-        key: "voiceover",
-        title: "AI Voiceover",
-        url: "/voiceover",
-        icon: Mic,
-      },
-      {
-        key: "audiobook",
-        title: "Book to Audio",
-        url: "/audiobook",
-        icon: BookOpen,
-      },
-      {
-        key: "autocut",
-        title: "Video Auto-Cut",
-        url: "/autocut",
-        icon: Scissors,
-      },
-      {
-        key: "studio",
-        title: "Photo Studio",
-        url: "/studio",
-        icon: Camera,
-      },
-      {
-        key: "vault",
-        title: "Vault & Calendar",
-        url: "/vault",
-        icon: FolderKanban,
-      },
-    ],
-  },
-]
 
 interface SidebarProps {
   mobileOpen: boolean
@@ -139,6 +77,9 @@ interface SidebarProps {
 
 export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
   const [hovered, setHovered] = useState(false)
+  const [quickIdeaOpen, setQuickIdeaOpen] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
+
   const sidebarSelector = useShallow((state: UIState) => ({
     sidebarCollapsed: state.sidebarCollapsed,
     activePageKey: state.activePageKey,
@@ -148,6 +89,8 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
     setLanguage: state.setLanguage,
     theme: state.theme,
     toggleTheme: state.toggleTheme,
+    user: state.user,
+    signOut: state.signOut,
   }))
   const {
     sidebarCollapsed,
@@ -158,9 +101,27 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
     setLanguage,
     theme,
     toggleTheme,
+    user,
+    signOut,
   } = useUIStore(sidebarSelector)
 
   const collapsed = sidebarCollapsed && !hovered
+  const activeRoom = getRoomForPageKey(activePageKey)
+
+  const handleSignOut = async () => {
+    setLoggingOut(true)
+    try {
+      const { error } = await supabase.auth.signOut()
+      if (error) throw error
+    } catch (err: unknown) {
+      console.error("Sign out error", err)
+    } finally {
+      signOut()
+      setLoggingOut(false)
+      onMobileToggle(false)
+      toast.success(t(language, "auth.signOutSuccess"))
+    }
+  }
 
   return (
     <>
@@ -196,35 +157,89 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
             </Button>
           )}
         </div>
+
         <ScrollArea className="flex-1">
-          <nav className="flex flex-col gap-4 px-2.5 pt-3 pb-4">
-            {navigationGroups.map((group) => (
-              <div key={group.labelKey} className="flex flex-col gap-1">
-                {!collapsed && (
-                  <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/75">
-                    {t(language, group.labelKey)}
-                  </div>
-                )}
-                {group.items.map((item) => (
-                  <NavLink
-                    key={item.key}
-                    item={{ ...item, title: t(language, `nav.${item.key}`) }}
-                    active={activePageKey === item.key}
-                    onSelect={(key, isMobile) => {
-                      setActivePageKey(key)
-                      if (isMobile) {
-                        onMobileToggle(false)
-                      }
-                    }}
-                    collapsed={collapsed}
-                  />
-                ))}
-              </div>
+          <nav className="flex flex-col gap-1.5 px-2.5 pt-3 pb-4">
+            {WORKSPACE_ROOMS.map((room) => (
+              <RoomNavButton
+                key={room.id}
+                room={room}
+                language={language}
+                active={activeRoom.id === room.id}
+                onSelect={(key, isMobile) => {
+                  setActivePageKey(key)
+                  if (isMobile) {
+                    onMobileToggle(false)
+                  }
+                }}
+                collapsed={collapsed}
+              />
             ))}
           </nav>
         </ScrollArea>
+
         <Separator className="mx-2 bg-border/60" />
-        <div className="px-2.5 pt-2.5 pb-4">
+        <div className="px-2.5 pt-2.5 pb-3 space-y-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setQuickIdeaOpen(true)}
+            className={cn(
+              "w-full h-8 text-xs font-medium border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20",
+              collapsed ? "px-0 justify-center" : "gap-1.5"
+            )}
+            title={t(language, "header.quickIdea")}
+          >
+            <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            {!collapsed && <span>{t(language, "header.quickIdea")}</span>}
+          </Button>
+
+          {!collapsed && (
+            <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setLanguage(language === "en" ? "my" : "en")}
+                className="flex-1 h-8 text-xs border-border/60 gap-1"
+                aria-label="Toggle language"
+              >
+                <Globe className="h-3.5 w-3.5 text-muted-foreground shrink-0" aria-hidden="true" />
+                <span>{language === "en" ? "EN" : "MY"}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={toggleTheme}
+                className="flex-1 h-8 text-xs border-border/60 gap-1"
+                aria-label="Toggle dark mode"
+              >
+                {theme === "dark" ? (
+                  <Sun className="h-3.5 w-3.5 text-amber-500 shrink-0" aria-hidden="true" />
+                ) : (
+                  <Moon className="h-3.5 w-3.5 text-muted-foreground shrink-0" aria-hidden="true" />
+                )}
+                <span>{theme === "dark" ? "Light" : "Dark"}</span>
+              </Button>
+            </div>
+          )}
+
+          {user && !collapsed && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleSignOut}
+              disabled={loggingOut}
+              className="w-full h-8 text-xs text-muted-foreground hover:text-destructive gap-1.5 justify-start px-2.5"
+            >
+              <LogOut className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>{t(language, "header.signOut")}</span>
+            </Button>
+          )}
+
           <Button
             variant="outline"
             size="sm"
@@ -246,11 +261,11 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
         open={mobileOpen}
         onOpenChange={onMobileToggle}
         side="left"
-        className="md:hidden w-[280px] max-w-[82vw] z-50 border-r border-border/60"
+        className="md:hidden w-[290px] max-w-[85vw] z-50 border-r border-border/60"
       >
-        <SheetContent className="w-full p-0 border-b-0 justify-between">
-          <div>
-            <SheetHeader className="relative flex flex-col items-start gap-1 text-left pr-10 pt-4 pb-4 px-4 border-b border-border/60">
+        <SheetContent className="w-full p-0 border-b-0 flex flex-col justify-between">
+          <div className="flex-1 min-h-0 flex flex-col">
+            <SheetHeader className="relative flex flex-col items-start gap-1 text-left pr-10 pt-4 pb-4 px-4 border-b border-border/60 shrink-0">
               <div className="flex items-center gap-2.5">
                 <CCLogo size={28} className="h-7 w-7 shrink-0 rounded-lg shadow-sm" />
                 <SheetTitle className="text-base leading-tight">
@@ -267,66 +282,93 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
                 className="absolute right-3 top-3.5 p-2 rounded-lg text-foreground hover:bg-accent"
               />
             </SheetHeader>
-            <ScrollArea className="max-h-[calc(100vh-140px)]">
-              <nav className="flex flex-col gap-4 px-3 py-4">
-                {navigationGroups.map((group) => (
-                  <div key={group.labelKey} className="flex flex-col gap-1">
-                    <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/75">
-                      {t(language, group.labelKey)}
-                    </div>
-                    {group.items.map((item) => (
-                      <NavLink
-                        key={item.key}
-                        item={{ ...item, title: t(language, `nav.${item.key}`) }}
-                        active={activePageKey === item.key}
-                        onSelect={(key) => {
-                          setActivePageKey(key)
-                          onMobileToggle(false)
-                        }}
-                        collapsed={false}
-                      />
-                    ))}
-                  </div>
+
+            <ScrollArea className="flex-1">
+              <nav className="flex flex-col gap-1.5 px-3 py-4">
+                {WORKSPACE_ROOMS.map((room) => (
+                  <RoomNavButton
+                    key={room.id}
+                    room={room}
+                    language={language}
+                    active={activeRoom.id === room.id}
+                    onSelect={(key) => {
+                      setActivePageKey(key)
+                      onMobileToggle(false)
+                    }}
+                    collapsed={false}
+                  />
                 ))}
               </nav>
             </ScrollArea>
           </div>
-          <div className="px-3 py-3 border-t border-border/60 flex items-center gap-2">
+
+          <div className="px-3 py-3 border-t border-border/60 space-y-2 shrink-0 bg-muted/20">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setLanguage(language === "en" ? "my" : "en")}
-              className="flex-1 h-9 text-xs font-medium border-border/60 gap-1.5"
-              aria-label="Toggle language"
+              onClick={() => {
+                onMobileToggle(false)
+                setQuickIdeaOpen(true)
+              }}
+              className="w-full h-9 text-xs font-medium border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 gap-1.5"
             >
-              <Globe className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden="true" />
-              <span>{language === "en" ? "English" : "မြန်မာ"}</span>
+              <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>{t(language, "header.quickIdea")}</span>
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={toggleTheme}
-              className="flex-1 h-9 text-xs font-medium border-border/60 gap-1.5"
-              aria-label="Toggle dark mode"
-            >
-              {theme === "dark" ? (
-                <>
-                  <Sun className="h-4 w-4 text-amber-500 shrink-0" aria-hidden="true" />
-                  <span>Light</span>
-                </>
-              ) : (
-                <>
-                  <Moon className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden="true" />
-                  <span>Dark</span>
-                </>
-              )}
-            </Button>
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setLanguage(language === "en" ? "my" : "en")}
+                className="flex-1 h-9 text-xs font-medium border-border/60 gap-1.5"
+                aria-label="Toggle language"
+              >
+                <Globe className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden="true" />
+                <span>{language === "en" ? "EN" : "MY"}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={toggleTheme}
+                className="flex-1 h-9 text-xs font-medium border-border/60 gap-1.5"
+                aria-label="Toggle dark mode"
+              >
+                {theme === "dark" ? (
+                  <>
+                    <Sun className="h-4 w-4 text-amber-500 shrink-0" aria-hidden="true" />
+                    <span>Light</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden="true" />
+                    <span>Dark</span>
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {user && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleSignOut}
+                disabled={loggingOut}
+                className="w-full h-9 text-xs font-medium border-border/60 text-muted-foreground hover:text-destructive gap-1.5"
+              >
+                <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{t(language, "header.signOut")}</span>
+              </Button>
+            )}
           </div>
         </SheetContent>
       </Sheet>
+
+      <QuickIdeaDialog open={quickIdeaOpen} onOpenChange={setQuickIdeaOpen} />
     </>
   )
 }
-

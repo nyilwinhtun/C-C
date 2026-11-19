@@ -1938,6 +1938,8 @@ async function callGeminiMultimodalText(params: {
   base64Data: string
   prompt: string
   maxOutputTokens?: number
+  temperature?: number
+  allowEmpty?: boolean
 }): Promise<string> {
   const { apiKeys } = getAiConfig()
   const geminiKey = apiKeys.gemini.trim()
@@ -1964,7 +1966,7 @@ async function callGeminiMultimodalText(params: {
       },
     ],
     generationConfig: {
-      temperature: 0.2,
+      temperature: params.temperature ?? 0.2,
       topP: 0.95,
       maxOutputTokens: params.maxOutputTokens ?? 8192,
     },
@@ -1991,6 +1993,9 @@ async function callGeminiMultimodalText(params: {
     .trim()
 
   if (!content) {
+    if (params.allowEmpty) {
+      return ""
+    }
     const finishReason = data.candidates?.[0]?.finishReason
     throw new Error(
       finishReason
@@ -2088,12 +2093,35 @@ export async function transcribeAudioWithGemini(
     ? " Automatically remove spoken filler hesitations, stumbles, and false starts (such as 'အဲ...', 'အင်း...', 'ဟို...', 'um', 'uh', 'er') and polish the wording into smooth, natural, ready-to-read voiceover script text while keeping the speaker's exact meaning and tone."
     : ""
 
-  return await callGeminiMultimodalText({
+  const rawText = await callGeminiMultimodalText({
     mimeType: resolvedMime,
     base64Data,
-    prompt: `Transcribe the speech in this audio accurately into clean, readable text with proper punctuation and natural paragraph breaks. ${langInstruction}${cleanupInstruction} Do not include timestamps, speaker labels unless clearly multiple speakers, or any extra commentary—output only the transcribed text.`,
+    prompt: `Transcribe ONLY the actual spoken words clearly heard in this audio into clean, readable text with proper punctuation. ${langInstruction}${cleanupInstruction}
+
+STRICT ANTI-REPETITION & ACCURACY RULES:
+1. Transcribe ONLY actual spoken words. Do NOT invent, guess, or hallucinate words during quiet parts or background noise.
+2. NEVER repeat filler syllables or phrases such as "ဟို ဟာ", "ဟု ဟာ", "ဟိုဟာ", "အဲ", "အင်း", "um", or "uh" in a loop.
+3. If the audio is silent, contains only background noise/breathing, or has no clearly intelligible speech, return "" (empty string) and nothing else.
+4. Do not include timestamps, speaker labels unless clearly multiple speakers, or any extra commentary—output only the transcribed text.`,
     maxOutputTokens: 4096,
+    temperature: 0.1,
+    allowEmpty: true,
   })
+
+  const trimmed = rawText.trim()
+  if (!trimmed || trimmed === '""' || trimmed === "''") {
+    return ""
+  }
+
+  // Guard against residual Burmese filler hallucination loops
+  const withoutRepeatedFillers = trimmed
+    .replace(/(?:ဟု\s*ဟာ|ဟို\s*ဟာ|ဟိုဟာ)[\s။,.!?\u200B]*/g, " ")
+    .trim()
+  if (!withoutRepeatedFillers && /(?:ဟု\s*ဟာ|ဟို\s*ဟာ|ဟိုဟာ)/.test(trimmed)) {
+    return ""
+  }
+
+  return trimmed
 }
 
 

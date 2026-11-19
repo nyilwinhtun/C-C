@@ -20,6 +20,7 @@ import {
   transcribeAudioWithGemini,
   type AudioTranscriptionLanguage,
 } from "@/api/aiService"
+import { prepareAudioForGemini } from "@/lib/audioProcessor"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -143,7 +144,38 @@ export function TranscriberPage() {
   const runTranscription = async (blob: Blob, mimeType?: string, fileName?: string) => {
     setIsTranscribing(true)
     try {
-      const text = await transcribeAudioWithGemini(blob, mimeType, langHint, fileName)
+      let uploadBlob: Blob = blob
+      let uploadMime = mimeType
+      let uploadName = fileName
+
+      try {
+        const processed = await prepareAudioForGemini(blob)
+        if (processed.isSilent) {
+          toast.error(
+            isMy
+              ? "အသံမကြားရပါ — မိုက်ခရိုဖုန်း စစ်ဆေးပါ"
+              : "No audio detected — please check your microphone."
+          )
+          return
+        }
+        if (processed.wavBlob) {
+          uploadBlob = processed.wavBlob
+          uploadMime = processed.mimeType
+          uploadName = fileName ? `${fileName.replace(/\.[^.]+$/, "")}.wav` : "recording.wav"
+        }
+      } catch {
+        // Fallback to raw blob if browser cannot decode an uploaded file format
+      }
+
+      const text = await transcribeAudioWithGemini(uploadBlob, uploadMime, langHint, uploadName)
+      if (!text.trim()) {
+        toast.info(
+          isMy
+            ? "စကားပြောသံ မတွေ့ရှိပါ — ထပ်မံအသံသွင်းကြည့်ပါ"
+            : "No clear speech detected."
+        )
+        return
+      }
       setTranscript(text)
       setPolishedResult(null)
       toast.success(isMy ? "အသံမှ စာသားပြောင်းပြီးပါပြီ" : "Audio transcribed!")

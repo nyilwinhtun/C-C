@@ -7,10 +7,12 @@ import {
   Download,
   Film,
   Loader2,
+  Play,
   Plus,
   Scissors,
   Share2,
   Sparkles,
+  Square,
   Trash2,
   Upload,
   X,
@@ -156,11 +158,22 @@ export function AutoCutPage() {
   const [exportingClipIndex, setExportingClipIndex] = useState<number | null>(null)
   const [exportedResult, setExportedResult] = useState<MergeVideoAudioResult | null>(null)
 
+  const [isPreviewing, setIsPreviewing] = useState(false)
+  const [previewClipIndex, setPreviewClipIndex] = useState(0)
+  const [previewSegIndex, setPreviewSegIndex] = useState(0)
+
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const exportUrlRef = useRef<string | null>(null)
   const analysisRunIdRef = useRef(0)
   const clipsRef = useRef<AutoCutClipItem[]>([])
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null)
+  const previewRafRef = useRef<number>(0)
+  const previewStateRef = useRef<{ clipIdx: number; segIdx: number; seeking: boolean }>({
+    clipIdx: 0,
+    segIdx: 0,
+    seeking: false,
+  })
 
   useEffect(() => {
     clipsRef.current = clips
@@ -170,12 +183,30 @@ export function AutoCutPage() {
     return () => {
       analysisRunIdRef.current += 1
       abortRef.current?.abort()
+      if (previewRafRef.current) cancelAnimationFrame(previewRafRef.current)
       for (const clip of clipsRef.current) {
         URL.revokeObjectURL(clip.previewUrl)
       }
       if (exportUrlRef.current) URL.revokeObjectURL(exportUrlRef.current)
     }
   }, [])
+
+  const stopPreview = () => {
+    if (previewRafRef.current) {
+      cancelAnimationFrame(previewRafRef.current)
+      previewRafRef.current = 0
+    }
+    const vid = previewVideoRef.current
+    if (vid) {
+      vid.pause()
+      vid.removeAttribute("src")
+      vid.load()
+    }
+    previewStateRef.current = { clipIdx: 0, segIdx: 0, seeking: false }
+    setIsPreviewing(false)
+    setPreviewClipIndex(0)
+    setPreviewSegIndex(0)
+  }
 
   const analyzeClipsSequentially = async (
     targetClips: AutoCutClipItem[],
@@ -345,6 +376,7 @@ export function AutoCutPage() {
   }
 
   const handleReset = () => {
+    stopPreview()
     analysisRunIdRef.current += 1
     abortRef.current?.abort()
     for (const clip of clips) {
@@ -361,7 +393,122 @@ export function AutoCutPage() {
     setExportingClipIndex(null)
   }
 
+  const handleTogglePreview = () => {
+    if (isPreviewing) {
+      stopPreview()
+      return
+    }
+    const playable = clips.filter(
+      (c) => c.status === "ready" && c.analysis && c.analysis.keepSegments.length > 0
+    )
+    if (playable.length === 0) return
+
+    previewStateRef.current = { clipIdx: 0, segIdx: 0, seeking: false }
+    setPreviewClipIndex(0)
+    setPreviewSegIndex(0)
+    setIsPreviewing(true)
+  }
+
+  useEffect(() => {
+    if (!isPreviewing) return
+    const playable = clipsRef.current.filter(
+      (c) => c.status === "ready" && c.analysis && c.analysis.keepSegments.length > 0
+    )
+    if (playable.length === 0) {
+      stopPreview()
+      return
+    }
+
+    const vid = previewVideoRef.current
+    if (!vid) return
+
+    let cancelled = false
+
+    const loadAndPlaySegment = (clipIdx: number, segIdx: number) => {
+      if (cancelled) return
+      const targetClip = playable[clipIdx]
+      const targetSeg = targetClip?.analysis?.keepSegments[segIdx]
+      if (!targetClip || !targetSeg) {
+        stopPreview()
+        return
+      }
+
+      previewStateRef.current = { clipIdx, segIdx, seeking: true }
+      setPreviewClipIndex(clipIdx)
+      setPreviewSegIndex(segIdx)
+
+      const startAtSeg = () => {
+        if (cancelled) return
+        const onSeeked = () => {
+          if (cancelled) return
+          previewStateRef.current.seeking = false
+          void vid.play().catch(() => {})
+        }
+        if (Math.abs(vid.currentTime - targetSeg.start) < 0.02) {
+          previewStateRef.current.seeking = false
+          void vid.play().catch(() => {})
+        } else {
+          vid.addEventListener("seeked", onSeeked, { once: true })
+          vid.currentTime = targetSeg.start
+        }
+      }
+
+      if (vid.src !== targetClip.previewUrl) {
+        vid.src = targetClip.previewUrl
+        vid.addEventListener("loadeddata", startAtSeg, { once: true })
+        vid.load()
+      } else {
+        startAtSeg()
+      }
+    }
+
+    loadAndPlaySegment(0, 0)
+
+    const tick = () => {
+      if (cancelled) return
+      const { clipIdx, segIdx, seeking } = previewStateRef.current
+      const activeClip = playable[clipIdx]
+      const activeSegs = activeClip?.analysis?.keepSegments ?? []
+      const activeSeg = activeSegs[segIdx]
+
+      if (!seeking && activeSeg && !vid.paused) {
+        if (vid.currentTime >= activeSeg.end - 0.02 || vid.ended) {
+          const nextSegIdx = segIdx + 1
+          if (nextSegIdx < activeSegs.length) {
+            const nextSeg = activeSegs[nextSegIdx]
+            previewStateRef.current = { clipIdx, segIdx: nextSegIdx, seeking: true }
+            setPreviewSegIndex(nextSegIdx)
+            const onSeeked = () => {
+              if (cancelled) return
+              previewStateRef.current.seeking = false
+            }
+            vid.addEventListener("seeked", onSeeked, { once: true })
+            vid.currentTime = nextSeg.start
+          } else if (clipIdx + 1 < playable.length) {
+            loadAndPlaySegment(clipIdx + 1, 0)
+          } else {
+            stopPreview()
+            return
+          }
+        }
+      }
+
+      previewRafRef.current = requestAnimationFrame(tick)
+    }
+
+    previewRafRef.current = requestAnimationFrame(tick)
+
+    return () => {
+      cancelled = true
+      if (previewRafRef.current) {
+        cancelAnimationFrame(previewRafRef.current)
+        previewRafRef.current = 0
+      }
+    }
+  }, [isPreviewing])
+
   const handleExport = async () => {
+    stopPreview()
     const readyClips = clips.filter((c) => c.status === "ready" && c.analysis)
     if (readyClips.length === 0) return
 
@@ -748,8 +895,61 @@ export function AutoCutPage() {
                 </div>
               )}
 
-              {/* Export / Cancel Button */}
-              <div className="flex gap-2">
+              {/* Preview Cut Result Player */}
+              {isPreviewing && (
+                <div className="rounded-lg border border-violet-500/40 bg-black/95 overflow-hidden space-y-2 p-2.5">
+                  <div className="flex items-center justify-between gap-2 text-xs text-white/90 px-1">
+                    <span className="inline-flex items-center gap-1.5 font-medium">
+                      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                      {isMy
+                        ? `အသံတိတ်ကျော်ပြီး အစမ်းကြည့်နေသည် — Clip ${previewClipIndex + 1} (အပိုင်း ${previewSegIndex + 1})`
+                        : `Jump-Cut Preview — Clip ${previewClipIndex + 1} (Segment ${previewSegIndex + 1})`}
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={stopPreview}
+                      className="h-6 px-2 text-xs text-white/80 hover:text-white hover:bg-white/10"
+                    >
+                      <Square className="h-3 w-3 mr-1" />
+                      {isMy ? "ပိတ်မည်" : "Stop"}
+                    </Button>
+                  </div>
+                  <video
+                    ref={previewVideoRef}
+                    playsInline
+                    controls
+                    className="w-full max-h-[260px] object-contain mx-auto rounded"
+                  />
+                </div>
+              )}
+
+              {/* Preview + Export / Cancel Buttons */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button
+                  type="button"
+                  variant={isPreviewing ? "secondary" : "outline"}
+                  disabled={!allReady || isAnalyzingQueue || isExporting || !hasAnySpeech}
+                  onClick={handleTogglePreview}
+                  className="gap-1.5 sm:w-auto"
+                >
+                  {isPreviewing ? (
+                    <Square className="h-4 w-4 text-rose-500" />
+                  ) : (
+                    <Play className="h-4 w-4 text-violet-500" />
+                  )}
+                  <span>
+                    {isPreviewing
+                      ? isMy
+                        ? "အစမ်းကြည့်မှု ရပ်မည်"
+                        : "Stop Preview"
+                      : isMy
+                        ? "ဖြတ်တောက်မှု အစမ်းကြည့်မည်"
+                        : "Preview Cut Result"}
+                  </span>
+                </Button>
+
                 <Button
                   type="button"
                   disabled={!allReady || isAnalyzingQueue || isExporting || !hasAnySpeech}

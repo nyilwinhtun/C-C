@@ -1429,8 +1429,26 @@ function loadAutoCutVideoElement(videoFile: File): {
   video.preload = "auto"
 
   const ready = new Promise<void>((resolve, reject) => {
-    const onLoaded = () => resolve()
-    const onErr = () => reject(new Error(`Could not load "${videoFile.name}" for export.`))
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+    const onLoaded = () => {
+      if (video.readyState >= 2) {
+        finish()
+      } else {
+        video.addEventListener("canplay", finish, { once: true })
+        setTimeout(finish, 800)
+      }
+    }
+    const onErr = () => {
+      if (settled) return
+      settled = true
+      reject(new Error(`Could not load "${videoFile.name}" for export.`))
+    }
+    video.addEventListener("loadeddata", finish, { once: true })
     video.addEventListener("loadedmetadata", onLoaded, { once: true })
     video.addEventListener("error", onErr, { once: true })
   })
@@ -1584,22 +1602,15 @@ export async function exportMultiClipAutoCutVideo(
             resolve()
           }
           video.addEventListener("seeked", finish, { once: true })
-          setTimeout(finish, 1200)
+          setTimeout(finish, 800)
           video.currentTime = clamped
         })
 
-      for (const seg of clip.analysis.keepSegments) {
-        if (signal?.aborted) {
-          if (recorder.state !== "inactive") recorder.stop()
-          throw new DOMException("Export aborted", "AbortError")
-        }
+      const keptSpeechSegments = clip.analysis.keepSegments
+      if (keptSpeechSegments.length === 0) continue
 
+      const startSegmentAudio = (seg: { start: number; end: number }) => {
         const segDuration = Math.max(0.05, seg.end - seg.start)
-        await seekTo(seg.start)
-        drawFramedMedia(ctx2d, video, srcW, srcH, canvas.width, canvas.height, {
-          blurredBg: false,
-        })
-
         const src = audioCtx.createBufferSource()
         src.buffer = clip.analysis.audioBuffer
         const gain = audioCtx.createGain()
@@ -1611,65 +1622,90 @@ export async function exportMultiClipAutoCutVideo(
         gain.gain.linearRampToValueAtTime(0, now + segDuration)
         src.connect(gain)
         gain.connect(audioDest)
+        src.start(now, seg.start, segDuration)
+        return src
+      }
 
-        video.playbackRate = 1.0
-        await video.play()
-        const segAudioStart = audioCtx.currentTime
-        src.start(segAudioStart, seg.start, segDuration)
+      let segIndex = 0
+      let currentSeg = keptSpeechSegments[0]
+      let isSeeking = false
+      let currentAudioSrc: AudioBufferSourceNode | null = null
 
-        await new Promise<void>((resolve) => {
-          const step = () => {
-            if (signal?.aborted) {
-              video.pause()
-              video.playbackRate = 1.0
-              try {
-                src.stop()
-              } catch {
-                // Ignore
-              }
-              resolve()
-              return
+      await seekTo(currentSeg.start)
+      drawFramedMedia(ctx2d, video, srcW, srcH, canvas.width, canvas.height, {
+        blurredBg: false,
+      })
+
+      video.playbackRate = 1.0
+      await video.play()
+      currentAudioSrc = startSegmentAudio(currentSeg)
+
+      await new Promise<void>((resolve) => {
+        const stopCurrentAudio = () => {
+          if (currentAudioSrc) {
+            try {
+              currentAudioSrc.stop()
+            } catch {
+              // Ignore
             }
+            currentAudioSrc = null
+          }
+        }
 
-            const elapsed = Math.max(0, audioCtx.currentTime - segAudioStart)
-            const videoOffset = Math.max(0, video.currentTime - seg.start)
-            const drift = elapsed - videoOffset
+        const step = () => {
+          if (signal?.aborted) {
+            stopCurrentAudio()
+            video.pause()
+            video.playbackRate = 1.0
+            resolve()
+            return
+          }
 
-            // Gentle audio-video sync lock via playbackRate adjustment
-            if (Math.abs(drift) > 0.12) {
-              video.playbackRate = drift > 0 ? 1.08 : 0.92
-            } else if (Math.abs(drift) < 0.04 && video.playbackRate !== 1.0) {
-              video.playbackRate = 1.0
-            }
-
+          if (!isSeeking) {
             drawFramedMedia(ctx2d, video, srcW, srcH, canvas.width, canvas.height, {
               blurredBg: false,
             })
 
+            const segDuration = Math.max(0.05, currentSeg.end - currentSeg.start)
+            const segElapsed = Math.max(0, Math.min(segDuration, video.currentTime - currentSeg.start))
             const pct = Math.min(
               99,
-              Math.round(((completedKept + Math.min(segDuration, elapsed)) / totalKept) * 100)
+              Math.round(((completedKept + segElapsed) / totalKept) * 100)
             )
             onProgress?.(pct, clipIdx)
 
-            if (elapsed >= segDuration - 0.01 || video.ended) {
-              video.pause()
-              video.playbackRate = 1.0
-              try {
-                src.stop()
-              } catch {
-                // Ignore
-              }
-              resolve()
-              return
-            }
-            rafId = requestAnimationFrame(step)
-          }
-          rafId = requestAnimationFrame(step)
-        })
+            // Monitor video.currentTime against keptSpeechSegments[segIndex].end
+            if (video.currentTime >= currentSeg.end - 0.015 || video.ended) {
+              stopCurrentAudio()
+              completedKept += segDuration
+              segIndex += 1
 
-        completedKept += segDuration
-      }
+              if (segIndex < keptSpeechSegments.length) {
+                const nextSegment = keptSpeechSegments[segIndex]
+                currentSeg = nextSegment
+                isSeeking = true
+                void seekTo(nextSegment.start).then(() => {
+                  if (signal?.aborted) return
+                  isSeeking = false
+                  if (video.paused) {
+                    void video.play().catch(() => {})
+                  }
+                  currentAudioSrc = startSegmentAudio(nextSegment)
+                })
+              } else {
+                video.pause()
+                video.playbackRate = 1.0
+                resolve()
+                return
+              }
+            }
+          }
+
+          rafId = requestAnimationFrame(step)
+        }
+
+        rafId = requestAnimationFrame(step)
+      })
     }
 
     if (signal?.aborted) {

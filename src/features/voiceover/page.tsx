@@ -31,6 +31,7 @@ import {
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
 import { isSupportedVideoFile, transcribeAudioWithGemini } from "@/api/aiService"
+import { prepareAudioForGemini } from "@/lib/audioProcessor"
 import {
   BURMESE_VOICE_PRESETS,
   SOUND_EFFECT_PRESETS,
@@ -367,11 +368,34 @@ export function VoiceoverPage() {
 
     setIsTranscribingVoice(true)
     try {
+      let uploadBlob: Blob = blob
+      let uploadMime = mimeType
+      let uploadName = fileName
+
+      try {
+        const processed = await prepareAudioForGemini(blob)
+        if (processed.isSilent) {
+          toast.error(
+            isMy
+              ? "အသံမကြားရပါ — မိုက်ခရိုဖုန်း စစ်ဆေးပါ"
+              : "No audio detected — please check your microphone."
+          )
+          return
+        }
+        if (processed.wavBlob) {
+          uploadBlob = processed.wavBlob
+          uploadMime = processed.mimeType
+          uploadName = fileName ? `${fileName.replace(/\.[^.]+$/, "")}.wav` : "recording.wav"
+        }
+      } catch {
+        // Fallback to raw blob if browser cannot decode an uploaded file format
+      }
+
       const cleanedText = await transcribeAudioWithGemini(
-        blob,
-        mimeType,
+        uploadBlob,
+        uploadMime,
         "auto",
-        fileName,
+        uploadName,
         true
       )
       if (cleanedText.trim()) {
