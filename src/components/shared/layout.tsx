@@ -4,7 +4,10 @@ import { useEffect, useState } from "react"
 import { t } from "@/locales/translations"
 import { GeneratorPage } from "@/features/generator/page"
 import { VideoToContentSection } from "@/features/generator/VideoToContentSection"
+import { TranscriberPage } from "@/features/transcriber/page"
 import { VoiceoverPage } from "@/features/voiceover/page"
+import { AudiobookPage } from "@/features/audiobook/page"
+import { AutoCutPage } from "@/features/autocut/page"
 import { PhotoStudioPage } from "@/features/photo-studio/page"
 import { VaultAndCalendarPage } from "@/features/vault/page"
 import { Header } from "@/components/shared/header"
@@ -18,7 +21,10 @@ import { cn } from "@/lib/utils"
 const pages: Record<string, React.FC> = {
   text: GeneratorPage,
   video: VideoToContentSection,
+  transcriber: TranscriberPage,
   voiceover: VoiceoverPage,
+  audiobook: AudiobookPage,
+  autocut: AutoCutPage,
   studio: PhotoStudioPage,
   vault: VaultAndCalendarPage,
 }
@@ -28,7 +34,10 @@ export function Layout() {
   const pageTitles: Record<string, string> = {
     text: t(language, "page.text"),
     video: t(language, "page.video"),
+    transcriber: t(language, "page.transcriber"),
     voiceover: t(language, "page.voiceover"),
+    audiobook: t(language, "page.audiobook"),
+    autocut: t(language, "page.autocut"),
     studio: t(language, "page.studio"),
     vault: t(language, "page.vault"),
   }

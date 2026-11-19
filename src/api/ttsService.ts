@@ -595,7 +595,7 @@ function encodeAudioBufferToWavBlob(audioBuffer: AudioBuffer): Blob {
   return pcmToWavBlob(pcmBytes, sampleRate, numChannels, 16)
 }
 
-async function concatenateAudioBlobsToWav(blobs: Blob[]): Promise<Blob> {
+export async function concatenateAudioBlobsToWav(blobs: Blob[]): Promise<Blob> {
   if (blobs.length === 1) return blobs[0]
 
   const AudioCtx =

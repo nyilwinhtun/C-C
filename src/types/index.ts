@@ -1,6 +1,14 @@
 export type Theme = 'light' | 'dark'
 
-export type NavItemKey = 'text' | 'video' | 'voiceover' | 'studio' | 'vault'
+export type NavItemKey =
+  | 'text'
+  | 'video'
+  | 'transcriber'
+  | 'voiceover'
+  | 'audiobook'
+  | 'autocut'
+  | 'studio'
+  | 'vault'
 
 export interface NavItem {
   key: NavItemKey

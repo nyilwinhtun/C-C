@@ -140,7 +140,10 @@ function normalizePageKey(key: string): string {
       return "vault"
     case "text":
     case "video":
+    case "transcriber":
     case "voiceover":
+    case "audiobook":
+    case "autocut":
     case "studio":
     case "vault":
       return key

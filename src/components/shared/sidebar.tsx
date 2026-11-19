@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 import {
+  AudioLines,
+  BookOpen,
   Camera,
   ChevronRight,
   FileText,
@@ -9,6 +11,7 @@ import {
   Globe,
   Mic,
   Moon,
+  Scissors,
   Sun,
   Video,
 } from "lucide-react"
@@ -63,36 +66,69 @@ function NavLink({ item, active, onSelect, collapsed }: NavLinkProps) {
   )
 }
 
-const navigation: NavItem[] = [
+interface NavGroup {
+  labelKey: string
+  items: NavItem[]
+}
+
+const navigationGroups: NavGroup[] = [
   {
-    key: "text",
-    title: "Text Post",
-    url: "/",
-    icon: FileText,
+    labelKey: "sidebar.group_create",
+    items: [
+      {
+        key: "text",
+        title: "Text Post",
+        url: "/",
+        icon: FileText,
+      },
+      {
+        key: "video",
+        title: "Video Script",
+        url: "/video",
+        icon: Video,
+      },
+      {
+        key: "transcriber",
+        title: "Voice-to-Text",
+        url: "/transcriber",
+        icon: AudioLines,
+      },
+    ],
   },
   {
-    key: "video",
-    title: "Video Script",
-    url: "/video",
-    icon: Video,
-  },
-  {
-    key: "voiceover",
-    title: "AI Voiceover",
-    url: "/voiceover",
-    icon: Mic,
-  },
-  {
-    key: "studio",
-    title: "Photo Studio",
-    url: "/studio",
-    icon: Camera,
-  },
-  {
-    key: "vault",
-    title: "Vault & Calendar",
-    url: "/vault",
-    icon: FolderKanban,
+    labelKey: "sidebar.group_media_studio",
+    items: [
+      {
+        key: "voiceover",
+        title: "AI Voiceover",
+        url: "/voiceover",
+        icon: Mic,
+      },
+      {
+        key: "audiobook",
+        title: "Book to Audio",
+        url: "/audiobook",
+        icon: BookOpen,
+      },
+      {
+        key: "autocut",
+        title: "Video Auto-Cut",
+        url: "/autocut",
+        icon: Scissors,
+      },
+      {
+        key: "studio",
+        title: "Photo Studio",
+        url: "/studio",
+        icon: Camera,
+      },
+      {
+        key: "vault",
+        title: "Vault & Calendar",
+        url: "/vault",
+        icon: FolderKanban,
+      },
+    ],
   },
 ]
 
@@ -161,20 +197,29 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
           )}
         </div>
         <ScrollArea className="flex-1">
-          <nav className="flex flex-col gap-1 px-2.5 pt-3">
-            {navigation.map((item) => (
-              <NavLink
-                key={item.key}
-                item={{ ...item, title: t(language, `nav.${item.key}`) }}
-                active={activePageKey === item.key}
-                onSelect={(key, isMobile) => {
-                  setActivePageKey(key)
-                  if (isMobile) {
-                    onMobileToggle(false)
-                  }
-                }}
-                collapsed={collapsed}
-              />
+          <nav className="flex flex-col gap-4 px-2.5 pt-3 pb-4">
+            {navigationGroups.map((group) => (
+              <div key={group.labelKey} className="flex flex-col gap-1">
+                {!collapsed && (
+                  <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/75">
+                    {t(language, group.labelKey)}
+                  </div>
+                )}
+                {group.items.map((item) => (
+                  <NavLink
+                    key={item.key}
+                    item={{ ...item, title: t(language, `nav.${item.key}`) }}
+                    active={activePageKey === item.key}
+                    onSelect={(key, isMobile) => {
+                      setActivePageKey(key)
+                      if (isMobile) {
+                        onMobileToggle(false)
+                      }
+                    }}
+                    collapsed={collapsed}
+                  />
+                ))}
+              </div>
             ))}
           </nav>
         </ScrollArea>
@@ -222,20 +267,29 @@ export function Sidebar({ mobileOpen, onMobileToggle }: SidebarProps) {
                 className="absolute right-3 top-3.5 p-2 rounded-lg text-foreground hover:bg-accent"
               />
             </SheetHeader>
-            <nav className="flex flex-col gap-1 px-3 py-4">
-              {navigation.map((item) => (
-                <NavLink
-                  key={item.key}
-                  item={{ ...item, title: t(language, `nav.${item.key}`) }}
-                  active={activePageKey === item.key}
-                  onSelect={(key) => {
-                    setActivePageKey(key)
-                    onMobileToggle(false)
-                  }}
-                  collapsed={false}
-                />
-              ))}
-            </nav>
+            <ScrollArea className="max-h-[calc(100vh-140px)]">
+              <nav className="flex flex-col gap-4 px-3 py-4">
+                {navigationGroups.map((group) => (
+                  <div key={group.labelKey} className="flex flex-col gap-1">
+                    <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/75">
+                      {t(language, group.labelKey)}
+                    </div>
+                    {group.items.map((item) => (
+                      <NavLink
+                        key={item.key}
+                        item={{ ...item, title: t(language, `nav.${item.key}`) }}
+                        active={activePageKey === item.key}
+                        onSelect={(key) => {
+                          setActivePageKey(key)
+                          onMobileToggle(false)
+                        }}
+                        collapsed={false}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </nav>
+            </ScrollArea>
           </div>
           <div className="px-3 py-3 border-t border-border/60 flex items-center gap-2">
             <Button

@@ -1191,3 +1191,376 @@ export async function mergeVideoWithVoiceover({
     cleanup()
   }
 }
+
+export interface AutoCutSegment {
+  start: number
+  end: number
+  isSilent: boolean
+}
+
+export interface VideoSilenceAnalysis {
+  audioBuffer: AudioBuffer
+  originalDuration: number
+  keptDuration: number
+  trimmedSeconds: number
+  keepSegments: Array<{ start: number; end: number }>
+  silentSegments: Array<{ start: number; end: number }>
+  timeline: AutoCutSegment[]
+}
+
+export interface AnalyzeSilenceOptions {
+  thresholdDb?: number
+  minSilenceSeconds?: number
+  paddingSeconds?: number
+}
+
+/**
+ * Decode a video file's audio track via Web Audio API (`decodeAudioData`)
+ * and detect silent dead-air pauses above `minSilenceSeconds`.
+ */
+export async function analyzeVideoSilence(
+  file: File,
+  options: AnalyzeSilenceOptions = {}
+): Promise<VideoSilenceAnalysis> {
+  const thresholdDb = options.thresholdDb ?? -35
+  const minSilenceSeconds = options.minSilenceSeconds ?? 0.6
+  const paddingSeconds = options.paddingSeconds ?? 0.08
+
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+  if (!AudioCtx) {
+    throw new Error("Web Audio API is not supported in this browser.")
+  }
+
+  const ctx = new AudioCtx()
+  let audioBuffer: AudioBuffer
+  try {
+    const arrayBuffer = await file.arrayBuffer()
+    audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+  } finally {
+    await ctx.close().catch(() => {})
+  }
+
+  const originalDuration = audioBuffer.duration
+  if (!Number.isFinite(originalDuration) || originalDuration <= 0) {
+    throw new Error("Could not read audio duration from this video.")
+  }
+
+  const sampleRate = audioBuffer.sampleRate
+  const frameDuration = 0.02 // 20ms analysis window
+  const frameSize = Math.max(1, Math.floor(sampleRate * frameDuration))
+  const totalSamples = audioBuffer.length
+  const totalFrames = Math.ceil(totalSamples / frameSize)
+  const thresholdLinear = Math.pow(10, thresholdDb / 20)
+
+  const channels: Float32Array[] = []
+  for (let ch = 0; ch < audioBuffer.numberOfChannels; ch += 1) {
+    channels.push(audioBuffer.getChannelData(ch))
+  }
+
+  const isFrameSilent = new Uint8Array(totalFrames)
+  for (let f = 0; f < totalFrames; f += 1) {
+    const start = f * frameSize
+    const end = Math.min(totalSamples, start + frameSize)
+    let sumSq = 0
+    let count = 0
+    for (let i = start; i < end; i += 2) {
+      let peak = 0
+      for (let c = 0; c < channels.length; c += 1) {
+        const v = Math.abs(channels[c][i])
+        if (v > peak) peak = v
+      }
+      sumSq += peak * peak
+      count += 1
+    }
+    const rms = count > 0 ? Math.sqrt(sumSq / count) : 0
+    isFrameSilent[f] = rms < thresholdLinear ? 1 : 0
+  }
+
+  // Group contiguous silent runs >= minSilenceSeconds
+  const rawSilentRuns: Array<{ start: number; end: number }> = []
+  let runStartFrame: number | null = null
+
+  for (let f = 0; f < totalFrames; f += 1) {
+    if (isFrameSilent[f] === 1 && runStartFrame === null) {
+      runStartFrame = f
+    } else if (isFrameSilent[f] === 0 && runStartFrame !== null) {
+      const startSec = runStartFrame * frameDuration
+      const endSec = Math.min(originalDuration, f * frameDuration)
+      if (endSec - startSec >= minSilenceSeconds) {
+        rawSilentRuns.push({ start: startSec, end: endSec })
+      }
+      runStartFrame = null
+    }
+  }
+  if (runStartFrame !== null) {
+    const startSec = runStartFrame * frameDuration
+    const endSec = originalDuration
+    if (endSec - startSec >= minSilenceSeconds) {
+      rawSilentRuns.push({ start: startSec, end: endSec })
+    }
+  }
+
+  // Apply padding around kept speech so words aren't clipped
+  const paddedSilentRuns: Array<{ start: number; end: number }> = []
+  for (const run of rawSilentRuns) {
+    const trimmedStart = run.start === 0 ? 0 : run.start + paddingSeconds
+    const trimmedEnd =
+      run.end >= originalDuration - 0.02 ? originalDuration : run.end - paddingSeconds
+    if (trimmedEnd - trimmedStart >= Math.max(0.25, minSilenceSeconds * 0.5)) {
+      paddedSilentRuns.push({ start: trimmedStart, end: trimmedEnd })
+    }
+  }
+
+  // Build keepSegments as complement of paddedSilentRuns
+  const keepSegments: Array<{ start: number; end: number }> = []
+  let cursor = 0
+  for (const silent of paddedSilentRuns) {
+    if (silent.start > cursor + 0.02) {
+      keepSegments.push({ start: cursor, end: silent.start })
+    }
+    cursor = Math.max(cursor, silent.end)
+  }
+  if (cursor < originalDuration - 0.02) {
+    keepSegments.push({ start: cursor, end: originalDuration })
+  }
+
+  // If entire video was silent, keep a tiny fallback or return empty keepSegments
+  const timeline: AutoCutSegment[] = []
+  let tCursor = 0
+  for (const seg of keepSegments) {
+    if (seg.start > tCursor + 0.01) {
+      timeline.push({ start: tCursor, end: seg.start, isSilent: true })
+    }
+    timeline.push({ start: seg.start, end: seg.end, isSilent: false })
+    tCursor = seg.end
+  }
+  if (tCursor < originalDuration - 0.01) {
+    timeline.push({ start: tCursor, end: originalDuration, isSilent: true })
+  }
+
+  const keptDuration = keepSegments.reduce((sum, s) => sum + (s.end - s.start), 0)
+  const trimmedSeconds = Math.max(0, originalDuration - keptDuration)
+
+  return {
+    audioBuffer,
+    originalDuration,
+    keptDuration,
+    trimmedSeconds,
+    keepSegments,
+    silentSegments: paddedSilentRuns,
+    timeline,
+  }
+}
+
+export interface ExportAutoCutOptions {
+  videoFile: File
+  analysis: VideoSilenceAnalysis
+  onProgress?: (percent: number) => void
+  signal?: AbortSignal
+}
+
+/**
+ * Render and export a continuous video with silent dead-air segments skipped.
+ */
+export async function exportAutoCutVideo(
+  options: ExportAutoCutOptions
+): Promise<MergeVideoAudioResult> {
+  const { videoFile, analysis, onProgress, signal } = options
+  if (analysis.keepSegments.length === 0) {
+    throw new Error("No speech segments detected to export. Try lowering the silence threshold.")
+  }
+
+  const mimeType = pickSupportedVideoMimeType()
+  if (!mimeType) {
+    throw new Error("Your browser does not support video recording export.")
+  }
+
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+  if (!AudioCtx) {
+    throw new Error("Web Audio API is not supported in this browser.")
+  }
+
+  const videoUrlObj = URL.createObjectURL(videoFile)
+  const video = document.createElement("video")
+  video.src = videoUrlObj
+  video.muted = true
+  video.playsInline = true
+  video.preload = "auto"
+
+  const audioCtx = new AudioCtx()
+  let recorder: MediaRecorder | null = null
+  let rafId = 0
+
+  const cleanup = () => {
+    if (rafId) cancelAnimationFrame(rafId)
+    try {
+      video.pause()
+      video.removeAttribute("src")
+      video.load()
+    } catch {
+      // Ignore
+    }
+    URL.revokeObjectURL(videoUrlObj)
+    audioCtx.close().catch(() => {})
+  }
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onLoaded = () => resolve()
+      const onErr = () => reject(new Error("Could not load video file for Auto-Cut export."))
+      video.addEventListener("loadedmetadata", onLoaded, { once: true })
+      video.addEventListener("error", onErr, { once: true })
+    })
+
+    if (signal?.aborted) {
+      throw new DOMException("Export aborted", "AbortError")
+    }
+
+    const size = computeCanvasSize(video.videoWidth || 720, video.videoHeight || 1280)
+    const canvas = document.createElement("canvas")
+    canvas.width = size.width
+    canvas.height = size.height
+    const ctx2d = canvas.getContext("2d")
+    if (!ctx2d) {
+      throw new Error("Could not initialize 2D canvas context.")
+    }
+
+    if (audioCtx.state === "suspended") {
+      await audioCtx.resume()
+    }
+
+    const audioDest = audioCtx.createMediaStreamDestination()
+    const canvasStream = canvas.captureStream(30)
+    const combinedStream = new MediaStream([
+      ...canvasStream.getVideoTracks(),
+      ...audioDest.stream.getAudioTracks(),
+    ])
+
+    const chunks: BlobPart[] = []
+    recorder = new MediaRecorder(combinedStream, {
+      mimeType,
+      videoBitsPerSecond: 4_000_000,
+    })
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        chunks.push(e.data)
+      }
+    }
+
+    const stoppedPromise = new Promise<Blob>((resolve, reject) => {
+      if (!recorder) return
+      recorder.onstop = () => {
+        resolve(new Blob(chunks, { type: mimeType }))
+      }
+      recorder.onerror = () => {
+        reject(new Error("MediaRecorder failed during Auto-Cut export."))
+      }
+    })
+
+    const seekTo = (timeSec: number) =>
+      new Promise<void>((resolve) => {
+        const clamped = Math.max(0, Math.min(video.duration || timeSec, timeSec))
+        if (Math.abs(video.currentTime - clamped) < 0.01) {
+          resolve()
+          return
+        }
+        const onSeeked = () => resolve()
+        video.addEventListener("seeked", onSeeked, { once: true })
+        video.currentTime = clamped
+      })
+
+    recorder.start(250)
+    let completedKept = 0
+    const totalKept = Math.max(0.1, analysis.keptDuration)
+
+    for (const seg of analysis.keepSegments) {
+      if (signal?.aborted) {
+        recorder.stop()
+        throw new DOMException("Export aborted", "AbortError")
+      }
+
+      const segDuration = Math.max(0.05, seg.end - seg.start)
+      await seekTo(seg.start)
+      ctx2d.drawImage(video, 0, 0, canvas.width, canvas.height)
+
+      const src = audioCtx.createBufferSource()
+      src.buffer = analysis.audioBuffer
+      const gain = audioCtx.createGain()
+      const now = audioCtx.currentTime
+      const fade = Math.min(0.012, segDuration / 4)
+      gain.gain.setValueAtTime(0, now)
+      gain.gain.linearRampToValueAtTime(1, now + fade)
+      gain.gain.setValueAtTime(1, Math.max(now + fade, now + segDuration - fade))
+      gain.gain.linearRampToValueAtTime(0, now + segDuration)
+      src.connect(gain)
+      gain.connect(audioDest)
+
+      src.start(now, seg.start, segDuration)
+      await video.play()
+
+      await new Promise<void>((resolve) => {
+        const step = () => {
+          if (signal?.aborted) {
+            video.pause()
+            try {
+              src.stop()
+            } catch {
+              // Ignore
+            }
+            resolve()
+            return
+          }
+
+          ctx2d.drawImage(video, 0, 0, canvas.width, canvas.height)
+          const segElapsed = Math.max(0, Math.min(segDuration, video.currentTime - seg.start))
+          const pct = Math.min(99, Math.round(((completedKept + segElapsed) / totalKept) * 100))
+          onProgress?.(pct)
+
+          if (video.currentTime >= seg.end - 0.015 || video.ended) {
+            video.pause()
+            try {
+              src.stop()
+            } catch {
+              // Ignore
+            }
+            resolve()
+            return
+          }
+          rafId = requestAnimationFrame(step)
+        }
+        rafId = requestAnimationFrame(step)
+      })
+
+      completedKept += segDuration
+    }
+
+    if (signal?.aborted) {
+      throw new DOMException("Export aborted", "AbortError")
+    }
+
+    if (recorder.state !== "inactive") {
+      recorder.stop()
+    }
+    const resultBlob = await stoppedPromise
+    onProgress?.(100)
+
+    const finalMime = resultBlob.type || mimeType || "video/webm"
+    const fileExtension: "mp4" | "webm" = finalMime.toLowerCase().includes("mp4") ? "mp4" : "webm"
+    const videoUrl = URL.createObjectURL(resultBlob)
+
+    return {
+      blob: resultBlob,
+      videoUrl,
+      mimeType: finalMime,
+      fileExtension,
+      durationSeconds: analysis.keptDuration,
+    }
+  } finally {
+    cleanup()
+  }
+}
+

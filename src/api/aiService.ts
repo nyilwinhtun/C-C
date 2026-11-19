@@ -1899,3 +1899,191 @@ export async function generateVideoContent(
   }
 }
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : ""
+      const base64 = result.includes(",") ? result.split(",")[1] : result
+      if (!base64) {
+        reject(new Error("Failed to encode file data."))
+        return
+      }
+      resolve(base64)
+    }
+    reader.onerror = () => reject(new Error("Failed to read file."))
+    reader.readAsDataURL(blob)
+  })
+}
+
+function readTextFileWithReader(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : ""
+      resolve(text)
+    }
+    reader.onerror = () => reject(new Error("Failed to read text file."))
+    reader.readAsText(file, "UTF-8")
+  })
+}
+
+async function callGeminiMultimodalText(params: {
+  mimeType: string
+  base64Data: string
+  prompt: string
+  maxOutputTokens?: number
+}): Promise<string> {
+  const { apiKeys } = getAiConfig()
+  const geminiKey = apiKeys.gemini.trim()
+  if (!geminiKey) {
+    throw new ApiError(
+      401,
+      "Gemini API key is required in Settings for PDF extraction and audio transcription."
+    )
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${geminiKey}`
+  const body = {
+    contents: [
+      {
+        parts: [
+          {
+            inlineData: {
+              mimeType: params.mimeType,
+              data: params.base64Data,
+            },
+          },
+          { text: params.prompt },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.2,
+      topP: 0.95,
+      maxOutputTokens: params.maxOutputTokens ?? 8192,
+    },
+  }
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw parseApiError("Gemini", res.status, text)
+  }
+
+  const data = await res.json()
+  const parts: Array<{ text?: string; thought?: boolean }> =
+    data.candidates?.[0]?.content?.parts ?? []
+  const content = parts
+    .filter((part) => !part.thought && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("")
+    .trim()
+
+  if (!content) {
+    const finishReason = data.candidates?.[0]?.finishReason
+    throw new Error(
+      finishReason
+        ? `No text returned from Gemini (finishReason: ${finishReason}).`
+        : "No text returned from Gemini."
+    )
+  }
+
+  return content
+}
+
+/**
+ * Extract readable text from a `.txt` file (via FileReader) or `.pdf` file
+ * (via Gemini 2.5 Flash multimodal inlineData).
+ */
+export async function extractTextFromDocument(file: File): Promise<string> {
+  const name = file.name.toLowerCase()
+  const isPdf = file.type === "application/pdf" || name.endsWith(".pdf")
+  const isTxt =
+    file.type.startsWith("text/") || name.endsWith(".txt") || name.endsWith(".md")
+
+  if (!isPdf && !isTxt) {
+    throw new Error("Unsupported file type. Please upload a .txt or .pdf file.")
+  }
+
+  if (isTxt) {
+    const text = await readTextFileWithReader(file)
+    if (!text.trim()) {
+      throw new Error("The uploaded text file is empty.")
+    }
+    return text.trim()
+  }
+
+  const maxPdfBytes = 18 * 1024 * 1024
+  if (file.size > maxPdfBytes) {
+    throw new Error("PDF file is too large (max 18 MB).")
+  }
+
+  const base64Data = await blobToBase64(file)
+  return await callGeminiMultimodalText({
+    mimeType: "application/pdf",
+    base64Data,
+    prompt:
+      "Extract all readable body text from this PDF document verbatim in natural reading order. Preserve chapter/section headings and paragraph breaks. Do not summarize, translate, or add commentary. Output plain text only.",
+    maxOutputTokens: 8192,
+  })
+}
+
+export type AudioTranscriptionLanguage = "auto" | "my" | "en"
+
+function normalizeAudioMimeType(mimeType: string, fileName?: string): string {
+  const clean = mimeType.split(";")[0].trim().toLowerCase()
+  if (clean && clean !== "application/octet-stream") {
+    if (clean === "audio/x-m4a") return "audio/mp4"
+    return clean
+  }
+  const lowerName = (fileName ?? "").toLowerCase()
+  if (lowerName.endsWith(".mp3")) return "audio/mp3"
+  if (lowerName.endsWith(".m4a")) return "audio/mp4"
+  if (lowerName.endsWith(".wav")) return "audio/wav"
+  if (lowerName.endsWith(".ogg")) return "audio/ogg"
+  if (lowerName.endsWith(".webm")) return "audio/webm"
+  return "audio/webm"
+}
+
+/**
+ * Transcribe spoken Burmese and/or English audio directly via Gemini 2.5 Flash (`inlineData`).
+ */
+export async function transcribeAudioWithGemini(
+  audioBlob: Blob,
+  mimeType?: string,
+  languageHint: AudioTranscriptionLanguage = "auto",
+  fileName?: string
+): Promise<string> {
+  const maxAudioBytes = 19 * 1024 * 1024
+  if (audioBlob.size > maxAudioBytes) {
+    throw new Error("Audio file is too large (max 19 MB).")
+  }
+
+  const resolvedMime = normalizeAudioMimeType(
+    mimeType || audioBlob.type || "",
+    fileName
+  )
+  const base64Data = await blobToBase64(audioBlob)
+
+  const langInstruction =
+    languageHint === "my"
+      ? "The speaker is speaking primarily in Burmese (Myanmar Unicode). Transcribe accurately in natural Myanmar Unicode script."
+      : languageHint === "en"
+        ? "The speaker is speaking primarily in English. Transcribe accurately in clean English."
+        : "The speaker may speak Burmese (Myanmar), English, or a mix of both (code-switching). Transcribe each word accurately in its spoken language (Myanmar Unicode for Burmese, English for English)."
+
+  return await callGeminiMultimodalText({
+    mimeType: resolvedMime,
+    base64Data,
+    prompt: `Transcribe the speech in this audio accurately into clean, readable text with proper punctuation and natural paragraph breaks. ${langInstruction} Do not include timestamps, speaker labels unless clearly multiple speakers, or any extra commentary—output only the transcribed text.`,
+    maxOutputTokens: 4096,
+  })
+}
+
+
