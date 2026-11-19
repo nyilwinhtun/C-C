@@ -2063,7 +2063,8 @@ export async function transcribeAudioWithGemini(
   audioBlob: Blob,
   mimeType?: string,
   languageHint: AudioTranscriptionLanguage = "auto",
-  fileName?: string
+  fileName?: string,
+  cleanScript = false
 ): Promise<string> {
   const maxAudioBytes = 19 * 1024 * 1024
   if (audioBlob.size > maxAudioBytes) {
@@ -2083,10 +2084,14 @@ export async function transcribeAudioWithGemini(
         ? "The speaker is speaking primarily in English. Transcribe accurately in clean English."
         : "The speaker may speak Burmese (Myanmar), English, or a mix of both (code-switching). Transcribe each word accurately in its spoken language (Myanmar Unicode for Burmese, English for English)."
 
+  const cleanupInstruction = cleanScript
+    ? " Automatically remove spoken filler hesitations, stumbles, and false starts (such as 'အဲ...', 'အင်း...', 'ဟို...', 'um', 'uh', 'er') and polish the wording into smooth, natural, ready-to-read voiceover script text while keeping the speaker's exact meaning and tone."
+    : ""
+
   return await callGeminiMultimodalText({
     mimeType: resolvedMime,
     base64Data,
-    prompt: `Transcribe the speech in this audio accurately into clean, readable text with proper punctuation and natural paragraph breaks. ${langInstruction} Do not include timestamps, speaker labels unless clearly multiple speakers, or any extra commentary—output only the transcribed text.`,
+    prompt: `Transcribe the speech in this audio accurately into clean, readable text with proper punctuation and natural paragraph breaks. ${langInstruction}${cleanupInstruction} Do not include timestamps, speaker labels unless clearly multiple speakers, or any extra commentary—output only the transcribed text.`,
     maxOutputTokens: 4096,
   })
 }

@@ -30,7 +30,7 @@ import {
 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
-import { isSupportedVideoFile } from "@/api/aiService"
+import { isSupportedVideoFile, transcribeAudioWithGemini } from "@/api/aiService"
 import {
   BURMESE_VOICE_PRESETS,
   SOUND_EFFECT_PRESETS,
@@ -52,6 +52,7 @@ import {
 } from "@/api/ttsService"
 import {
   generateSrtContent,
+  getAudioBlobDurationSeconds,
   mergeVideoWithVoiceover,
   previewBackgroundMusic,
   stopBackgroundMusicPreview,
@@ -155,6 +156,51 @@ function formatFileSize(bytes: number): string {
 }
 
 type AccordionSection = "voice" | "media" | "music"
+type AudioSourceMode = "ai" | "original"
+
+interface RecordedVoiceResult {
+  blob: Blob
+  audioUrl: string
+  mimeType: string
+  fileExtension: string
+  durationSeconds: number
+  label: string
+}
+
+const RECORDER_MIME_CANDIDATES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+  "audio/ogg;codecs=opus",
+] as const
+
+function pickSupportedAudioRecorderMime(): string {
+  if (typeof MediaRecorder === "undefined") return ""
+  for (const candidate of RECORDER_MIME_CANDIDATES) {
+    if (MediaRecorder.isTypeSupported(candidate)) return candidate
+  }
+  return ""
+}
+
+function formatRecordTimer(seconds: number): string {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+}
+
+function inferAudioExtension(mimeType: string, fileName?: string): string {
+  const cleanName = (fileName ?? "").toLowerCase()
+  const match = cleanName.match(/\.([a-z0-9]+)$/)
+  if (match && ["mp3", "m4a", "wav", "ogg", "webm", "aac"].includes(match[1])) {
+    return match[1]
+  }
+  const lowerMime = mimeType.toLowerCase()
+  if (lowerMime.includes("mp4") || lowerMime.includes("m4a")) return "m4a"
+  if (lowerMime.includes("mpeg") || lowerMime.includes("mp3")) return "mp3"
+  if (lowerMime.includes("wav")) return "wav"
+  if (lowerMime.includes("ogg")) return "ogg"
+  return "webm"
+}
 
 export function VoiceoverPage() {
   const language = useUIStore(useShallow((state) => state.language))
@@ -220,6 +266,12 @@ export function VoiceoverPage() {
   const [videoDuration, setVideoDuration] = useState<number | null>(null)
   const [durationSyncMode, setDurationSyncMode] = useState<VideoDurationSyncMode>("loop_video")
 
+  const [audioSourceMode, setAudioSourceMode] = useState<AudioSourceMode>("ai")
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const [isTranscribingVoice, setIsTranscribingVoice] = useState(false)
+  const [recordedVoice, setRecordedVoice] = useState<RecordedVoiceResult | null>(null)
+
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false)
   const [voiceProgress, setVoiceProgress] = useState<VoiceoverProgress | null>(null)
   const [voiceoverResult, setVoiceoverResult] = useState<VoiceoverResult | null>(null)
@@ -230,14 +282,28 @@ export function VoiceoverPage() {
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const customMusicInputRef = useRef<HTMLInputElement | null>(null)
+  const voiceUploadInputRef = useRef<HTMLInputElement | null>(null)
   const mergeAbortRef = useRef<AbortController | null>(null)
   const voiceUrlRef = useRef<string | null>(null)
+  const recordedVoiceUrlRef = useRef<string | null>(null)
   const mergedUrlRef = useRef<string | null>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const recordTimerRef = useRef<number | null>(null)
+  const recordChunksRef = useRef<BlobPart[]>([])
+  const recordingSecondsRef = useRef(0)
 
   const revokeVoiceUrl = useCallback(() => {
     if (voiceUrlRef.current) {
       URL.revokeObjectURL(voiceUrlRef.current)
       voiceUrlRef.current = null
+    }
+  }, [])
+
+  const revokeRecordedVoiceUrl = useCallback(() => {
+    if (recordedVoiceUrlRef.current) {
+      URL.revokeObjectURL(recordedVoiceUrlRef.current)
+      recordedVoiceUrlRef.current = null
     }
   }, [])
 
@@ -248,14 +314,180 @@ export function VoiceoverPage() {
     }
   }, [])
 
+  const stopRecorderResources = useCallback(() => {
+    if (recordTimerRef.current !== null) {
+      window.clearInterval(recordTimerRef.current)
+      recordTimerRef.current = null
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+    }
+  }, [])
+
   useEffect(() => {
     return () => {
       mergeAbortRef.current?.abort()
       stopBackgroundMusicPreview()
+      stopRecorderResources()
       revokeVoiceUrl()
+      revokeRecordedVoiceUrl()
       revokeMergedUrl()
     }
-  }, [revokeVoiceUrl, revokeMergedUrl])
+  }, [stopRecorderResources, revokeVoiceUrl, revokeRecordedVoiceUrl, revokeMergedUrl])
+
+  const processRecordedOrUploadedAudio = async (
+    blob: Blob,
+    mimeType: string,
+    label: string,
+    fileName?: string,
+    fallbackDuration = 0
+  ) => {
+    const resolvedDuration =
+      (await getAudioBlobDurationSeconds(blob)) || fallbackDuration || 1
+    const fileExtension = inferAudioExtension(mimeType, fileName)
+
+    revokeRecordedVoiceUrl()
+    revokeMergedUrl()
+    const url = URL.createObjectURL(blob)
+    recordedVoiceUrlRef.current = url
+
+    setRecordedVoice({
+      blob,
+      audioUrl: url,
+      mimeType,
+      fileExtension,
+      durationSeconds: resolvedDuration,
+      label,
+    })
+    setMergedVideo(null)
+    if (videoDuration !== null) {
+      setDurationSyncMode(resolvedDuration > videoDuration ? "loop_video" : "fit_video")
+    }
+
+    setIsTranscribingVoice(true)
+    try {
+      const cleanedText = await transcribeAudioWithGemini(
+        blob,
+        mimeType,
+        "auto",
+        fileName,
+        true
+      )
+      if (cleanedText.trim()) {
+        setVoiceoverDraftScript(cleanedText.trim())
+        toast.success(
+          isMy
+            ? "အသံဖမ်းယူပြီး စာသားသန့်ရှင်းစွာ ပြောင်းလဲပြီးပါပြီ။"
+            : "Voice captured & transcribed into clean script!"
+        )
+      } else {
+        toast.info(
+          isMy
+            ? "အသံဖိုင် သိမ်းဆည်းပြီးပါပြီ (စကားသံ မတွေ့ရှိပါ)။"
+            : "Audio saved, but no clear speech was detected."
+        )
+      }
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to transcribe recorded audio."
+      toast.error(msg)
+    } finally {
+      setIsTranscribingVoice(false)
+    }
+  }
+
+  const startVoiceRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      toast.error(
+        isMy
+          ? "ဤ Browser တွင် အသံဖမ်းစနစ်ကို မပံ့ပိုးပါ။"
+          : "Audio recording is not supported in this browser."
+      )
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
+
+      const mimeType = pickSupportedAudioRecorderMime()
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream)
+      recorderRef.current = recorder
+      recordChunksRef.current = []
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          recordChunksRef.current.push(e.data)
+        }
+      }
+
+      recorder.onstop = () => {
+        const finalMime = recorder.mimeType || mimeType || "audio/webm"
+        const blob = new Blob(recordChunksRef.current, { type: finalMime })
+        const elapsed = recordingSecondsRef.current
+        stopRecorderResources()
+        setIsRecordingVoice(false)
+        if (blob.size > 0) {
+          const label = isMy
+            ? `ကိုယ်ပိုင်အသံသွင်းချက် (${formatRecordTimer(elapsed)})`
+            : `My Recording (${formatRecordTimer(elapsed)})`
+          void processRecordedOrUploadedAudio(blob, finalMime, label, undefined, elapsed)
+        }
+      }
+
+      recordingSecondsRef.current = 0
+      setRecordingSeconds(0)
+      setIsRecordingVoice(true)
+      recorder.start(250)
+      recordTimerRef.current = window.setInterval(() => {
+        recordingSecondsRef.current += 1
+        setRecordingSeconds(recordingSecondsRef.current)
+      }, 1000)
+    } catch (err) {
+      stopRecorderResources()
+      setIsRecordingVoice(false)
+      const msg =
+        err instanceof Error ? err.message : "Microphone permission denied or unavailable."
+      toast.error(msg)
+    }
+  }
+
+  const stopVoiceRecording = () => {
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      recorderRef.current.stop()
+    } else {
+      stopRecorderResources()
+      setIsRecordingVoice(false)
+    }
+  }
+
+  const handleUploadVoiceFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+
+    const mimeType = file.type || "audio/mpeg"
+    await processRecordedOrUploadedAudio(file, mimeType, file.name, file.name)
+  }
+
+  const handleClearRecordedVoice = () => {
+    revokeRecordedVoiceUrl()
+    setRecordedVoice(null)
+    revokeMergedUrl()
+    setMergedVideo(null)
+  }
+
+  const handleDownloadRecordedVoice = () => {
+    if (!recordedVoice) return
+    const timestamp = new Date().toISOString().slice(0, 10)
+    triggerBlobDownload(
+      recordedVoice.audioUrl,
+      `my-voice-${timestamp}.${recordedVoice.fileExtension}`
+    )
+  }
 
   const toggleSection = (section: AccordionSection) => {
     setOpenSection((prev) => (prev === section ? null : section))
@@ -485,8 +717,18 @@ export function VoiceoverPage() {
     toast.info("Direct sharing is not supported on this browser; downloading audio instead.")
   }
 
+  const activeVoiceoverAudio =
+    audioSourceMode === "original"
+      ? recordedVoice?.blob ?? null
+      : voiceoverResult?.audioBuffer ?? null
+
+  const activeVoiceoverDuration =
+    audioSourceMode === "original"
+      ? recordedVoice?.durationSeconds ?? null
+      : voiceoverResult?.durationSeconds ?? null
+
   const handleDownloadSrt = () => {
-    const duration = voiceoverResult?.durationSeconds ?? 15
+    const duration = activeVoiceoverDuration ?? 15
     const srt = generateSrtContent(voiceoverDraftScript, duration)
     if (!srt) {
       toast.error(isMy ? ".SRT ထုတ်ရန် စာသားအရင်ထည့်ပါ။" : "Enter script text to export .SRT.")
@@ -515,11 +757,15 @@ export function VoiceoverPage() {
       )
       return
     }
-    if (!voiceoverResult) {
+    if (!activeVoiceoverAudio) {
       toast.error(
-        isMy
-          ? "အရင်ဆုံး AI Voiceover အသံဖန်တီးပါ။"
-          : "Generate the AI voice preview first."
+        audioSourceMode === "original"
+          ? isMy
+            ? "အရင်ဆုံး ကိုယ်ပိုင်အသံကို ဖမ်းယူပါ သို့မဟုတ် အသံဖိုင်တင်ပါ။"
+            : "Record or upload your voice first."
+          : isMy
+            ? "အရင်ဆုံး AI Voiceover အသံဖန်တီးပါ။"
+            : "Generate the AI voice preview first."
       )
       return
     }
@@ -538,7 +784,7 @@ export function VoiceoverPage() {
       const merged = await mergeVideoWithVoiceover({
         videoFile: mediaMode === "video" ? videoFile : null,
         imageFiles: mediaMode === "photos" ? uploadedPhotos.map((p) => p.file) : [],
-        voiceoverAudio: voiceoverResult.audioBuffer,
+        voiceoverAudio: activeVoiceoverAudio,
         originalVolume,
         voiceoverVolume: 1.0,
         durationSyncMode,
@@ -622,9 +868,16 @@ export function VoiceoverPage() {
   const canShareFiles =
     typeof navigator !== "undefined" && typeof navigator.share === "function"
 
-  const voiceSummary = `${voiceType === "female" ? "Nilar" : "Thiha"} · ${speed.toFixed(1)}x${
-    introSfx !== "none" ? ` · ${SOUND_EFFECT_PRESETS[introSfx].label}` : ""
-  }`
+  const voiceSummary =
+    audioSourceMode === "original"
+      ? recordedVoice
+        ? `${isMy ? "ကိုယ်ပိုင်အသံ" : "My Voice"} · ${formatAudioClockDuration(recordedVoice.durationSeconds)}`
+        : isMy
+          ? "ကိုယ်ပိုင်အသံ (မသွင်းရသေးပါ)"
+          : "My Voice (Not recorded)"
+      : `${voiceType === "female" ? "Nilar" : "Thiha"} · ${speed.toFixed(1)}x${
+          introSfx !== "none" ? ` · ${SOUND_EFFECT_PRESETS[introSfx].label}` : ""
+        }`
 
   const mediaSummary =
     mediaMode === "photos"
@@ -662,9 +915,112 @@ export function VoiceoverPage() {
         </CardHeader>
 
         <CardContent className="p-3.5 sm:p-5 space-y-3.5">
-          {/* Script Input + 1-tap Pause Pills */}
+          {/* Dual Audio Source Mode 2-Pill Toggle */}
           <div className="space-y-1.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-muted/50 border border-border/60">
+              <button
+                type="button"
+                onClick={() => setAudioSourceMode("ai")}
+                className={`flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition-all cursor-pointer font-myanmar ${
+                  audioSourceMode === "ai"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-background/60"
+                }`}
+              >
+                <span aria-hidden="true">🤖</span>
+                <span className="truncate">
+                  {isMy ? "AI အသံသုံးမည် (AI TTS)" : "AI Voice (TTS)"}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAudioSourceMode("original")}
+                className={`flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition-all cursor-pointer font-myanmar ${
+                  audioSourceMode === "original"
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-background/60"
+                }`}
+              >
+                <span aria-hidden="true">🎙️</span>
+                <span className="truncate">
+                  {isMy ? "ကိုယ်ပိုင်အသံအစစ် သုံးမည် (My Voice)" : "My Recorded Voice"}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* Built-In Voice Recorder & Auto-Transcriber + Script Input */}
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-indigo-500/20 bg-indigo-500/[0.04] px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {!isRecordingVoice ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="default"
+                    onClick={startVoiceRecording}
+                    disabled={isTranscribingVoice || isGeneratingVoice || isMergingVideo}
+                    className="h-8 px-3 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white border-0 font-myanmar"
+                  >
+                    <Mic className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                    {isMy ? "🎤 အသံဖြင့် ပြောထည့်မည် (Record Voice)" : "🎤 Record Voice"}
+                  </Button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-500/15 border border-rose-500/40 px-2.5 py-1 text-xs font-semibold text-rose-600 dark:text-rose-400">
+                      <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+                      {formatRecordTimer(recordingSeconds)}
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      onClick={stopVoiceRecording}
+                      className="h-8 px-3 text-xs font-semibold font-myanmar"
+                    >
+                      <Square className="h-3 w-3 mr-1.5 fill-current" aria-hidden="true" />
+                      {isMy ? "ရပ်မည်" : "Stop"}
+                    </Button>
+                  </div>
+                )}
+
+                <input
+                  ref={voiceUploadInputRef}
+                  type="file"
+                  accept="audio/*,.mp3,.m4a,.wav,.ogg,.webm"
+                  onChange={handleUploadVoiceFile}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => voiceUploadInputRef.current?.click()}
+                  disabled={isRecordingVoice || isTranscribingVoice || isGeneratingVoice}
+                  className="h-8 px-2.5 text-xs border-border/60 font-myanmar"
+                >
+                  <Upload className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                  {isMy ? "အသံဖိုင်တင်မည်" : "Upload Audio"}
+                </Button>
+              </div>
+
+              {isTranscribingVoice ? (
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 font-myanmar">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  {isMy
+                    ? "Gemini 2.5 Flash ဖြင့် စာသားပြောင်းနေပါသည်..."
+                    : "Transcribing & cleaning script..."}
+                </span>
+              ) : (
+                <span className="text-[11px] text-muted-foreground font-myanmar">
+                  {isMy
+                    ? "ပြောပြီးလျှင် စာသားအလိုအလျောက် ပြောင်းပေးပါမည်"
+                    : "Auto-transcribes & cleans fillers"}
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
               <div className="flex flex-wrap items-center gap-2">
                 <Label
                   htmlFor="voiceover-page-text"
@@ -765,6 +1121,15 @@ export function VoiceoverPage() {
 
             {openSection === "voice" && (
               <div className="px-3.5 pb-3.5 pt-2 border-t border-border/50 space-y-3">
+                {audioSourceMode === "original" && (
+                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-700 dark:text-emerald-300 font-myanmar">
+                    {isMy
+                      ? "🎙️ ကိုယ်ပိုင်အသံအစစ် (My Voice) မုဒ်ဖွင့်ထားပါသည် — AI TTS အသံအစား သင့်ကိုယ်ပိုင်အသံကို ဗီဒီယိုထဲသို့ တိုက်ရိုက်ထည့်သွင်းပေးပါမည်။"
+                      : "🎙️ My Recorded Voice mode is active — your own recorded/uploaded voice will be used as the master track instead of AI TTS."}
+                  </div>
+                )}
+                {audioSourceMode === "ai" && (
+                  <>
                 {/* Delivery Tone */}
                 <div className="space-y-1.5">
                   <Label className="text-[11px] font-medium text-muted-foreground font-myanmar">
@@ -974,6 +1339,8 @@ export function VoiceoverPage() {
                     </div>
                   )}
                 </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -1514,58 +1881,60 @@ export function VoiceoverPage() {
             )}
           </div>
 
-          {/* Generate Audio CTA (Desktop) */}
-          <div className="hidden lg:block pt-1 space-y-2">
-            <Button
-              type="button"
-              onClick={handleGenerateVoice}
-              disabled={isGeneratingVoice || isMergingVideo || !voiceoverDraftScript.trim()}
-              className="w-full h-10 text-sm font-semibold bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white border-0"
-            >
-              {isGeneratingVoice ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
-                  {voiceProgress && voiceProgress.totalChunks > 1
-                    ? isMy
-                      ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
-                      : `Synthesizing audio... (Part ${voiceProgress.currentChunk}/${voiceProgress.totalChunks})`
-                    : isMy
-                      ? "အသံဖန်တီးနေပါသည်..."
-                      : "Synthesizing Burmese Voiceover..."}
-                </>
-              ) : (
-                <>
-                  <Mic className="h-4 w-4 mr-2" aria-hidden="true" />
-                  {isMy ? "AI အသံနမူနာ ဖန်တီးမည်" : "Generate Voice Preview"}
-                </>
+          {/* Generate Audio CTA (Desktop, AI TTS Mode only) */}
+          {audioSourceMode === "ai" && (
+            <div className="hidden lg:block pt-1 space-y-2">
+              <Button
+                type="button"
+                onClick={handleGenerateVoice}
+                disabled={isGeneratingVoice || isMergingVideo || !voiceoverDraftScript.trim()}
+                className="w-full h-10 text-sm font-semibold bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white border-0"
+              >
+                {isGeneratingVoice ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
+                    {voiceProgress && voiceProgress.totalChunks > 1
+                      ? isMy
+                        ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
+                        : `Synthesizing audio... (Part ${voiceProgress.currentChunk}/${voiceProgress.totalChunks})`
+                      : isMy
+                        ? "အသံဖန်တီးနေပါသည်..."
+                        : "Synthesizing Burmese Voiceover..."}
+                  </>
+                ) : (
+                  <>
+                    <Mic className="h-4 w-4 mr-2" aria-hidden="true" />
+                    {isMy ? "AI အသံနမူနာ ဖန်တီးမည်" : "Generate Voice Preview"}
+                  </>
+                )}
+              </Button>
+              {isGeneratingVoice && voiceProgress && voiceProgress.totalChunks > 1 && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span>
+                      {isMy
+                        ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
+                        : `Synthesizing part ${voiceProgress.currentChunk} of ${voiceProgress.totalChunks}...`}
+                    </span>
+                    <span className="font-semibold text-foreground">
+                      {Math.round((voiceProgress.currentChunk / voiceProgress.totalChunks) * 100)}%
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-indigo-500 to-blue-500 transition-all duration-200"
+                      style={{
+                        width: `${Math.round((voiceProgress.currentChunk / voiceProgress.totalChunks) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
               )}
-            </Button>
-            {isGeneratingVoice && voiceProgress && voiceProgress.totalChunks > 1 && (
-              <div className="space-y-1">
-                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span>
-                    {isMy
-                      ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
-                      : `Synthesizing part ${voiceProgress.currentChunk} of ${voiceProgress.totalChunks}...`}
-                  </span>
-                  <span className="font-semibold text-foreground">
-                    {Math.round((voiceProgress.currentChunk / voiceProgress.totalChunks) * 100)}%
-                  </span>
-                </div>
-                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-indigo-500 to-blue-500 transition-all duration-200"
-                    style={{
-                      width: `${Math.round((voiceProgress.currentChunk / voiceProgress.totalChunks) * 100)}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
 
-          {/* Audio Preview Player */}
-          {voiceoverResult && (
+          {/* Audio Preview Player (AI TTS Mode) */}
+          {audioSourceMode === "ai" && voiceoverResult && (
             <div className="rounded-xl border border-border/60 bg-background/80 p-3 space-y-2.5">
               <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                 <span className="font-medium text-foreground truncate">
@@ -1604,13 +1973,61 @@ export function VoiceoverPage() {
             </div>
           )}
 
+          {/* Recorded / Uploaded Voice Preview Player (My Voice Mode) */}
+          {audioSourceMode === "original" && (
+            recordedVoice ? (
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.04] p-3 space-y-2.5">
+                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-emerald-700 dark:text-emerald-300 truncate font-myanmar">
+                    🎙️ {recordedVoice.label}
+                  </span>
+                  <span className="shrink-0 font-medium text-foreground">
+                    {isMy
+                      ? `ကြာချိန်: ${formatAudioClockDuration(recordedVoice.durationSeconds)}`
+                      : `Duration: ${formatAudioClockDuration(recordedVoice.durationSeconds)}`}{" "}
+                    · {recordedVoice.fileExtension.toUpperCase()}
+                  </span>
+                </div>
+                <audio controls src={recordedVoice.audioUrl} className="w-full h-10" />
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownloadRecordedVoice}
+                    className="h-8 px-3 text-xs border-border/60"
+                  >
+                    <Download className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                    {isMy ? "အသံဖိုင် ဒေါင်းလုဒ်" : "Download Audio"} (.{recordedVoice.fileExtension})
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearRecordedVoice}
+                    className="h-8 px-2.5 text-xs text-muted-foreground hover:text-destructive"
+                  >
+                    <X className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
+                    {isMy ? "ဖယ်ရှားမည်" : "Clear"}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-emerald-500/35 bg-emerald-500/[0.03] px-3.5 py-3 text-xs text-muted-foreground font-myanmar">
+                {isMy
+                  ? "🎙️ အထက်ပါ 'အသံဖြင့် ပြောထည့်မည်' ခလုတ်ကို နှိပ်၍ အသံသွင်းပါ သို့မဟုတ် အသံဖိုင်တင်ပါ — ထိုအသံကို ဗီဒီယို၏ Master Voiceover အဖြစ် တိုက်ရိုက်အသုံးပြုပါမည်။"
+                  : "🎙️ Click 'Record Voice' or 'Upload Audio' above to capture your own voiceover track for video export."}
+              </div>
+            )
+          )}
+
           {/* Create / Merge Video Action */}
           <div className="space-y-2 pt-1">
             <div className="flex flex-col sm:flex-row gap-2">
               <Button
                 type="button"
                 onClick={handleMergeVideo}
-                disabled={!voiceoverResult || !hasReadyMedia || isMergingVideo || isGeneratingVoice}
+                disabled={!activeVoiceoverAudio || !hasReadyMedia || isMergingVideo || isGeneratingVoice || isRecordingVoice}
                 className="flex-1 h-10 text-xs sm:text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white border-0 disabled:opacity-50"
               >
                 {isMergingVideo ? (
@@ -1666,35 +2083,68 @@ export function VoiceoverPage() {
       {/* Mobile Bottom Thumb-Zone Bar */}
       <div className="lg:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur-md px-3 py-2.5 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
         <div className="flex items-center gap-2 max-w-3xl mx-auto">
-          <Button
-            type="button"
-            onClick={handleGenerateVoice}
-            disabled={isGeneratingVoice || isMergingVideo || !voiceoverDraftScript.trim()}
-            className="flex-1 min-h-[44px] text-xs font-semibold bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white border-0 font-myanmar"
-          >
-            {isGeneratingVoice ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" aria-hidden="true" />
-                {voiceProgress && voiceProgress.totalChunks > 1
-                  ? isMy
-                    ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
-                    : `Part ${voiceProgress.currentChunk}/${voiceProgress.totalChunks}...`
-                  : isMy
-                    ? "အသံဖန်တီးနေပါသည်..."
-                    : "Generating..."}
-              </>
-            ) : (
-              <>
-                <Mic className="h-4 w-4 mr-1.5" aria-hidden="true" />
-                {isMy ? "AI အသံဖန်တီးမည်" : "Generate Voice"}
-              </>
-            )}
-          </Button>
-          {voiceoverResult && hasReadyMedia && (
+          {audioSourceMode === "ai" ? (
+            <Button
+              type="button"
+              onClick={handleGenerateVoice}
+              disabled={isGeneratingVoice || isMergingVideo || !voiceoverDraftScript.trim()}
+              className="flex-1 min-h-[44px] text-xs font-semibold bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white border-0 font-myanmar"
+            >
+              {isGeneratingVoice ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" aria-hidden="true" />
+                  {voiceProgress && voiceProgress.totalChunks > 1
+                    ? isMy
+                      ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
+                      : `Part ${voiceProgress.currentChunk}/${voiceProgress.totalChunks}...`
+                    : isMy
+                      ? "အသံဖန်တီးနေပါသည်..."
+                      : "Generating..."}
+                </>
+              ) : (
+                <>
+                  <Mic className="h-4 w-4 mr-1.5" aria-hidden="true" />
+                  {isMy ? "AI အသံဖန်တီးမည်" : "Generate Voice"}
+                </>
+              )}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              onClick={isRecordingVoice ? stopVoiceRecording : startVoiceRecording}
+              disabled={isTranscribingVoice || isMergingVideo}
+              className={`flex-1 min-h-[44px] text-xs font-semibold text-white border-0 font-myanmar ${
+                isRecordingVoice
+                  ? "bg-destructive hover:bg-destructive/90"
+                  : "bg-rose-600 hover:bg-rose-700"
+              }`}
+            >
+              {isRecordingVoice ? (
+                <>
+                  <Square className="h-3.5 w-3.5 mr-1.5 fill-current" aria-hidden="true" />
+                  {isMy
+                    ? `ရပ်မည် (${formatRecordTimer(recordingSeconds)})`
+                    : `Stop (${formatRecordTimer(recordingSeconds)})`}
+                </>
+              ) : (
+                <>
+                  <Mic className="h-4 w-4 mr-1.5" aria-hidden="true" />
+                  {recordedVoice
+                    ? isMy
+                      ? "အသံပြန်သွင်းမည်"
+                      : "Re-record Voice"
+                    : isMy
+                      ? "အသံဖြင့် ပြောထည့်မည်"
+                      : "Record Voice"}
+                </>
+              )}
+            </Button>
+          )}
+          {activeVoiceoverAudio && hasReadyMedia && (
             <Button
               type="button"
               onClick={handleMergeVideo}
-              disabled={isMergingVideo || isGeneratingVoice}
+              disabled={isMergingVideo || isGeneratingVoice || isRecordingVoice}
               className="min-h-[44px] px-3.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white border-0 font-myanmar"
             >
               <Film className="h-4 w-4 mr-1.5" aria-hidden="true" />

@@ -1564,3 +1564,43 @@ export async function exportAutoCutVideo(
   }
 }
 
+/**
+ * Decode an audio Blob (e.g. a microphone recording or uploaded voice file)
+ * to determine its exact playback duration in seconds.
+ */
+export async function getAudioBlobDurationSeconds(blob: Blob): Promise<number> {
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+
+  if (AudioCtx) {
+    const ctx = new AudioCtx()
+    try {
+      const buffer = await ctx.decodeAudioData(await blob.arrayBuffer())
+      if (Number.isFinite(buffer.duration) && buffer.duration > 0) {
+        return buffer.duration
+      }
+    } catch {
+      // Fallback to HTMLAudioElement below
+    } finally {
+      await ctx.close().catch(() => {})
+    }
+  }
+
+  return await new Promise<number>((resolve) => {
+    const url = URL.createObjectURL(blob)
+    const audio = new Audio()
+    audio.preload = "metadata"
+    audio.onloadedmetadata = () => {
+      const dur = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0
+      URL.revokeObjectURL(url)
+      resolve(dur)
+    }
+    audio.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve(0)
+    }
+    audio.src = url
+  })
+}
+
