@@ -432,6 +432,11 @@ function base64ToUint8Array(base64: string): Uint8Array {
   return bytes
 }
 
+export const TTS_SAMPLE_RATE = 24000
+export const TTS_NUM_CHANNELS = 1
+export const TTS_BITS_PER_SAMPLE = 16
+export const TTS_BYTE_RATE = (TTS_SAMPLE_RATE * TTS_NUM_CHANNELS * TTS_BITS_PER_SAMPLE) / 8
+
 function parsePcmSampleRate(mimeType: string): number {
   const match = mimeType.match(/rate=(\d+)/i)
   if (match && match[1]) {
@@ -440,7 +445,148 @@ function parsePcmSampleRate(mimeType: string): number {
       return parsed
     }
   }
-  return 24000
+  return TTS_SAMPLE_RATE
+}
+
+interface ParsedWavPcm {
+  pcmBytes: Uint8Array
+  sampleRate: number
+  numChannels: number
+  bitsPerSample: number
+}
+
+function isRiffWaveHeader(bytes: Uint8Array): boolean {
+  return (
+    bytes.byteLength >= 44 &&
+    bytes[0] === 0x52 && // R
+    bytes[1] === 0x49 && // I
+    bytes[2] === 0x46 && // F
+    bytes[3] === 0x46 && // F
+    bytes[8] === 0x57 && // W
+    bytes[9] === 0x41 && // A
+    bytes[10] === 0x56 && // V
+    bytes[11] === 0x45 // E
+  )
+}
+
+/**
+ * Strip the RIFF/WAV header (44 bytes or extended chunks) and extract raw PCM payload
+ * along with its format metadata. Returns null if bytes are not a valid PCM WAV.
+ */
+function extractPcmFromWavBytes(bytes: Uint8Array): ParsedWavPcm | null {
+  if (!isRiffWaveHeader(bytes)) return null
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  let offset = 12
+  let audioFormat = 1
+  let numChannels = TTS_NUM_CHANNELS
+  let sampleRate = TTS_SAMPLE_RATE
+  let bitsPerSample = TTS_BITS_PER_SAMPLE
+  let foundFmt = false
+  let pcmBytes: Uint8Array | null = null
+
+  while (offset + 8 <= bytes.byteLength) {
+    const id = String.fromCharCode(
+      bytes[offset],
+      bytes[offset + 1],
+      bytes[offset + 2],
+      bytes[offset + 3]
+    )
+    const chunkSize = view.getUint32(offset + 4, true)
+    const payloadStart = offset + 8
+
+    if (id === "fmt " && payloadStart + 16 <= bytes.byteLength) {
+      audioFormat = view.getUint16(payloadStart, true)
+      numChannels = view.getUint16(payloadStart + 2, true)
+      sampleRate = view.getUint32(payloadStart + 4, true)
+      bitsPerSample = view.getUint16(payloadStart + 14, true)
+      foundFmt = true
+    } else if (id === "data") {
+      const payloadEnd =
+        chunkSize > 0 ? Math.min(bytes.byteLength, payloadStart + chunkSize) : bytes.byteLength
+      pcmBytes = bytes.subarray(payloadStart, payloadEnd)
+      break
+    }
+
+    const paddedSize = chunkSize + (chunkSize % 2)
+    const nextOffset = payloadStart + paddedSize
+    if (nextOffset <= offset) break
+    offset = nextOffset
+  }
+
+  if (!pcmBytes) {
+    pcmBytes = bytes.subarray(44)
+  }
+
+  if (foundFmt && (audioFormat !== 1 || bitsPerSample !== 16)) {
+    return null
+  }
+
+  return {
+    pcmBytes,
+    sampleRate: sampleRate > 0 ? sampleRate : TTS_SAMPLE_RATE,
+    numChannels: numChannels > 0 ? numChannels : TTS_NUM_CHANNELS,
+    bitsPerSample: bitsPerSample > 0 ? bitsPerSample : TTS_BITS_PER_SAMPLE,
+  }
+}
+
+/**
+ * Normalize raw 16-bit signed LE PCM to consistent 24000Hz mono 16-bit PCM
+ * so concatenated chunks never shift pitch/speed mid-audio.
+ */
+function normalizePcmTo24kMono(
+  pcmBytes: Uint8Array,
+  sampleRate: number,
+  numChannels = 1
+): Uint8Array {
+  const bytesPerFrame = Math.max(1, numChannels) * 2
+  const usableBytes = pcmBytes.byteLength - (pcmBytes.byteLength % bytesPerFrame)
+  if (usableBytes <= 0) return new Uint8Array(0)
+
+  const aligned = usableBytes === pcmBytes.byteLength ? pcmBytes : pcmBytes.subarray(0, usableBytes)
+  if (sampleRate === TTS_SAMPLE_RATE && numChannels === TTS_NUM_CHANNELS) {
+    return aligned
+  }
+
+  const view = new DataView(aligned.buffer, aligned.byteOffset, aligned.byteLength)
+  const frameCount = usableBytes / bytesPerFrame
+  const mono = new Float32Array(frameCount)
+
+  for (let i = 0; i < frameCount; i += 1) {
+    let sum = 0
+    for (let ch = 0; ch < numChannels; ch += 1) {
+      const sample = view.getInt16((i * numChannels + ch) * 2, true)
+      sum += sample / 32768
+    }
+    mono[i] = sum / numChannels
+  }
+
+  if (sampleRate === TTS_SAMPLE_RATE) {
+    const outBytes = new Uint8Array(frameCount * 2)
+    const outView = new DataView(outBytes.buffer)
+    for (let i = 0; i < frameCount; i += 1) {
+      const clamped = Math.max(-1, Math.min(1, mono[i]))
+      outView.setInt16(i * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true)
+    }
+    return outBytes
+  }
+
+  const targetFrames = Math.max(1, Math.round((frameCount * TTS_SAMPLE_RATE) / sampleRate))
+  const outBytes = new Uint8Array(targetFrames * 2)
+  const outView = new DataView(outBytes.buffer)
+  const ratio = sampleRate / TTS_SAMPLE_RATE
+
+  for (let i = 0; i < targetFrames; i += 1) {
+    const srcPos = i * ratio
+    const idx0 = Math.min(frameCount - 1, Math.floor(srcPos))
+    const idx1 = Math.min(frameCount - 1, idx0 + 1)
+    const frac = srcPos - idx0
+    const interpolated = mono[idx0] * (1 - frac) + mono[idx1] * frac
+    const clamped = Math.max(-1, Math.min(1, interpolated))
+    outView.setInt16(i * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true)
+  }
+
+  return outBytes
 }
 
 /**
@@ -449,9 +595,9 @@ function parsePcmSampleRate(mimeType: string): number {
  */
 function pcmToWavBlob(
   pcmBytes: Uint8Array,
-  sampleRate = 24000,
-  numChannels = 1,
-  bitsPerSample = 16
+  sampleRate = TTS_SAMPLE_RATE,
+  numChannels = TTS_NUM_CHANNELS,
+  bitsPerSample = TTS_BITS_PER_SAMPLE
 ): Blob {
   const byteRate = (sampleRate * numChannels * bitsPerSample) / 8
   const blockAlign = (numChannels * bitsPerSample) / 8
@@ -480,6 +626,62 @@ function pcmToWavBlob(
   view.setUint32(40, dataSize, true)
 
   new Uint8Array(buffer, 44).set(pcmBytes)
+  return new Blob([buffer], { type: "audio/wav" })
+}
+
+/**
+ * Concatenate multiple 24kHz 16-bit mono PCM buffers sequentially with a brief
+ * silence gap and write a single accurate 44-byte RIFF/WAV header.
+ */
+function concatenatePcmBuffersToWav(pcmChunks: Uint8Array[], gapMs = 120): Blob {
+  const nonEmpty = pcmChunks.filter((c) => c.byteLength > 0)
+  if (nonEmpty.length === 0) {
+    return pcmToWavBlob(new Uint8Array(0), TTS_SAMPLE_RATE, TTS_NUM_CHANNELS, TTS_BITS_PER_SAMPLE)
+  }
+  if (nonEmpty.length === 1) {
+    return pcmToWavBlob(nonEmpty[0], TTS_SAMPLE_RATE, TTS_NUM_CHANNELS, TTS_BITS_PER_SAMPLE)
+  }
+
+  const gapSamples = Math.max(0, Math.floor((TTS_SAMPLE_RATE * gapMs) / 1000))
+  const gapBytes = gapSamples * 2
+  const totalDataLength =
+    nonEmpty.reduce((sum, chunk) => sum + chunk.byteLength, 0) + gapBytes * (nonEmpty.length - 1)
+
+  const buffer = new ArrayBuffer(44 + totalDataLength)
+  const view = new DataView(buffer)
+
+  const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i += 1) {
+      view.setUint8(offset + i, str.charCodeAt(i))
+    }
+  }
+
+  writeString(0, "RIFF")
+  view.setUint32(4, 36 + totalDataLength, true)
+  writeString(8, "WAVE")
+  writeString(12, "fmt ")
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, TTS_NUM_CHANNELS, true)
+  view.setUint32(24, TTS_SAMPLE_RATE, true)
+  view.setUint32(28, TTS_BYTE_RATE, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, TTS_BITS_PER_SAMPLE, true)
+  writeString(36, "data")
+  view.setUint32(40, totalDataLength, true)
+
+  const out = new Uint8Array(buffer, 44)
+  let offset = 0
+  for (let i = 0; i < nonEmpty.length; i += 1) {
+    const chunk = nonEmpty[i]
+    out.set(chunk, offset)
+    offset += chunk.byteLength
+    if (i < nonEmpty.length - 1) {
+      // ArrayBuffer is zero-initialized, so advancing offset leaves clean 16-bit PCM silence
+      offset += gapBytes
+    }
+  }
+
   return new Blob([buffer], { type: "audio/wav" })
 }
 
@@ -517,9 +719,9 @@ export const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 
 /**
  * Split long scripts cleanly at sentence boundaries (`။` / newlines / punctuation)
- * so each TTS chunk synthesizes reliably without timeouts or clipping.
+ * so each TTS chunk (max ~160-200 chars) synthesizes reliably without Gemini truncation.
  */
-export function splitScriptIntoChunks(text: string, maxChunkChars = 360): string[] {
+export function splitScriptIntoChunks(text: string, maxChunkChars = 180): string[] {
   const normalized = text.trim()
   if (!normalized) return []
   if (normalized.length <= maxChunkChars) return [normalized]
@@ -528,6 +730,14 @@ export function splitScriptIntoChunks(text: string, maxChunkChars = 360): string
     .split(/\r?\n+/)
     .map((line) => line.trim())
     .filter(Boolean)
+
+  const pushHardSplit = (segment: string, out: string[]) => {
+    const chars = Array.from(segment)
+    for (let i = 0; i < chars.length; i += maxChunkChars) {
+      const piece = chars.slice(i, i + maxChunkChars).join("").trim()
+      if (piece) out.push(piece)
+    }
+  }
 
   const sentences: string[] = []
   for (const line of lines) {
@@ -540,14 +750,47 @@ export function splitScriptIntoChunks(text: string, maxChunkChars = 360): string
         sentences.push(trimmed)
       } else {
         // Fallback split at Burmese comma (၊), comma, or whitespace
-        const subParts = trimmed.split(/(?<=[၊,])\s+/)
+        const subParts = trimmed.split(/(?<=[၊,])\s*/)
         let subCurrent = ""
         for (const sub of subParts) {
-          if (subCurrent && subCurrent.length + sub.length + 1 > maxChunkChars) {
+          const subTrimmed = sub.trim()
+          if (!subTrimmed) continue
+          if (subTrimmed.length > maxChunkChars) {
+            if (subCurrent.trim()) {
+              sentences.push(subCurrent.trim())
+              subCurrent = ""
+            }
+            const words = subTrimmed.split(/\s+/)
+            if (words.length > 1) {
+              let wordBuf = ""
+              for (const w of words) {
+                if (w.length > maxChunkChars) {
+                  if (wordBuf.trim()) {
+                    sentences.push(wordBuf.trim())
+                    wordBuf = ""
+                  }
+                  pushHardSplit(w, sentences)
+                } else if (wordBuf && wordBuf.length + w.length + 1 > maxChunkChars) {
+                  sentences.push(wordBuf.trim())
+                  wordBuf = w
+                } else {
+                  wordBuf = wordBuf ? `${wordBuf} ${w}` : w
+                }
+              }
+              if (wordBuf.trim()) {
+                sentences.push(wordBuf.trim())
+              }
+            } else {
+              pushHardSplit(subTrimmed, sentences)
+            }
+            continue
+          }
+
+          if (subCurrent && subCurrent.length + subTrimmed.length + 1 > maxChunkChars) {
             sentences.push(subCurrent.trim())
-            subCurrent = sub
+            subCurrent = subTrimmed
           } else {
-            subCurrent = subCurrent ? `${subCurrent} ${sub}` : sub
+            subCurrent = subCurrent ? `${subCurrent} ${subTrimmed}` : subTrimmed
           }
         }
         if (subCurrent.trim()) {
@@ -573,6 +816,46 @@ export function splitScriptIntoChunks(text: string, maxChunkChars = 360): string
   return chunks
 }
 
+function audioBufferTo24kMonoPcm(audioBuffer: AudioBuffer): Uint8Array {
+  const length = audioBuffer.length
+  const channelCount = audioBuffer.numberOfChannels
+  const mono = new Float32Array(length)
+
+  for (let i = 0; i < length; i += 1) {
+    let sample = 0
+    for (let ch = 0; ch < channelCount; ch += 1) {
+      sample += audioBuffer.getChannelData(ch)[i] ?? 0
+    }
+    mono[i] = sample / Math.max(1, channelCount)
+  }
+
+  const srcRate = audioBuffer.sampleRate
+  if (srcRate === TTS_SAMPLE_RATE) {
+    const pcmBytes = new Uint8Array(length * 2)
+    const view = new DataView(pcmBytes.buffer)
+    for (let i = 0; i < length; i += 1) {
+      const clamped = Math.max(-1, Math.min(1, mono[i]))
+      view.setInt16(i * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true)
+    }
+    return pcmBytes
+  }
+
+  const targetFrames = Math.max(1, Math.round((length * TTS_SAMPLE_RATE) / srcRate))
+  const pcmBytes = new Uint8Array(targetFrames * 2)
+  const view = new DataView(pcmBytes.buffer)
+  const ratio = srcRate / TTS_SAMPLE_RATE
+  for (let i = 0; i < targetFrames; i += 1) {
+    const srcPos = i * ratio
+    const idx0 = Math.min(length - 1, Math.floor(srcPos))
+    const idx1 = Math.min(length - 1, idx0 + 1)
+    const frac = srcPos - idx0
+    const interpolated = mono[idx0] * (1 - frac) + mono[idx1] * frac
+    const clamped = Math.max(-1, Math.min(1, interpolated))
+    view.setInt16(i * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true)
+  }
+  return pcmBytes
+}
+
 function encodeAudioBufferToWavBlob(audioBuffer: AudioBuffer): Blob {
   const numChannels = 1
   const sampleRate = audioBuffer.sampleRate
@@ -596,45 +879,52 @@ function encodeAudioBufferToWavBlob(audioBuffer: AudioBuffer): Blob {
 }
 
 export async function concatenateAudioBlobsToWav(blobs: Blob[]): Promise<Blob> {
+  if (blobs.length === 0) {
+    return pcmToWavBlob(new Uint8Array(0), TTS_SAMPLE_RATE, TTS_NUM_CHANNELS, TTS_BITS_PER_SAMPLE)
+  }
   if (blobs.length === 1) return blobs[0]
 
-  const AudioCtx =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-  if (!AudioCtx) {
-    throw new TtsError("Web Audio API is not supported in this browser.")
-  }
+  const pcmChunks: Uint8Array[] = []
+  let ctx: AudioContext | null = null
 
-  const ctx = new AudioCtx()
   try {
-    const buffers: AudioBuffer[] = []
     for (const blob of blobs) {
-      const arrayBuffer = await blob.arrayBuffer()
-      buffers.push(await ctx.decodeAudioData(arrayBuffer))
-    }
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      const parsedWav = extractPcmFromWavBytes(bytes)
+      if (parsedWav) {
+        const normalized = normalizePcmTo24kMono(
+          parsedWav.pcmBytes,
+          parsedWav.sampleRate,
+          parsedWav.numChannels
+        )
+        if (normalized.byteLength > 0) {
+          pcmChunks.push(normalized)
+        }
+        continue
+      }
 
-    const sampleRate = buffers[0].sampleRate
-    const gapSamples = Math.floor(sampleRate * 0.12)
-    const totalLength =
-      buffers.reduce((sum, b) => sum + b.length, 0) + gapSamples * Math.max(0, buffers.length - 1)
+      if (!ctx) {
+        const AudioCtx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+        if (!AudioCtx) {
+          throw new TtsError("Web Audio API is not supported in this browser.")
+        }
+        ctx = new AudioCtx()
+      }
 
-    const merged = ctx.createBuffer(1, totalLength, sampleRate)
-    const out = merged.getChannelData(0)
-    let offset = 0
-
-    for (let idx = 0; idx < buffers.length; idx += 1) {
-      const buf = buffers[idx]
-      const ch0 = buf.getChannelData(0)
-      out.set(ch0, offset)
-      offset += buf.length
-      if (idx < buffers.length - 1) {
-        offset += gapSamples
+      const decoded = await ctx.decodeAudioData(bytes.buffer.slice(0))
+      const normalized = audioBufferTo24kMonoPcm(decoded)
+      if (normalized.byteLength > 0) {
+        pcmChunks.push(normalized)
       }
     }
 
-    return encodeAudioBufferToWavBlob(merged)
+    return concatenatePcmBuffersToWav(pcmChunks, 120)
   } finally {
-    await ctx.close().catch(() => {})
+    if (ctx) {
+      await ctx.close().catch(() => {})
+    }
   }
 }
 
@@ -707,20 +997,21 @@ async function synthesizeGeminiChunk(
     return { kind: "blob", blob: mp3Blob, mimeType: "audio/mpeg", fileExtension: "mp3" }
   }
 
-  const hasRiffHeader =
-    bytes.byteLength >= 12 &&
-    bytes[0] === 0x52 &&
-    bytes[1] === 0x49 &&
-    bytes[2] === 0x46 &&
-    bytes[3] === 0x46
-
-  if (hasRiffHeader && rawMime.includes("wav")) {
-    const wavBlob = new Blob([bytes.buffer as ArrayBuffer], { type: "audio/wav" })
-    return { kind: "blob", blob: wavBlob, mimeType: "audio/wav", fileExtension: "wav" }
+  // Strip any 44-byte (or extended) RIFF/WAV header if Gemini returned WAV-wrapped PCM,
+  // and normalize to consistent 24000Hz 16-bit mono PCM.
+  const parsedWav = extractPcmFromWavBytes(bytes)
+  if (parsedWav) {
+    const normalizedPcm = normalizePcmTo24kMono(
+      parsedWav.pcmBytes,
+      parsedWav.sampleRate,
+      parsedWav.numChannels
+    )
+    return { kind: "pcm", pcmBytes: normalizedPcm, sampleRate: TTS_SAMPLE_RATE }
   }
 
   const sampleRate = parsePcmSampleRate(rawMime)
-  return { kind: "pcm", pcmBytes: bytes, sampleRate }
+  const normalizedPcm = normalizePcmTo24kMono(bytes, sampleRate, 1)
+  return { kind: "pcm", pcmBytes: normalizedPcm, sampleRate: TTS_SAMPLE_RATE }
 }
 
 async function synthesizeWithGemini(
@@ -728,19 +1019,21 @@ async function synthesizeWithGemini(
   preset: BurmeseVoicePreset,
   speed: VoiceoverSpeed,
   deliveryTone: VoiceDeliveryTone,
-  apiKey: string
+  apiKey: string,
+  onChunkProgress?: (currentChunk: number, totalChunks: number) => void
 ): Promise<{ blob: Blob; mimeType: string; fileExtension: "wav" | "mp3" }> {
-  const chunks = splitScriptIntoChunks(cleanedText, 360)
+  const chunks = splitScriptIntoChunks(cleanedText, 180)
   const chunkResults = []
-  for (const chunk of chunks) {
-    chunkResults.push(await synthesizeGeminiChunk(chunk, preset, speed, deliveryTone, apiKey))
+  for (let i = 0; i < chunks.length; i += 1) {
+    onChunkProgress?.(i + 1, chunks.length)
+    chunkResults.push(await synthesizeGeminiChunk(chunks[i], preset, speed, deliveryTone, apiKey))
   }
 
   if (chunkResults.length === 1) {
     const single = chunkResults[0]
     if (single.kind === "pcm") {
       return {
-        blob: pcmToWavBlob(single.pcmBytes, single.sampleRate, 1, 16),
+        blob: pcmToWavBlob(single.pcmBytes, TTS_SAMPLE_RATE, TTS_NUM_CHANNELS, TTS_BITS_PER_SAMPLE),
         mimeType: "audio/wav",
         fileExtension: "wav",
       }
@@ -748,36 +1041,19 @@ async function synthesizeWithGemini(
     return { blob: single.blob, mimeType: single.mimeType, fileExtension: single.fileExtension }
   }
 
-  const allPcmSameRate =
-    chunkResults.every((r) => r.kind === "pcm") &&
-    new Set(chunkResults.map((r) => (r.kind === "pcm" ? r.sampleRate : 0))).size === 1
-
-  if (allPcmSameRate) {
-    const sampleRate = chunkResults[0].kind === "pcm" ? chunkResults[0].sampleRate : 24000
-    const gapBytes = Math.floor(sampleRate * 0.12) * 2
-    const totalBytes =
-      chunkResults.reduce((sum, r) => sum + (r.kind === "pcm" ? r.pcmBytes.byteLength : 0), 0) +
-      gapBytes * (chunkResults.length - 1)
-    const mergedPcm = new Uint8Array(totalBytes)
-    let offset = 0
-    for (let i = 0; i < chunkResults.length; i += 1) {
-      const r = chunkResults[i]
-      if (r.kind !== "pcm") continue
-      mergedPcm.set(r.pcmBytes, offset)
-      offset += r.pcmBytes.byteLength
-      if (i < chunkResults.length - 1) {
-        offset += gapBytes
-      }
-    }
+  if (chunkResults.every((r) => r.kind === "pcm")) {
+    const pcmChunks = chunkResults.map((r) => (r.kind === "pcm" ? r.pcmBytes : new Uint8Array(0)))
     return {
-      blob: pcmToWavBlob(mergedPcm, sampleRate, 1, 16),
+      blob: concatenatePcmBuffersToWav(pcmChunks, 120),
       mimeType: "audio/wav",
       fileExtension: "wav",
     }
   }
 
   const blobs = chunkResults.map((r) =>
-    r.kind === "pcm" ? pcmToWavBlob(r.pcmBytes, r.sampleRate, 1, 16) : r.blob
+    r.kind === "pcm"
+      ? pcmToWavBlob(r.pcmBytes, TTS_SAMPLE_RATE, TTS_NUM_CHANNELS, TTS_BITS_PER_SAMPLE)
+      : r.blob
   )
   const mergedWav = await concatenateAudioBlobsToWav(blobs)
   return { blob: mergedWav, mimeType: "audio/wav", fileExtension: "wav" }
@@ -979,10 +1255,33 @@ function synthesizeWithSpeechSynthesis(
   return { blob: wavBlob, mimeType: "audio/wav", fileExtension: "wav" }
 }
 
+export interface VoiceoverProgress {
+  currentChunk: number
+  totalChunks: number
+}
+
 export interface GenerateVoiceoverOptions {
   deliveryTone?: VoiceDeliveryTone
   customPronunciations?: ReadonlyArray<PronunciationRule>
   introSfx?: SoundEffectType
+  onProgress?: (progress: VoiceoverProgress) => void
+}
+
+const MYANMAR_DIGIT_MAP = ["၀", "၁", "၂", "၃", "၄", "၅", "၆", "၇", "၈", "၉"] as const
+
+export function toBurmeseDigits(value: number | string): string {
+  return String(value).replace(/\d/g, (d) => MYANMAR_DIGIT_MAP[Number(d)] ?? d)
+}
+
+export function formatAudioClockDuration(totalSeconds: number): string {
+  const safe = Math.max(0, Math.round(totalSeconds))
+  const hours = Math.floor(safe / 3600)
+  const mins = Math.floor((safe % 3600) / 60)
+  const secs = safe % 60
+  if (hours > 0) {
+    return `${hours}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+  }
+  return `${mins}:${secs.toString().padStart(2, "0")}`
 }
 
 /**
@@ -1132,7 +1431,8 @@ async function synthesizeSpeechSegmentBlob(
   cleanedText: string,
   preset: BurmeseVoicePreset,
   speed: VoiceoverSpeed,
-  deliveryTone: VoiceDeliveryTone
+  deliveryTone: VoiceDeliveryTone,
+  onChunkProgress?: (currentChunk: number, totalChunks: number) => void
 ): Promise<{
   blob: Blob
   mimeType: string
@@ -1149,7 +1449,8 @@ async function synthesizeSpeechSegmentBlob(
         preset,
         speed,
         deliveryTone,
-        geminiKey
+        geminiKey,
+        onChunkProgress
       )
       return {
         ...geminiResult,
@@ -1162,20 +1463,22 @@ async function synthesizeSpeechSegmentBlob(
   }
 
   try {
-    const neuralChunks = splitScriptIntoChunks(cleanedText, 450)
+    const neuralChunks = splitScriptIntoChunks(cleanedText, 200)
     let neuralBlob: Blob
     let neuralMime = "audio/mpeg"
     let neuralExt: "mp3" | "wav" = "mp3"
 
     if (neuralChunks.length <= 1) {
+      onChunkProgress?.(1, 1)
       const single = await synthesizeWithNeuralTts(cleanedText, preset, speed)
       neuralBlob = single.blob
       neuralMime = single.mimeType
       neuralExt = single.fileExtension
     } else {
       const chunkBlobs: Blob[] = []
-      for (const chunk of neuralChunks) {
-        const res = await synthesizeWithNeuralTts(chunk, preset, speed)
+      for (let i = 0; i < neuralChunks.length; i += 1) {
+        onChunkProgress?.(i + 1, neuralChunks.length)
+        const res = await synthesizeWithNeuralTts(neuralChunks[i], preset, speed)
         chunkBlobs.push(res.blob)
       }
       neuralBlob = await concatenateAudioBlobsToWav(chunkBlobs)
@@ -1191,6 +1494,7 @@ async function synthesizeSpeechSegmentBlob(
       provider: "neural-tts",
     }
   } catch {
+    onChunkProgress?.(1, 1)
     const speechResult = synthesizeWithSpeechSynthesis(cleanedText, preset, speed)
     return {
       ...speechResult,
@@ -1331,6 +1635,7 @@ export async function generateBurmeseVoiceover(
 
   const combinedCleanedText = speechSegments.map((s) => s.text).join(" ")
   const hasPauses = normalizedTimeline.some((item) => item.kind === "pause")
+  const onProgress = options.onProgress
 
   // Fast path: single speech segment and no SFX
   if (!hasPauses && introSfx === "none" && speechSegments.length === 1) {
@@ -1338,7 +1643,10 @@ export async function generateBurmeseVoiceover(
       speechSegments[0].text,
       preset,
       speed,
-      deliveryTone
+      deliveryTone,
+      onProgress
+        ? (currentChunk, totalChunks) => onProgress({ currentChunk, totalChunks })
+        : undefined
     )
     const audioBuffer = await decodeBlobToAudioBuffer(single.blob)
     const audioUrl = URL.createObjectURL(single.blob)
@@ -1356,6 +1664,13 @@ export async function generateBurmeseVoiceover(
   }
 
   // Multi-segment (with pauses) and/or intro SFX path
+  const segmentChunkCounts = speechSegments.map((seg) => splitScriptIntoChunks(seg.text, 180).length)
+  const totalChunksAllSegments = Math.max(
+    1,
+    segmentChunkCounts.reduce((sum, count) => sum + count, 0)
+  )
+  let completedChunksBeforeSegment = 0
+
   const audioTimeline: Array<
     | { kind: "speech"; blob: Blob }
     | { kind: "pause"; seconds: number }
@@ -1363,12 +1678,34 @@ export async function generateBurmeseVoiceover(
 
   let lastVoiceName = `${preset.label} · ${preset.neuralVoice}`
   let lastProvider: VoiceoverResult["provider"] = "neural-tts"
+  let speechIdx = 0
 
   for (const item of normalizedTimeline) {
     if (item.kind === "pause") {
       audioTimeline.push(item)
     } else {
-      const res = await synthesizeSpeechSegmentBlob(item.text, preset, speed, deliveryTone)
+      const segBase = completedChunksBeforeSegment
+      const segChunksCount = segmentChunkCounts[speechIdx] ?? 1
+      const res = await synthesizeSpeechSegmentBlob(
+        item.text,
+        preset,
+        speed,
+        deliveryTone,
+        onProgress
+          ? (currentChunk, totalChunks) => {
+              const scaled =
+                totalChunks === segChunksCount
+                  ? segBase + currentChunk
+                  : segBase + Math.min(segChunksCount, Math.ceil((currentChunk / Math.max(1, totalChunks)) * segChunksCount))
+              onProgress({
+                currentChunk: Math.min(totalChunksAllSegments, Math.max(1, scaled)),
+                totalChunks: totalChunksAllSegments,
+              })
+            }
+          : undefined
+      )
+      completedChunksBeforeSegment += segChunksCount
+      speechIdx += 1
       lastVoiceName = res.voiceName
       lastProvider = res.provider
       audioTimeline.push({ kind: "speech", blob: res.blob })

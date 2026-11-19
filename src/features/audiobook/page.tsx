@@ -17,11 +17,15 @@ import { useShallow } from "zustand/react/shallow"
 import { extractTextFromDocument } from "@/api/aiService"
 import {
   BURMESE_VOICE_PRESETS,
+  TTS_BYTE_RATE,
   VOICEOVER_SPEEDS,
   concatenateAudioBlobsToWav,
   estimateSpokenDurationSeconds,
+  formatAudioClockDuration,
   generateBurmeseVoiceover,
+  toBurmeseDigits,
   type BurmeseVoiceType,
+  type VoiceoverProgress,
   type VoiceoverSpeed,
 } from "@/api/ttsService"
 import { Badge } from "@/components/ui/badge"
@@ -66,6 +70,7 @@ export function AudiobookPage() {
 
   const [isGenerating, setIsGenerating] = useState(false)
   const [progressLabel, setProgressLabel] = useState("")
+  const [chunkProgress, setChunkProgress] = useState<VoiceoverProgress | null>(null)
   const [chapterAudios, setChapterAudios] = useState<Record<string, SynthesizedChapterAudio>>({})
   const [fullAudio, setFullAudio] = useState<{
     audioUrl: string
@@ -137,12 +142,23 @@ export function AudiobookPage() {
 
   const handleGenerateChapter = async (chapter: BookChapter) => {
     setIsGenerating(true)
+    setChunkProgress(null)
     setProgressLabel(
-      isMy ? `${chapter.title} ကို အသံပြောင်းနေသည်...` : `Synthesizing ${chapter.title}...`
+      isMy ? "အသံဖန်တီးနေပါသည်..." : `Synthesizing ${chapter.title}...`
     )
     try {
       const result = await generateBurmeseVoiceover(chapter.text, voiceType, speed, {
         deliveryTone: "storytelling",
+        onProgress: (p) => {
+          setChunkProgress(p)
+          if (p.totalChunks > 1) {
+            setProgressLabel(
+              isMy
+                ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(p.currentChunk)}/${toBurmeseDigits(p.totalChunks)})`
+                : `Synthesizing ${chapter.title}... (Part ${p.currentChunk}/${p.totalChunks})`
+            )
+          }
+        },
       })
       activeUrlsRef.current.push(result.audioUrl)
       const item: SynthesizedChapterAudio = {
@@ -170,12 +186,14 @@ export function AudiobookPage() {
     } finally {
       setIsGenerating(false)
       setProgressLabel("")
+      setChunkProgress(null)
     }
   }
 
   const handleGenerateAll = async () => {
     if (chapters.length === 0) return
     setIsGenerating(true)
+    setChunkProgress(null)
     clearGeneratedAudio()
 
     try {
@@ -187,11 +205,29 @@ export function AudiobookPage() {
         const ch = chapters[i]
         setProgressLabel(
           isMy
-            ? `အပိုင်း ${i + 1} / ${chapters.length} ကို အသံပြောင်းနေသည်...`
+            ? chapters.length > 1
+              ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(i + 1)}/${toBurmeseDigits(chapters.length)})`
+              : "အသံဖန်တီးနေပါသည်..."
             : `Synthesizing part ${i + 1} of ${chapters.length}...`
         )
         const result = await generateBurmeseVoiceover(ch.text, voiceType, speed, {
           deliveryTone: "storytelling",
+          onProgress: (p) => {
+            setChunkProgress(p)
+            if (chapters.length === 1 && p.totalChunks > 1) {
+              setProgressLabel(
+                isMy
+                  ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(p.currentChunk)}/${toBurmeseDigits(p.totalChunks)})`
+                  : `Synthesizing... (Part ${p.currentChunk}/${p.totalChunks})`
+              )
+            } else if (chapters.length > 1) {
+              setProgressLabel(
+                isMy
+                  ? `အသံဖန်တီးနေပါသည်... (အခန်း ${toBurmeseDigits(i + 1)}/${toBurmeseDigits(chapters.length)} · အပိုင်း ${toBurmeseDigits(p.currentChunk)}/${toBurmeseDigits(p.totalChunks)})`
+                  : `Synthesizing chapter ${i + 1}/${chapters.length} (Part ${p.currentChunk}/${p.totalChunks})...`
+              )
+            }
+          },
         })
         activeUrlsRef.current.push(result.audioUrl)
         blobs.push(result.blob)
@@ -212,10 +248,17 @@ export function AudiobookPage() {
       const mergedUrl = URL.createObjectURL(mergedBlob)
       activeUrlsRef.current.push(mergedUrl)
 
+      const exactMergedDuration =
+        blobs.length === 1
+          ? totalDuration
+          : mergedBlob.size > 44
+            ? (mergedBlob.size - 44) / TTS_BYTE_RATE
+            : totalDuration
+
       setFullAudio({
         audioUrl: mergedUrl,
         blob: mergedBlob,
-        durationSeconds: totalDuration,
+        durationSeconds: exactMergedDuration,
         fileExtension: blobs.length === 1 ? newChapterMap[chapters[0].id].fileExtension : "wav",
         title: sourceFileName
           ? sourceFileName.replace(/\.(txt|pdf|md)$/i, "")
@@ -234,6 +277,7 @@ export function AudiobookPage() {
     } finally {
       setIsGenerating(false)
       setProgressLabel("")
+      setChunkProgress(null)
     }
   }
 
@@ -471,7 +515,7 @@ export function AudiobookPage() {
               )}
               <span>
                 {isGenerating
-                  ? progressLabel || (isMy ? "အသံပြောင်းနေသည်..." : "Synthesizing...")
+                  ? progressLabel || (isMy ? "အသံဖန်တီးနေပါသည်..." : "Synthesizing...")
                   : chapters.length > 1
                     ? isMy
                       ? `အပိုင်း ${chapters.length} ခုလုံး အသံပြောင်းမည်`
@@ -482,6 +526,31 @@ export function AudiobookPage() {
               </span>
             </Button>
           </div>
+
+          {isGenerating && (progressLabel || chunkProgress) && (
+            <div className="space-y-1.5 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2">
+              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span className="truncate font-medium text-foreground">
+                  {progressLabel || (isMy ? "အသံဖန်တီးနေပါသည်..." : "Synthesizing...")}
+                </span>
+                {chunkProgress && chunkProgress.totalChunks > 1 && (
+                  <span className="shrink-0 font-semibold text-blue-600 dark:text-blue-400">
+                    {Math.round((chunkProgress.currentChunk / chunkProgress.totalChunks) * 100)}%
+                  </span>
+                )}
+              </div>
+              {chunkProgress && chunkProgress.totalChunks > 1 && (
+                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-200"
+                    style={{
+                      width: `${Math.round((chunkProgress.currentChunk / chunkProgress.totalChunks) * 100)}%`,
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -494,8 +563,10 @@ export function AudiobookPage() {
                 <Headphones className="h-4 w-4 text-emerald-500" />
                 <span className="truncate">{fullAudio.title}</span>
               </CardTitle>
-              <Badge variant="secondary" className="text-xs">
-                {formatDurationLabel(fullAudio.durationSeconds)}
+              <Badge variant="secondary" className="text-xs shrink-0">
+                {isMy
+                  ? `စုစုပေါင်း အသံကြာချိန်: ${formatAudioClockDuration(fullAudio.durationSeconds)}`
+                  : `Total Duration: ${formatAudioClockDuration(fullAudio.durationSeconds)}`}
               </Badge>
             </div>
           </CardHeader>

@@ -38,12 +38,15 @@ import {
   VOICEOVER_SPEEDS,
   cleanVoiceoverText,
   estimateSpokenDurationSeconds,
+  formatAudioClockDuration,
   generateBurmeseVoiceover,
   optimizeScriptPreservingPauses,
   playSoundEffectPreview,
+  toBurmeseDigits,
   type BurmeseVoiceType,
   type SoundEffectType,
   type VoiceDeliveryTone,
+  type VoiceoverProgress,
   type VoiceoverResult,
   type VoiceoverSpeed,
 } from "@/api/ttsService"
@@ -218,6 +221,7 @@ export function VoiceoverPage() {
   const [durationSyncMode, setDurationSyncMode] = useState<VideoDurationSyncMode>("loop_video")
 
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false)
+  const [voiceProgress, setVoiceProgress] = useState<VoiceoverProgress | null>(null)
   const [voiceoverResult, setVoiceoverResult] = useState<VoiceoverResult | null>(null)
 
   const [isMergingVideo, setIsMergingVideo] = useState(false)
@@ -413,11 +417,13 @@ export function VoiceoverPage() {
     }
 
     setIsGeneratingVoice(true)
+    setVoiceProgress(null)
     try {
       const result = await generateBurmeseVoiceover(trimmed, voiceType, speed, {
         deliveryTone,
         customPronunciations,
         introSfx,
+        onProgress: setVoiceProgress,
       })
       revokeVoiceUrl()
       revokeMergedUrl()
@@ -436,6 +442,7 @@ export function VoiceoverPage() {
       toast.error(msg)
     } finally {
       setIsGeneratingVoice(false)
+      setVoiceProgress(null)
     }
   }
 
@@ -1508,7 +1515,7 @@ export function VoiceoverPage() {
           </div>
 
           {/* Generate Audio CTA (Desktop) */}
-          <div className="hidden lg:block pt-1">
+          <div className="hidden lg:block pt-1 space-y-2">
             <Button
               type="button"
               onClick={handleGenerateVoice}
@@ -1518,7 +1525,13 @@ export function VoiceoverPage() {
               {isGeneratingVoice ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
-                  {isMy ? "AI အသံဖန်တီးနေသည်..." : "Synthesizing Burmese Voiceover..."}
+                  {voiceProgress && voiceProgress.totalChunks > 1
+                    ? isMy
+                      ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
+                      : `Synthesizing audio... (Part ${voiceProgress.currentChunk}/${voiceProgress.totalChunks})`
+                    : isMy
+                      ? "အသံဖန်တီးနေပါသည်..."
+                      : "Synthesizing Burmese Voiceover..."}
                 </>
               ) : (
                 <>
@@ -1527,6 +1540,28 @@ export function VoiceoverPage() {
                 </>
               )}
             </Button>
+            {isGeneratingVoice && voiceProgress && voiceProgress.totalChunks > 1 && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>
+                    {isMy
+                      ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
+                      : `Synthesizing part ${voiceProgress.currentChunk} of ${voiceProgress.totalChunks}...`}
+                  </span>
+                  <span className="font-semibold text-foreground">
+                    {Math.round((voiceProgress.currentChunk / voiceProgress.totalChunks) * 100)}%
+                  </span>
+                </div>
+                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-indigo-500 to-blue-500 transition-all duration-200"
+                    style={{
+                      width: `${Math.round((voiceProgress.currentChunk / voiceProgress.totalChunks) * 100)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Audio Preview Player */}
@@ -1536,9 +1571,11 @@ export function VoiceoverPage() {
                 <span className="font-medium text-foreground truncate">
                   {voiceoverResult.voiceName}
                 </span>
-                <span className="shrink-0">
-                  {voiceoverResult.durationSeconds.toFixed(1)}s ·{" "}
-                  {voiceoverResult.fileExtension.toUpperCase()}
+                <span className="shrink-0 font-medium text-foreground">
+                  {isMy
+                    ? `စုစုပေါင်း အသံကြာချိန်: ${formatAudioClockDuration(voiceoverResult.durationSeconds)}`
+                    : `Total Duration: ${formatAudioClockDuration(voiceoverResult.durationSeconds)}`}{" "}
+                  · {voiceoverResult.fileExtension.toUpperCase()}
                 </span>
               </div>
               <audio controls src={voiceoverResult.audioUrl} className="w-full h-10" />
@@ -1638,7 +1675,13 @@ export function VoiceoverPage() {
             {isGeneratingVoice ? (
               <>
                 <Loader2 className="h-4 w-4 mr-1.5 animate-spin" aria-hidden="true" />
-                {isMy ? "ဖန်တီးနေသည်..." : "Generating..."}
+                {voiceProgress && voiceProgress.totalChunks > 1
+                  ? isMy
+                    ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
+                    : `Part ${voiceProgress.currentChunk}/${voiceProgress.totalChunks}...`
+                  : isMy
+                    ? "အသံဖန်တီးနေပါသည်..."
+                    : "Generating..."}
               </>
             ) : (
               <>
