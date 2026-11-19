@@ -21,6 +21,7 @@ import {
   VOICEOVER_SPEEDS,
   cleanVoiceoverText,
   generateBurmeseVoiceover,
+  normalizeBurmeseForTTS,
   type BurmeseVoiceType,
   type VoiceoverResult,
   type VoiceoverSpeed,
@@ -143,6 +144,24 @@ export function VoiceoverPage() {
     setUploadedVideo(file, url)
     revokeMergedUrl()
     setMergedVideo(null)
+  }
+
+  const handleOptimizeSpeechText = () => {
+    const optimized = normalizeBurmeseForTTS(voiceoverDraftScript)
+    if (!optimized) {
+      toast.error(
+        isMy
+          ? "အသံထွက်စာသား ပြောင်းရန် စာသားအရင်ထည့်ပါ။"
+          : "Please enter script text before optimizing."
+      )
+      return
+    }
+    setVoiceoverDraftScript(optimized)
+    toast.success(
+      isMy
+        ? "အသံထွက်စာသား ပြောင်းလဲပြီးပါပြီ။"
+        : "Speech text optimized for Burmese voiceover!"
+    )
   }
 
   const handleGenerateVoice = async () => {
@@ -307,22 +326,34 @@ export function VoiceoverPage() {
         <CardContent className="p-3.5 sm:p-5 space-y-4">
           {/* Script input */}
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <Label
                 htmlFor="voiceover-page-text"
                 className="text-xs font-medium text-muted-foreground font-myanmar"
               >
                 {isMy ? "အသံဖတ်မည့် စာသား" : "Spoken Script"}
               </Label>
-              {voiceoverDraftScript && (
-                <button
+              <div className="flex items-center gap-2">
+                <Button
                   type="button"
-                  onClick={() => setVoiceoverDraftScript("")}
-                  className="text-[11px] text-muted-foreground hover:text-foreground"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleOptimizeSpeechText}
+                  disabled={!voiceoverDraftScript.trim() || isGeneratingVoice}
+                  className="h-7 px-2.5 text-[11px] font-medium font-myanmar border-indigo-500/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/10"
                 >
-                  {isMy ? "ရှင်းမည်" : "Clear"}
-                </button>
-              )}
+                  🪄 အသံထွက်စာသား ပြောင်းမည် (Optimize for Voice)
+                </Button>
+                {voiceoverDraftScript && (
+                  <button
+                    type="button"
+                    onClick={() => setVoiceoverDraftScript("")}
+                    className="text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    {isMy ? "ရှင်းမည်" : "Clear"}
+                  </button>
+                )}
+              </div>
             </div>
             <Textarea
               id="voiceover-page-text"

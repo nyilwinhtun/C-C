@@ -77,13 +77,16 @@ const BURMESE_DIGITS = [
 
 const BURMESE_PLACE_UNITS: ReadonlyArray<{ value: number; label: string; creakyLabel?: string }> = [
   { value: 10_000_000, label: "ကုဋေ" },
-  { value: 1_000_000, label: "သန်း" },
   { value: 100_000, label: "သိန်း" },
   { value: 10_000, label: "သောင်း" },
   { value: 1_000, label: "ထောင်", creakyLabel: "ထောင့်" },
   { value: 100, label: "ရာ", creakyLabel: "ရာ့" },
   { value: 10, label: "ဆယ်", creakyLabel: "ဆယ့်" },
 ]
+
+function myanmarDigitsToArabic(input: string): string {
+  return input.replace(/[၀-၉]/g, (ch) => String(ch.charCodeAt(0) - 0x1040))
+}
 
 function integerToBurmeseWords(n: number): string {
   if (!Number.isFinite(n) || n < 0) return String(n)
@@ -92,7 +95,8 @@ function integerToBurmeseWords(n: number): string {
   if (intVal < 10) return BURMESE_DIGITS[intVal]
 
   let remaining = intVal
-  let result = ""
+  const largeParts: string[] = []
+  let smallPart = ""
 
   for (const unit of BURMESE_PLACE_UNITS) {
     if (remaining >= unit.value) {
@@ -101,15 +105,25 @@ function integerToBurmeseWords(n: number): string {
 
       const countWords = count >= 10 ? integerToBurmeseWords(count) : BURMESE_DIGITS[count]
       const unitWord = remaining > 0 && unit.creakyLabel ? unit.creakyLabel : unit.label
-      result += `${countWords}${unitWord}`
+      const chunk = `${countWords}${unitWord}`
+
+      if (unit.value >= 100) {
+        largeParts.push(chunk)
+      } else {
+        smallPart += chunk
+      }
     }
   }
 
   if (remaining > 0) {
-    result += BURMESE_DIGITS[remaining]
+    smallPart += BURMESE_DIGITS[remaining]
   }
 
-  return result
+  if (smallPart) {
+    largeParts.push(smallPart)
+  }
+
+  return largeParts.join(" ")
 }
 
 function numericStringToBurmeseWords(rawNum: string): string {
@@ -145,9 +159,21 @@ const ENGLISH_TO_BURMESE_PHONETICS: ReadonlyArray<[RegExp, string]> = [
   [/\bpre[-\s]?order\b/gi, "ပရီအော်ဒါ"],
   [/\btype[-\s]?c\b/gi, "တိုက်ပ်စီ"],
   [/\bin[-\s]?stock\b/gi, "အင်စတော့ခ်"],
-  [/\bpromotion\b/gi, "ပရိုမိုးရှင်း"],
+  [/\bsubscribes?\b/gi, "ဆပ်စခရိုက်ဘ်"],
+  [/\bfollows?\b/gi, "ဖောလိုး"],
+  [/\blikes?\b/gi, "လိုက်ခ်"],
+  [/\bshares?\b/gi, "ရှယ်"],
+  [/\bcomments?\b/gi, "ကွန်မန့်"],
+  [/\btutorials?\b/gi, "ကျူတိုရီရယ်"],
+  [/\bcontents?\b/gi, "ကွန်တန့်"],
+  [/\bupdates?\b/gi, "အပ်ဒိတ်"],
+  [/\blinks?\b/gi, "လင့်ခ်"],
+  [/\bapps?\b/gi, "အက်ပ်"],
+  [/\bpro\b/gi, "ပရို"],
+  [/\bplus\b/gi, "ပလပ်စ်"],
+  [/\bpromotions?\b/gi, "ပရိုမိုးရှင်း"],
   [/\bpromo\b/gi, "ပရိုမိုးရှင်း"],
-  [/\bdiscount\b/gi, "ဒစ်စကောင့်"],
+  [/\bdiscounts?\b/gi, "ဒစ်စကောင့်"],
   [/\boriginal\b/gi, "အော်ဂျင်နယ်"],
   [/\bfacebook\b/gi, "ဖေ့စ်ဘွတ်ခ်"],
   [/\btiktok\b/gi, "တစ်တော့ခ်"],
@@ -186,6 +212,9 @@ export function normalizeBurmeseForTTS(rawText: string): string {
   for (const [pattern, phonetic] of ENGLISH_TO_BURMESE_PHONETICS) {
     text = text.replace(pattern, phonetic)
   }
+
+  // Convert Myanmar digits (၀-၉) to Arabic digits (0-9) so unified number parsing handles both
+  text = myanmarDigitsToArabic(text)
 
   // Convert percentages (special case 100% -> ရာနှုန်းပြည့်)
   text = text.replace(/(?<![\d.])(\d[\d,]*(?:\.\d+)?)\s*%/g, (_match, num: string) => {
@@ -227,12 +256,14 @@ export function normalizeBurmeseForTTS(rawText: string): string {
     numericStringToBurmeseWords(num)
   )
 
-  // Convert slashes, pipes, and hyphens into natural Burmese pauses
+  // Convert slashes, pipes, commas, and hyphens into natural Burmese pauses
   text = text
     .replace(/\s*\|\s*/g, "။ ")
     .replace(/\s*\/\s*/g, "၊ ")
     .replace(/\s*[-–—]+\s*/g, "၊ ")
-    .replace(/([၊။])(?:\s*[၊။])+/g, "$1")
+    .replace(/,\s*/g, "၊ ")
+    .replace(/\s*([၊။])\s*/g, "$1 ")
+    .replace(/([၊။])(?:\s*[၊။])+/g, "$1 ")
 
   return text
     .split(/\r?\n/)
@@ -361,8 +392,8 @@ async function synthesizeWithGemini(
 
   const prompt = [
     "You are a professional Burmese (Myanmar) commercial voiceover artist.",
-    `Read ONLY the following Burmese script aloud naturally in Burmese. ${getSpeedPromptInstruction(speed)}`,
-    "Do not add any intro, commentary, or extra words.",
+    `Read aloud in warm, clear, natural spoken Myanmar with smooth pacing and brief pauses at commas and periods. ${getSpeedPromptInstruction(speed)}`,
+    "Read ONLY the following Burmese script aloud. Do not add any intro, commentary, or extra words.",
     "",
     cleanedText,
   ].join("\n")
