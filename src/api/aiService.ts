@@ -216,15 +216,15 @@ function buildDurationGuidance(
     return ""
   }
   const d = Math.max(5, Math.min(180, Math.round(targetDurationSeconds)))
-  const targetWords = Math.round(d * 2.8)
-  const maxWords = Math.round(targetWords * 1.15)
-  const minChars = Math.round(targetWords * 5.7)
-  const maxChars = Math.round(targetWords * 6.7)
+  const minWords = Math.round(d * 3.2)
+  const maxWords = Math.round(minWords * 1.15)
+  const minChars = Math.round(minWords * 5.8)
+  const maxChars = Math.round(minWords * 7.1)
 
   if (isMyanmar) {
-    return `\nTarget Spoken Duration: ${d} seconds. Required Length: ~${targetWords}–${maxWords} rich spoken Burmese words (~${minChars}–${maxChars} characters). STRICTLY DO NOT write a short 1–2 sentence summary! Write a full, naturally paced ${d}-second script/post so the voiceover fills the entire ${d} seconds from start to finish.`
+    return `\nTarget Spoken Duration: ${d} seconds. Strict Minimum Length: AT LEAST ${minWords}–${maxWords} rich spoken Burmese words (~${minChars}–${maxChars} characters across 4–6 rich, natural spoken sentences for 20s+ videos). STRICTLY DO NOT write a short 1–2 sentence summary! Write a full, naturally paced ${d}-second script/post so the voiceover fills the entire ${d} seconds from start to finish.`
   }
-  return `\nTarget Spoken Duration: ${d} seconds. Required Length: ~${targetWords}–${maxWords} spoken words. STRICTLY DO NOT write a short 1–2 sentence summary! Write a full, naturally paced ${d}-second script/post so the voiceover fills the entire ${d} seconds from start to finish.`
+  return `\nTarget Spoken Duration: ${d} seconds. Strict Minimum Length: AT LEAST ${minWords}–${maxWords} spoken words. STRICTLY DO NOT write a short 1–2 sentence summary! Write a full, naturally paced ${d}-second script/post so the voiceover fills the entire ${d} seconds from start to finish.`
 }
 
 function buildUserPrompt(request: GenerateContentRequest): string {
@@ -1380,10 +1380,10 @@ function buildVideoPrompt(params: {
     params.targetDurationSeconds > 0
       ? Math.max(5, Math.min(180, Math.round(params.targetDurationSeconds)))
       : 15
-  const targetWords = Math.round(d * 2.8)
-  const maxWords = Math.round(targetWords * 1.15)
-  const minChars = Math.round(targetWords * 5.7)
-  const maxChars = Math.round(targetWords * 6.7)
+  const minWords = Math.round(d * 3.2)
+  const maxWords = Math.round(minWords * 1.15)
+  const minChars = Math.round(minWords * 5.8)
+  const maxChars = Math.round(minWords * 7.1)
   const hookEnd = Math.min(3, Math.max(2, Math.round(d * 0.2)))
   const midEnd = d === 15 ? 10 : Math.max(hookEnd + 2, Math.round(d * 0.7))
 
@@ -1391,7 +1391,7 @@ function buildVideoPrompt(params: {
     ? `\nCREATIVE DIRECTION: ${params.creativeAngleHint.trim()}`
     : ""
   const expandBlock = params.expandFromScript?.trim()
-    ? `\nEXPAND & ENRICH TASK: Expand the following previous voiceoverScript with richer visual details, stronger storytelling, and a more compelling call-to-action so it fills the full duration naturally without rushing:\n"""\n${params.expandFromScript.trim()}\n"""`
+    ? `\nEXPAND & ENRICH TASK: Expand the following previous voiceoverScript to ROUGHLY 2X ITS CURRENT LENGTH with richer visual storytelling, clear product/content benefits, and a strong Burmese call-to-action (or English CTA if English), keeping every scene natural and engaging without filler:\n"""\n${params.expandFromScript.trim()}\n"""`
     : ""
 
   if (params.language === "my") {
@@ -1402,8 +1402,8 @@ function buildVideoPrompt(params: {
     return `You are Myanmar's #1 short-form video strategist and spoken Burmese copywriter (TikTok, Facebook Reels, YouTube Shorts) for creators of all niches.
 ${mediaContext}
 Exact Video Duration: ${d} seconds.
-Required Spoken Script Length: ~${targetWords}–${maxWords} rich spoken Burmese words (~${minChars}–${maxChars} characters).
-CRITICAL LENGTH RULE: STRICTLY DO NOT write a short 1–2 sentence summary! The voiceoverScript MUST be rich, detailed, and long enough to fill the entire ${d}-second video naturally from start to finish at normal speaking pace.
+Strict Minimum Spoken Script Length: AT LEAST ${minWords}–${maxWords} rich spoken Burmese words (~${minChars}–${maxChars} characters across 4–6 rich, natural spoken sentences).
+CRITICAL LENGTH RULE: STRICTLY DO NOT write a short 1–2 sentence summary! The voiceoverScript MUST be at least ${minWords} Burmese words, rich, detailed, and long enough to fill the entire ${d}-second video naturally from start to finish at normal speaking pace.
 Creator / Business Category: ${categoryGuide}
 Target Platform: ${params.platform}
 ${noteBlock}${creativeBlock}${expandBlock}
@@ -1415,7 +1415,7 @@ Analyze the visual scenes, details, and pacing, then return ONLY a valid JSON ob
    - Hook 2 (Value / Key Insight / တန်ဖိုးပေါ်လွင်): Highlights the main takeaway, surprising fact, or standout value.
    - Hook 3 (Relatable Problem / Story / ပြဿနာနှင့် ဇာတ်လမ်း): Calls out a relatable everyday moment or pain point.
 
-2. "voiceoverScript": A high-energy, natural spoken Burmese voiceover script strictly broken down into these 3 timed sections (~${targetWords}–${maxWords} words total):
+2. "voiceoverScript": A high-energy, natural spoken Burmese voiceover script strictly broken down into these 3 timed sections (AT LEAST ${minWords}–${maxWords} words total):
    [0-${hookEnd}s Hook]
    (Punchy opening line that grabs attention immediately)
 
@@ -1439,14 +1439,14 @@ CRITICAL LANGUAGE & STYLE RULES:
   return `You are a top short-form video sales strategist and social media copywriter.
 ${mediaContext}
 Exact Video Duration: ${d} seconds.
-Required Spoken Script Length: ~${targetWords}–${maxWords} spoken words.
-CRITICAL LENGTH RULE: STRICTLY DO NOT write a short 1–2 sentence summary! The voiceoverScript MUST be detailed and long enough to fill the entire ${d}-second video naturally from start to finish.
+Strict Minimum Spoken Script Length: AT LEAST ${minWords}–${maxWords} spoken words.
+CRITICAL LENGTH RULE: STRICTLY DO NOT write a short 1–2 sentence summary! The voiceoverScript MUST be at least ${minWords} words, detailed, and long enough to fill the entire ${d}-second video naturally from start to finish.
 Target Platform: ${params.platform}
 ${noteBlock}${creativeBlock}${expandBlock}
 
 Analyze the visual scenes, product details, and pacing, then return ONLY a valid JSON object with these exact 4 keys:
 1. "hooks": An array of 3 scroll-stopping hook strings for the first ${hookEnd} seconds covering 3 angles: (1) Curiosity, (2) Price/Value, and (3) Problem-Solution.
-2. "voiceoverScript": A punchy spoken English voiceover script (~${targetWords}–${maxWords} words total) strictly broken down into [0-${hookEnd}s Hook], [${hookEnd}-${midEnd}s Demo & Key Benefit], and [${midEnd}-${d}s Price & Call-to-Action].
+2. "voiceoverScript": A punchy spoken English voiceover script (AT LEAST ${minWords}–${maxWords} words total) strictly broken down into [0-${hookEnd}s Hook], [${hookEnd}-${midEnd}s Demo & Key Benefit], and [${midEnd}-${d}s Price & Call-to-Action].
 3. "coverTitles": An array of 2 short, punchy 3 to 5 word On-Screen Cover Text headlines ready to paste into CapCut.
 4. "caption": A ready-to-copy-paste ${params.platform} caption in English with relevant emojis and 4-6 hashtags at the end.
 
@@ -1486,7 +1486,12 @@ function parseVideoContentResponse(
     const voiceoverScript =
       typeof parsed.voiceoverScript === "string"
         ? stripMarkdownArtifacts(parsed.voiceoverScript)
-        : ""
+        : Array.isArray(parsed.voiceoverScript)
+          ? parsed.voiceoverScript
+              .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+              .map((item) => stripMarkdownArtifacts(item))
+              .join("\n\n")
+          : ""
     const rawCaption =
       typeof parsed.caption === "string"
         ? stripMarkdownArtifacts(parsed.caption, true)

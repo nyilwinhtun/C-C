@@ -32,6 +32,7 @@ import {
   Mic,
   Pencil,
   Plus,
+  RotateCcw,
   SlidersHorizontal,
   ChevronDown,
 } from "lucide-react"
@@ -402,6 +403,9 @@ export function GeneratorPage() {
   )
   const draftInput = useContentStore(useShallow((state) => state.draftInput))
   const {
+    textPostResult: result,
+    setTextPostResult: setResult,
+    clearTextPostDraft,
     addGeneratedItem,
     saveToVault,
     generatedHistory,
@@ -416,6 +420,9 @@ export function GeneratorPage() {
     setVoiceoverDraftScript,
   } = useContentStore(
     useShallow((state) => ({
+      textPostResult: state.textPostResult,
+      setTextPostResult: state.setTextPostResult,
+      clearTextPostDraft: state.clearTextPostDraft,
       addGeneratedItem: state.addGeneratedItem,
       saveToVault: state.saveToVault,
       generatedHistory: state.generatedHistory,
@@ -432,6 +439,7 @@ export function GeneratorPage() {
   )
 
   const [activeAction, setActiveAction] = useState<ActiveAction | null>(null)
+  const [isExpanding, setIsExpanding] = useState(false)
   const pendingActionRef = useRef<ActiveAction | null>(null)
   const previewRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -442,6 +450,7 @@ export function GeneratorPage() {
       pendingActionRef.current = null
       setActiveAction(null)
       setIsGenerating(false)
+      setIsExpanding(false)
 
       const rawContent = data.content
       const selectedGenLang = form.getValues("language")
@@ -464,9 +473,15 @@ export function GeneratorPage() {
       }
 
       setResult(normalizedData)
-      setDisplayedText("")
-      setTypewriterIndex(0)
-      setIsTypewriting(true)
+      if (action?.kind === "refine") {
+        setDisplayedText(normalizedData.content)
+        setTypewriterIndex(normalizedData.content.length)
+        setIsTypewriting(false)
+      } else {
+        setDisplayedText("")
+        setTypewriterIndex(0)
+        setIsTypewriting(true)
+      }
       addGeneratedItem({
         topic: normalizedData.topic,
         platform: normalizedData.platform,
@@ -490,6 +505,7 @@ export function GeneratorPage() {
       pendingActionRef.current = null
       setActiveAction(null)
       setIsGenerating(false)
+      setIsExpanding(false)
       const baseMsg = t(language, "generator.genError")
       const detail = err instanceof Error && err.message ? err.message : String(err ?? "")
       toast.error(detail ? `${baseMsg}: ${detail}` : baseMsg)
@@ -498,11 +514,10 @@ export function GeneratorPage() {
 
   const { mutate: generate, isPending } = mutation
 
-  const [result, setResult] = useState<GeneratedContent | null>(null)
   const [isCopying, setIsCopying] = useState(false)
   const [copiedStripKey, setCopiedStripKey] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<"editor" | "preview">("editor")
-  const [displayedText, setDisplayedText] = useState("")
+  const [displayedText, setDisplayedText] = useState(() => result?.content ?? "")
   const [typewriterIndex, setTypewriterIndex] = useState(0)
   const [isTypewriting, setIsTypewriting] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
@@ -559,10 +574,12 @@ export function GeneratorPage() {
       setIsTypewriting(false)
       setDisplayedText(nextText)
       setTypewriterIndex(nextText.length)
-      setResult((prev) => {
-        if (prev) return { ...prev, content: nextText }
+      const prev = useContentStore.getState().textPostResult
+      if (prev) {
+        setResult({ ...prev, content: nextText })
+      } else {
         const values = form.getValues()
-        return {
+        setResult({
           id: crypto.randomUUID(),
           topic: values.topic || "Draft",
           platform: values.platform || "instagram",
@@ -570,10 +587,10 @@ export function GeneratorPage() {
           tone: values.tone || "engaging",
           content: nextText,
           createdAt: new Date().toISOString(),
-        }
-      })
+        })
+      }
     },
-    [form]
+    [form, setResult]
   )
 
   const handleQuickCopySection = useCallback(
@@ -691,11 +708,20 @@ export function GeneratorPage() {
   }, [displayedText, result, form, setPosterDraft, setActivePageKey])
 
   const handleSendToVoiceover = useCallback(() => {
-    const activeText = (displayedText || result?.content || "").trim()
+    const activeText = (result?.content || displayedText || "").trim()
     if (!activeText) return
     setVoiceoverDraftScript(cleanVoiceoverText(activeText))
     setActivePageKey("voiceover")
   }, [displayedText, result, setVoiceoverDraftScript, setActivePageKey])
+
+  const handleClearDraft = useCallback(() => {
+    clearTextPostDraft()
+    form.reset(useContentStore.getState().draftInput)
+    setDisplayedText("")
+    setTypewriterIndex(0)
+    setIsTypewriting(false)
+    setMobileView("create")
+  }, [clearTextPostDraft, form])
 
   const handleRegenerate = useCallback(() => {
     if (!result) return
@@ -756,6 +782,7 @@ export function GeneratorPage() {
       pendingActionRef.current = action
       setActiveAction(action)
       setIsGenerating(true)
+      setIsExpanding(params.id === "expand_longer")
       setIsTypewriting(false)
 
       generate({
@@ -770,7 +797,7 @@ export function GeneratorPage() {
         includeHashtags: values.includeHashtags ?? true,
         targetDurationSeconds:
           params.id === "expand_longer"
-            ? Math.round((values.targetDurationSeconds ?? 15) * 1.45)
+            ? Math.round((values.targetDurationSeconds ?? 15) * 2)
             : values.targetDurationSeconds ?? 15,
         instruction: `${params.instruction}\n${languageDirective}`,
         currentContent: currentText,
@@ -919,8 +946,21 @@ export function GeneratorPage() {
       <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 items-start">
         <div className={`w-full flex-1 min-w-0 ${mobileView === "create" ? "block" : "hidden lg:block"}`}>
           <Card className="border-border/60 shadow-sm">
-            <CardHeader className="py-3 px-4 sm:py-4 sm:px-5 border-b border-border/60">
+            <CardHeader className="py-3 px-4 sm:py-4 sm:px-5 border-b border-border/60 flex flex-row items-start justify-between gap-3 space-y-0">
               <CardDescription className="text-xs sm:text-sm leading-relaxed">{t(language, "generator.desc")}</CardDescription>
+              {(Boolean(formValues.topic?.trim()) || Boolean(result)) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleClearDraft}
+                  disabled={isGeneratingFlag}
+                  className="h-7 px-2.5 text-xs shrink-0 border-border/60 text-muted-foreground hover:text-foreground"
+                >
+                  <RotateCcw className="h-3 w-3 mr-1" aria-hidden="true" />
+                  <span>{language === "my" ? "Clear / ရှင်းမည်" : "Clear"}</span>
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="p-0">
               <form
@@ -1601,13 +1641,13 @@ export function GeneratorPage() {
                       kind: "refine",
                       id: "expand_longer",
                       instruction:
-                        "Expand and enrich the following script/post with richer details, stronger storytelling, and a more compelling call-to-action so it fills more spoken time naturally without filler.",
+                        "Expand and enrich the following script/post to roughly 2x its current length with richer storytelling, clear product/content benefits, and a strong natural Burmese call-to-action (or English CTA if English) so it fills more spoken time naturally without filler.",
                     })
                   }
-                  disabled={!contentToShow || isGeneratingFlag}
+                  disabled={!contentToShow || isGeneratingFlag || isExpanding}
                   className="w-full h-9 text-xs font-medium border-indigo-500/30 bg-indigo-500/5 hover:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-myanmar"
                 >
-                  {isGeneratingFlag && activeAction?.id === "expand_longer" ? (
+                  {isExpanding ? (
                     <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin shrink-0" aria-hidden="true" />
                   ) : (
                     <Plus className="h-3.5 w-3.5 mr-1.5 shrink-0" aria-hidden="true" />

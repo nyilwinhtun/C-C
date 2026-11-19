@@ -119,3 +119,4 @@ export function formatDurationLabel(totalSeconds: number): string {
   if (mins === 0) return `${secs}s`
   return `${mins}m ${secs.toString().padStart(2, "0")}s`
 }
+

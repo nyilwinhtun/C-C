@@ -30,6 +30,7 @@ import {
 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import {
+  generateContent,
   generateVideoContent,
   isSupportedVideoFile,
   type VideoContentResult,
@@ -67,65 +68,6 @@ const VIDEO_PLATFORMS: VideoPlatformOption[] = [
 ]
 
 const DIRECT_MODE_LIMIT_BYTES = 15 * 1024 * 1024
-const VIDEO_DRAFT_STORAGE_KEY = "cc_last_video_draft"
-
-interface StoredVideoDraft {
-  productNote: string
-  platform: VideoPlatformOption
-  outputLanguage: "en" | "my"
-  result: VideoContentResult | null
-}
-
-function loadVideoDraft(fallbackLanguage: "en" | "my"): StoredVideoDraft {
-  if (typeof window === "undefined") {
-    return {
-      productNote: "",
-      platform: "TikTok / Reels",
-      outputLanguage: fallbackLanguage,
-      result: null,
-    }
-  }
-  try {
-    const raw = window.localStorage.getItem(VIDEO_DRAFT_STORAGE_KEY)
-    if (!raw) {
-      return {
-        productNote: "",
-        platform: "TikTok / Reels",
-        outputLanguage: fallbackLanguage,
-        result: null,
-      }
-    }
-    const parsed = JSON.parse(raw) as Partial<StoredVideoDraft>
-    const platform: VideoPlatformOption = VIDEO_PLATFORMS.includes(
-      parsed.platform as VideoPlatformOption
-    )
-      ? (parsed.platform as VideoPlatformOption)
-      : "TikTok / Reels"
-    const outputLanguage: "en" | "my" =
-      parsed.outputLanguage === "en" || parsed.outputLanguage === "my"
-        ? parsed.outputLanguage
-        : fallbackLanguage
-    const productNote = typeof parsed.productNote === "string" ? parsed.productNote : ""
-    const result =
-      parsed.result && typeof parsed.result === "object"
-        ? (parsed.result as VideoContentResult)
-        : null
-
-    return {
-      productNote,
-      platform,
-      outputLanguage,
-      result,
-    }
-  } catch {
-    return {
-      productNote: "",
-      platform: "TikTok / Reels",
-      outputLanguage: fallbackLanguage,
-      result: null,
-    }
-  }
-}
 
 function getCoverTitles(data: VideoContentResult): string[] {
   if (Array.isArray(data.coverTitles) && data.coverTitles.length > 0) {
@@ -174,9 +116,15 @@ export function VideoToContentSection() {
   const videoFile = useContentStore((state) => state.uploadedVideoFile)
   const previewUrl = useContentStore((state) => state.videoPreviewUrl)
   const productNote = useContentStore((state) => state.videoProductNote)
+  const platform = useContentStore((state) => state.videoPlatform)
+  const outputLanguage = useContentStore((state) => state.videoOutputLanguage)
+  const videoDurationSeconds = useContentStore((state) => state.videoDurationSeconds)
   const result = useContentStore((state) => state.generatedVideoResult)
   const setUploadedVideo = useContentStore((state) => state.setUploadedVideo)
   const setProductNote = useContentStore((state) => state.setVideoProductNote)
+  const setPlatform = useContentStore((state) => state.setVideoPlatform)
+  const setOutputLanguage = useContentStore((state) => state.setVideoOutputLanguage)
+  const setVideoDurationSeconds = useContentStore((state) => state.setVideoDurationSeconds)
   const setResult = useContentStore((state) => state.setGeneratedVideoResult)
   const clearUploadedVideo = useContentStore((state) => state.clearUploadedVideo)
 
@@ -184,18 +132,11 @@ export function VideoToContentSection() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const prevLanguageRef = useRef(language)
 
-  const [initialDraft] = useState<StoredVideoDraft>(() => loadVideoDraft(language))
-
   const [isDragging, setIsDragging] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [videoDurationSeconds, setVideoDurationSeconds] = useState<number | null>(null)
-
-  const [platform, setPlatform] = useState<VideoPlatformOption>(initialDraft.platform)
-  const [outputLanguage, setOutputLanguage] = useState<"en" | "my">(
-    initialDraft.outputLanguage
-  )
 
   const [progressStage, setProgressStage] = useState<"extracting" | "analyzing" | null>(null)
+  const [isExpanding, setIsExpanding] = useState(false)
   const [activeVideoAction, setActiveVideoAction] = useState<"default" | "regenerate" | "expand" | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [mobileView, setMobileView] = useState<"create" | "result">("create")
@@ -203,38 +144,12 @@ export function VideoToContentSection() {
   const [activeTab, setActiveTab] = useState<VideoOutputTab>("hooks")
   const [showAllTabs, setShowAllTabs] = useState(false)
 
-  // Hydrate store from localStorage draft once if store is empty
-  useEffect(() => {
-    const state = useContentStore.getState()
-    if (!state.videoProductNote && initialDraft.productNote) {
-      setProductNote(initialDraft.productNote)
-    }
-    if (!state.generatedVideoResult && initialDraft.result) {
-      setResult(initialDraft.result)
-    }
-  }, [initialDraft, setProductNote, setResult])
-
   useEffect(() => {
     if (prevLanguageRef.current !== language) {
       prevLanguageRef.current = language
       setOutputLanguage(language)
     }
-  }, [language])
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    try {
-      const payload: StoredVideoDraft = {
-        productNote,
-        platform,
-        outputLanguage,
-        result,
-      }
-      window.localStorage.setItem(VIDEO_DRAFT_STORAGE_KEY, JSON.stringify(payload))
-    } catch {
-      // Ignore storage quota errors
-    }
-  }, [productNote, platform, outputLanguage, result])
+  }, [language, setOutputLanguage])
 
   const handleSelectFile = useCallback(
     (file: File | null | undefined) => {
@@ -276,25 +191,24 @@ export function VideoToContentSection() {
     setOutputLanguage(language)
     setErrorMessage(null)
     setMobileView("create")
-    if (typeof window !== "undefined") {
-      try {
-        window.localStorage.removeItem(VIDEO_DRAFT_STORAGE_KEY)
-      } catch {
-        // Ignore storage errors
-      }
-    }
-  }, [clearUploadedVideo, setProductNote, language])
+  }, [clearUploadedVideo, setVideoDurationSeconds, setProductNote, setPlatform, setOutputLanguage, language])
 
   const handleGenerate = useCallback(
     async (mode: "default" | "regenerate" | "expand" = "default") => {
-      if (!videoFile || progressStage) return
+      if (progressStage || isExpanding) return
+      if (mode !== "expand" && !videoFile) return
+      if (mode === "expand" && !videoFile && !result?.voiceoverScript?.trim()) return
+
       setErrorMessage(null)
       setActiveVideoAction(mode)
+      if (mode === "expand") {
+        setIsExpanding(true)
+      }
       if (typeof window !== "undefined" && window.innerWidth < 1024) {
         setMobileView("result")
       }
       setProgressStage(
-        videoFile.size <= DIRECT_MODE_LIMIT_BYTES ? "analyzing" : "extracting"
+        !videoFile || videoFile.size <= DIRECT_MODE_LIMIT_BYTES ? "analyzing" : "extracting"
       )
       try {
         const refDuration =
@@ -307,9 +221,36 @@ export function VideoToContentSection() {
         const targetDurationSeconds =
           mode === "expand"
             ? resolvedDuration
-              ? Math.round(resolvedDuration * 1.45)
-              : 25
+              ? Math.round(resolvedDuration * 2)
+              : 30
             : resolvedDuration
+
+        if (mode === "expand" && !videoFile && result?.voiceoverScript?.trim()) {
+          const expanded = await generateContent({
+            topic: productNote.trim() || result.coverTitle || "Video Voiceover Script",
+            platform: mapVideoPlatformToVaultPlatform(platform),
+            contentType: "video_script",
+            tone: "engaging",
+            businessCategory,
+            customNiche,
+            language: outputLanguage === "my" ? "myanmar" : "english",
+            includeHashtags: false,
+            targetDurationSeconds,
+            currentContent: result.voiceoverScript.trim(),
+            instruction:
+              outputLanguage === "my"
+                ? "Expand this Burmese voiceover script to roughly 2x its current length with richer storytelling, clear product/content benefits, and a strong natural spoken Burmese call-to-action. Return only the expanded voiceover script with [0-3s] style section timestamps."
+                : "Expand this voiceover script to roughly 2x its current length with richer storytelling, clear benefits, and a strong call-to-action. Return only the expanded voiceover script with section timestamps.",
+          })
+          setResult({
+            ...result,
+            voiceoverScript: expanded.content,
+          })
+          toast.success(t(language, "generator.videoSuccess"))
+          return
+        }
+
+        if (!videoFile) return
 
         const generated = await generateVideoContent({
           file: videoFile,
@@ -370,12 +311,14 @@ export function VideoToContentSection() {
         toast.error(message)
       } finally {
         setProgressStage(null)
+        setIsExpanding(false)
         setActiveVideoAction(null)
       }
     },
     [
       videoFile,
       progressStage,
+      isExpanding,
       videoDurationSeconds,
       productNote,
       platform,
@@ -574,7 +517,7 @@ export function VideoToContentSection() {
                 className="h-7 px-2.5 text-xs shrink-0 border-border/60 text-muted-foreground hover:text-foreground"
               >
                 <RotateCcw className="h-3 w-3 mr-1" aria-hidden="true" />
-                <span>Clear / New Video</span>
+                <span>{language === "my" ? "Clear / ရှင်းမည်" : "Clear / New Video"}</span>
               </Button>
             )}
           </CardHeader>
@@ -832,7 +775,7 @@ export function VideoToContentSection() {
                 disabled={!videoFile || isGenerating}
                 className="w-full min-h-[44px] rounded-xl font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 border-0"
               >
-                {isGenerating ? (
+                {isGenerating && !isExpanding ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden="true" />
                     <span>
@@ -859,7 +802,7 @@ export function VideoToContentSection() {
           mobileView === "result" ? "flex" : "hidden lg:flex"
         }`}
       >
-        {isGenerating ? (
+        {isGenerating && !isExpanding ? (
           <Card className="border-border/60 shadow-sm overflow-hidden" aria-busy="true">
             <CardHeader className="py-3.5 px-4 border-b border-border/60 bg-muted/20">
               <div className="flex items-center justify-between gap-2">
@@ -940,11 +883,11 @@ export function VideoToContentSection() {
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={!videoFile || isGenerating || !result.voiceoverScript}
+                disabled={isGenerating || isExpanding || !result.voiceoverScript?.trim()}
                 onClick={() => void handleGenerate("expand")}
                 className="h-9 text-xs font-medium border-indigo-500/30 bg-indigo-500/5 hover:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-myanmar"
               >
-                {isGenerating && activeVideoAction === "expand" ? (
+                {isExpanding ? (
                   <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin shrink-0" aria-hidden="true" />
                 ) : (
                   <Plus className="h-3.5 w-3.5 mr-1.5 shrink-0" aria-hidden="true" />
@@ -1308,7 +1251,7 @@ export function VideoToContentSection() {
               disabled={!videoFile || isGenerating}
               className="flex-1 min-h-[44px] rounded-xl font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-0 shadow-md shadow-blue-500/20 font-myanmar"
             >
-              {isGenerating ? (
+              {isGenerating && !isExpanding ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden="true" />
                   <span>

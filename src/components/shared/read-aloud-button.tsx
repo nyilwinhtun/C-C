@@ -32,7 +32,7 @@ export function sanitizeSpeechText(raw: string): string {
     // Remove bracketed timestamps like [0:00-0:03], [0-3s], [0-3s Hook], [10-15s Price & Call-to-Action]
     // Only matches timestamps with optional ASCII section labels so Burmese/English spoken text is never deleted.
     .replace(
-      /\[\s*\d+(?::\d+)?\s*(?:s\b|:\d+|\s*[-–—]\s*\d+(?::\d+)?\s*s?)(?:\s+[a-zA-Z0-9\s,&/\-]{1,40})?\s*\]/gi,
+      /\[\s*\d+(?::\d+)?\s*(?:s\b|:\d+|\s*[-–—]\s*\d+(?::\d+)?\s*s?)(?:\s+[^\]]{1,50})?\s*\]/gi,
       " "
     )
     // Remove standalone unbracketed timestamp ranges like 0:00 - 0:05 or 00:00-00:15

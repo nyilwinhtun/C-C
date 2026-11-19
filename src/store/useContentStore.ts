@@ -1,7 +1,11 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import type { GeneratorFormValues } from "@/features/generator/schema"
-import type { VideoContentResult } from "@/api/aiService"
+import type {
+  GeneratedContent,
+  VideoContentResult,
+  VideoPlatformOption,
+} from "@/api/aiService"
 import {
   normalizeBusinessCategory,
   normalizeSalesAngle,
@@ -63,6 +67,7 @@ export interface UploadedPhotoItem {
 
 interface ContentState {
   draftInput: GeneratorFormValues
+  textPostResult: GeneratedContent | null
   generatedHistory: GeneratedItem[]
   savedVault: SavedVaultItem[]
   brandSignature: string
@@ -75,11 +80,16 @@ interface ContentState {
   videoPreviewUrl: string | null
   uploadedPhotos: UploadedPhotoItem[]
   videoProductNote: string
+  videoPlatform: VideoPlatformOption
+  videoOutputLanguage: "en" | "my"
+  videoDurationSeconds: number | null
   generatedVideoResult: VideoContentResult | null
   voiceoverDraftScript: string
   customPronunciations: CustomPronunciation[]
   isSyncing: boolean
   setDraftInput: (input: Partial<GeneratorFormValues>) => void
+  setTextPostResult: (result: GeneratedContent | null) => void
+  clearTextPostDraft: () => void
   addGeneratedItem: (item: Omit<GeneratedItem, "id" | "createdAt">) => void
   setBrandSignature: (signature: string) => void
   setBusinessCategory: (category: BusinessCategory) => void
@@ -91,6 +101,9 @@ interface ContentState {
   setUploadedPhotos: (photos: UploadedPhotoItem[]) => void
   clearUploadedPhotos: () => void
   setVideoProductNote: (note: string) => void
+  setVideoPlatform: (platform: VideoPlatformOption) => void
+  setVideoOutputLanguage: (lang: "en" | "my") => void
+  setVideoDurationSeconds: (duration: number | null) => void
   setGeneratedVideoResult: (result: VideoContentResult | null) => void
   setVoiceoverDraftScript: (script: string) => void
   addCustomPronunciation: (word: string, phonetic: string) => void
@@ -124,6 +137,7 @@ export const useContentStore = create<ContentState>()(
   persist(
     (set) => ({
       draftInput: defaultDraft,
+      textPostResult: null,
       generatedHistory: [],
       savedVault: [],
       brandSignature: "",
@@ -136,6 +150,9 @@ export const useContentStore = create<ContentState>()(
       videoPreviewUrl: null,
       uploadedPhotos: [],
       videoProductNote: "",
+      videoPlatform: "TikTok / Reels",
+      videoOutputLanguage: "my",
+      videoDurationSeconds: null,
       generatedVideoResult: null,
       voiceoverDraftScript: "",
       customPronunciations: [],
@@ -145,6 +162,12 @@ export const useContentStore = create<ContentState>()(
         set((state) => ({
           draftInput: { ...state.draftInput, ...input },
         })),
+      setTextPostResult: (textPostResult) => set({ textPostResult }),
+      clearTextPostDraft: () =>
+        set({
+          draftInput: defaultDraft,
+          textPostResult: null,
+        }),
 
       addGeneratedItem: (item) =>
         set((state) => {
@@ -191,6 +214,9 @@ export const useContentStore = create<ContentState>()(
           return { uploadedPhotos: [] }
         }),
       setVideoProductNote: (videoProductNote) => set({ videoProductNote }),
+      setVideoPlatform: (videoPlatform) => set({ videoPlatform }),
+      setVideoOutputLanguage: (videoOutputLanguage) => set({ videoOutputLanguage }),
+      setVideoDurationSeconds: (videoDurationSeconds) => set({ videoDurationSeconds }),
       setGeneratedVideoResult: (generatedVideoResult) =>
         set({ generatedVideoResult }),
       setVoiceoverDraftScript: (voiceoverDraftScript) => set({ voiceoverDraftScript }),
@@ -221,6 +247,7 @@ export const useContentStore = create<ContentState>()(
           return {
             uploadedVideoFile: null,
             videoPreviewUrl: null,
+            videoDurationSeconds: null,
             generatedVideoResult: null,
           }
         }),
@@ -342,6 +369,7 @@ export const useContentStore = create<ContentState>()(
       name: "content-creator-content",
       partialize: (state) => ({
         draftInput: state.draftInput ?? defaultDraft,
+        textPostResult: state.textPostResult ?? null,
         generatedHistory: (state.generatedHistory ?? []).slice(0, 10),
         savedVault: state.savedVault ?? [],
         brandSignature: state.brandSignature ?? "",
@@ -349,6 +377,11 @@ export const useContentStore = create<ContentState>()(
         customNiche: state.customNiche ?? "",
         autoAppendShopCta: state.autoAppendShopCta ?? false,
         shopLogoDataUrl: state.shopLogoDataUrl ?? null,
+        videoProductNote: state.videoProductNote ?? "",
+        videoPlatform: state.videoPlatform ?? "TikTok / Reels",
+        videoOutputLanguage: state.videoOutputLanguage ?? "my",
+        videoDurationSeconds: state.videoDurationSeconds ?? null,
+        generatedVideoResult: state.generatedVideoResult ?? null,
         customPronunciations: state.customPronunciations ?? [],
       }),
       merge: (persistedState, currentState) => {
