@@ -1192,6 +1192,8 @@ export async function mergeVideoWithVoiceover({
   }
 }
 
+export type AutoCutSensitivityPreset = "light" | "balanced" | "snappy"
+
 export interface AutoCutSegment {
   start: number
   end: number
@@ -1203,28 +1205,46 @@ export interface VideoSilenceAnalysis {
   originalDuration: number
   keptDuration: number
   trimmedSeconds: number
+  noiseFloorDb: number
+  adaptiveThresholdDb: number
   keepSegments: Array<{ start: number; end: number }>
   silentSegments: Array<{ start: number; end: number }>
   timeline: AutoCutSegment[]
 }
 
 export interface AnalyzeSilenceOptions {
+  preset?: AutoCutSensitivityPreset
   thresholdDb?: number
   minSilenceSeconds?: number
-  paddingSeconds?: number
+  preRollSeconds?: number
+  postRollSeconds?: number
+  mergeGapSeconds?: number
+}
+
+const PRESET_CONFIG: Record<
+  AutoCutSensitivityPreset,
+  { minSilenceSeconds: number; snrMarginDb: number }
+> = {
+  light: { minSilenceSeconds: 1.0, snrMarginDb: 6.5 },
+  balanced: { minSilenceSeconds: 0.6, snrMarginDb: 8.5 },
+  snappy: { minSilenceSeconds: 0.35, snrMarginDb: 11.0 },
 }
 
 /**
- * Decode a video file's audio track via Web Audio API (`decodeAudioData`)
- * and detect silent dead-air pauses above `minSilenceSeconds`.
+ * Decode a video file's audio track via Web Audio API (`decodeAudioData`),
+ * normalize RMS energy against the clip's own noise floor, and detect
+ * silent dead-air pauses with 0.20s pre/post-roll voice padding.
  */
 export async function analyzeVideoSilence(
   file: File,
   options: AnalyzeSilenceOptions = {}
 ): Promise<VideoSilenceAnalysis> {
-  const thresholdDb = options.thresholdDb ?? -35
-  const minSilenceSeconds = options.minSilenceSeconds ?? 0.6
-  const paddingSeconds = options.paddingSeconds ?? 0.08
+  const preset = options.preset ?? "balanced"
+  const presetCfg = PRESET_CONFIG[preset]
+  const minSilenceSeconds = options.minSilenceSeconds ?? presetCfg.minSilenceSeconds
+  const preRollSeconds = options.preRollSeconds ?? 0.2
+  const postRollSeconds = options.postRollSeconds ?? 0.2
+  const mergeGapSeconds = options.mergeGapSeconds ?? 0.25
 
   const AudioCtx =
     window.AudioContext ||
@@ -1252,30 +1272,47 @@ export async function analyzeVideoSilence(
   const frameSize = Math.max(1, Math.floor(sampleRate * frameDuration))
   const totalSamples = audioBuffer.length
   const totalFrames = Math.ceil(totalSamples / frameSize)
-  const thresholdLinear = Math.pow(10, thresholdDb / 20)
 
   const channels: Float32Array[] = []
   for (let ch = 0; ch < audioBuffer.numberOfChannels; ch += 1) {
     channels.push(audioBuffer.getChannelData(ch))
   }
 
-  const isFrameSilent = new Uint8Array(totalFrames)
+  const frameRms = new Float32Array(totalFrames)
   for (let f = 0; f < totalFrames; f += 1) {
     const start = f * frameSize
     const end = Math.min(totalSamples, start + frameSize)
     let sumSq = 0
     let count = 0
     for (let i = start; i < end; i += 2) {
-      let peak = 0
+      let chSq = 0
       for (let c = 0; c < channels.length; c += 1) {
-        const v = Math.abs(channels[c][i])
-        if (v > peak) peak = v
+        const v = channels[c][i]
+        chSq += v * v
       }
-      sumSq += peak * peak
+      sumSq += chSq / channels.length
       count += 1
     }
-    const rms = count > 0 ? Math.sqrt(sumSq / count) : 0
-    isFrameSilent[f] = rms < thresholdLinear ? 1 : 0
+    frameRms[f] = count > 0 ? Math.sqrt(sumSq / count) : 0
+  }
+
+  // Estimate clip-specific noise floor (12th percentile) & speech level (90th percentile)
+  const sortedRms = Float32Array.from(frameRms).sort()
+  const noiseFloorRms = sortedRms[Math.floor(sortedRms.length * 0.12)] ?? 0
+  const speechPeakRms = sortedRms[Math.floor(sortedRms.length * 0.9)] ?? 0
+
+  const noiseFloorDb = 20 * Math.log10(Math.max(noiseFloorRms, 1e-6))
+  const speechPeakDb = 20 * Math.log10(Math.max(speechPeakRms, 1e-6))
+
+  const adaptiveThresholdDb =
+    options.thresholdDb ??
+    Math.max(-52, Math.min(noiseFloorDb + presetCfg.snrMarginDb, speechPeakDb - 6))
+  const thresholdLinear = Math.pow(10, adaptiveThresholdDb / 20)
+
+  const isFrameSilent = new Uint8Array(totalFrames)
+  const hasAnySpeech = speechPeakRms >= 0.0015
+  for (let f = 0; f < totalFrames; f += 1) {
+    isFrameSilent[f] = !hasAnySpeech || frameRms[f] < thresholdLinear ? 1 : 0
   }
 
   // Group contiguous silent runs >= minSilenceSeconds
@@ -1302,41 +1339,46 @@ export async function analyzeVideoSilence(
     }
   }
 
-  // Apply padding around kept speech so words aren't clipped
-  const paddedSilentRuns: Array<{ start: number; end: number }> = []
-  for (const run of rawSilentRuns) {
-    const trimmedStart = run.start === 0 ? 0 : run.start + paddingSeconds
-    const trimmedEnd =
-      run.end >= originalDuration - 0.02 ? originalDuration : run.end - paddingSeconds
-    if (trimmedEnd - trimmedStart >= Math.max(0.25, minSilenceSeconds * 0.5)) {
-      paddedSilentRuns.push({ start: trimmedStart, end: trimmedEnd })
+  // Derive raw speech segments as the complement of long silent runs
+  const rawSpeechSegments: Array<{ start: number; end: number }> = []
+  let speechCursor = 0
+  for (const silent of rawSilentRuns) {
+    if (silent.start > speechCursor + 0.02) {
+      rawSpeechSegments.push({ start: speechCursor, end: silent.start })
     }
+    speechCursor = Math.max(speechCursor, silent.end)
+  }
+  if (speechCursor < originalDuration - 0.02) {
+    rawSpeechSegments.push({ start: speechCursor, end: originalDuration })
   }
 
-  // Build keepSegments as complement of paddedSilentRuns
+  // Apply 0.20s pre-roll & post-roll voice padding and merge gaps < 0.25s
   const keepSegments: Array<{ start: number; end: number }> = []
-  let cursor = 0
-  for (const silent of paddedSilentRuns) {
-    if (silent.start > cursor + 0.02) {
-      keepSegments.push({ start: cursor, end: silent.start })
+  for (const seg of rawSpeechSegments) {
+    const paddedStart = Math.max(0, seg.start - preRollSeconds)
+    const paddedEnd = Math.min(originalDuration, seg.end + postRollSeconds)
+    const last = keepSegments[keepSegments.length - 1]
+    if (last && paddedStart - last.end < mergeGapSeconds) {
+      last.end = Math.max(last.end, paddedEnd)
+    } else {
+      keepSegments.push({ start: paddedStart, end: paddedEnd })
     }
-    cursor = Math.max(cursor, silent.end)
-  }
-  if (cursor < originalDuration - 0.02) {
-    keepSegments.push({ start: cursor, end: originalDuration })
   }
 
-  // If entire video was silent, keep a tiny fallback or return empty keepSegments
+  // Build silentSegments & full timeline from keepSegments
+  const silentSegments: Array<{ start: number; end: number }> = []
   const timeline: AutoCutSegment[] = []
   let tCursor = 0
   for (const seg of keepSegments) {
     if (seg.start > tCursor + 0.01) {
+      silentSegments.push({ start: tCursor, end: seg.start })
       timeline.push({ start: tCursor, end: seg.start, isSilent: true })
     }
     timeline.push({ start: seg.start, end: seg.end, isSilent: false })
     tCursor = seg.end
   }
   if (tCursor < originalDuration - 0.01) {
+    silentSegments.push({ start: tCursor, end: originalDuration })
     timeline.push({ start: tCursor, end: originalDuration, isSilent: true })
   }
 
@@ -1348,10 +1390,23 @@ export async function analyzeVideoSilence(
     originalDuration,
     keptDuration,
     trimmedSeconds,
+    noiseFloorDb,
+    adaptiveThresholdDb,
     keepSegments,
-    silentSegments: paddedSilentRuns,
+    silentSegments,
     timeline,
   }
+}
+
+export interface AutoCutClipInput {
+  videoFile: File
+  analysis: VideoSilenceAnalysis
+}
+
+export interface ExportMultiClipAutoCutOptions {
+  clips: AutoCutClipInput[]
+  onProgress?: (percent: number, clipIndex?: number) => void
+  signal?: AbortSignal
 }
 
 export interface ExportAutoCutOptions {
@@ -1361,15 +1416,50 @@ export interface ExportAutoCutOptions {
   signal?: AbortSignal
 }
 
+function loadAutoCutVideoElement(videoFile: File): {
+  video: HTMLVideoElement
+  objectUrl: string
+  ready: Promise<void>
+} {
+  const objectUrl = URL.createObjectURL(videoFile)
+  const video = document.createElement("video")
+  video.src = objectUrl
+  video.muted = true
+  video.playsInline = true
+  video.preload = "auto"
+
+  const ready = new Promise<void>((resolve, reject) => {
+    const onLoaded = () => resolve()
+    const onErr = () => reject(new Error(`Could not load "${videoFile.name}" for export.`))
+    video.addEventListener("loadedmetadata", onLoaded, { once: true })
+    video.addEventListener("error", onErr, { once: true })
+  })
+
+  return { video, objectUrl, ready }
+}
+
+function disposeAutoCutVideoElement(video: HTMLVideoElement, objectUrl: string) {
+  try {
+    video.pause()
+    video.removeAttribute("src")
+    video.load()
+  } catch {
+    // Ignore
+  }
+  URL.revokeObjectURL(objectUrl)
+}
+
 /**
- * Render and export a continuous video with silent dead-air segments skipped.
+ * Stitch and export one or more video clips with silent dead-air segments skipped,
+ * using AudioContext as master clock with gentle playbackRate sync lock.
  */
-export async function exportAutoCutVideo(
-  options: ExportAutoCutOptions
+export async function exportMultiClipAutoCutVideo(
+  options: ExportMultiClipAutoCutOptions
 ): Promise<MergeVideoAudioResult> {
-  const { videoFile, analysis, onProgress, signal } = options
-  if (analysis.keepSegments.length === 0) {
-    throw new Error("No speech segments detected to export. Try lowering the silence threshold.")
+  const { clips, onProgress, signal } = options
+  const activeClips = clips.filter((c) => c.analysis.keepSegments.length > 0)
+  if (activeClips.length === 0) {
+    throw new Error("No speech segments detected to export. Try a lighter sensitivity preset.")
   }
 
   const mimeType = pickSupportedVideoMimeType()
@@ -1384,43 +1474,37 @@ export async function exportAutoCutVideo(
     throw new Error("Web Audio API is not supported in this browser.")
   }
 
-  const videoUrlObj = URL.createObjectURL(videoFile)
-  const video = document.createElement("video")
-  video.src = videoUrlObj
-  video.muted = true
-  video.playsInline = true
-  video.preload = "auto"
-
   const audioCtx = new AudioCtx()
   let recorder: MediaRecorder | null = null
   let rafId = 0
+  let currentVideo: HTMLVideoElement | null = null
+  let currentUrl: string | null = null
 
   const cleanup = () => {
     if (rafId) cancelAnimationFrame(rafId)
-    try {
-      video.pause()
-      video.removeAttribute("src")
-      video.load()
-    } catch {
-      // Ignore
+    if (currentVideo && currentUrl) {
+      disposeAutoCutVideoElement(currentVideo, currentUrl)
+      currentVideo = null
+      currentUrl = null
     }
-    URL.revokeObjectURL(videoUrlObj)
     audioCtx.close().catch(() => {})
   }
 
   try {
-    await new Promise<void>((resolve, reject) => {
-      const onLoaded = () => resolve()
-      const onErr = () => reject(new Error("Could not load video file for Auto-Cut export."))
-      video.addEventListener("loadedmetadata", onLoaded, { once: true })
-      video.addEventListener("error", onErr, { once: true })
-    })
+    // Probe first clip dimensions to establish output canvas resolution
+    const firstProbe = loadAutoCutVideoElement(activeClips[0].videoFile)
+    currentVideo = firstProbe.video
+    currentUrl = firstProbe.objectUrl
+    await firstProbe.ready
 
     if (signal?.aborted) {
       throw new DOMException("Export aborted", "AbortError")
     }
 
-    const size = computeCanvasSize(video.videoWidth || 720, video.videoHeight || 1280)
+    const size = computeCanvasSize(
+      firstProbe.video.videoWidth || 720,
+      firstProbe.video.videoHeight || 1280
+    )
     const canvas = document.createElement("canvas")
     canvas.width = size.width
     canvas.height = size.height
@@ -1461,81 +1545,131 @@ export async function exportAutoCutVideo(
       }
     })
 
-    const seekTo = (timeSec: number) =>
-      new Promise<void>((resolve) => {
-        const clamped = Math.max(0, Math.min(video.duration || timeSec, timeSec))
-        if (Math.abs(video.currentTime - clamped) < 0.01) {
-          resolve()
-          return
-        }
-        const onSeeked = () => resolve()
-        video.addEventListener("seeked", onSeeked, { once: true })
-        video.currentTime = clamped
-      })
+    const totalKept = Math.max(
+      0.1,
+      activeClips.reduce((sum, c) => sum + c.analysis.keptDuration, 0)
+    )
+    let completedKept = 0
 
     recorder.start(250)
-    let completedKept = 0
-    const totalKept = Math.max(0.1, analysis.keptDuration)
 
-    for (const seg of analysis.keepSegments) {
-      if (signal?.aborted) {
-        recorder.stop()
-        throw new DOMException("Export aborted", "AbortError")
+    for (let clipIdx = 0; clipIdx < activeClips.length; clipIdx += 1) {
+      const clip = activeClips[clipIdx]
+
+      if (clipIdx > 0) {
+        if (currentVideo && currentUrl) {
+          disposeAutoCutVideoElement(currentVideo, currentUrl)
+        }
+        const loaded = loadAutoCutVideoElement(clip.videoFile)
+        currentVideo = loaded.video
+        currentUrl = loaded.objectUrl
+        await loaded.ready
       }
 
-      const segDuration = Math.max(0.05, seg.end - seg.start)
-      await seekTo(seg.start)
-      ctx2d.drawImage(video, 0, 0, canvas.width, canvas.height)
+      const video = currentVideo!
+      const srcW = video.videoWidth || canvas.width
+      const srcH = video.videoHeight || canvas.height
 
-      const src = audioCtx.createBufferSource()
-      src.buffer = analysis.audioBuffer
-      const gain = audioCtx.createGain()
-      const now = audioCtx.currentTime
-      const fade = Math.min(0.012, segDuration / 4)
-      gain.gain.setValueAtTime(0, now)
-      gain.gain.linearRampToValueAtTime(1, now + fade)
-      gain.gain.setValueAtTime(1, Math.max(now + fade, now + segDuration - fade))
-      gain.gain.linearRampToValueAtTime(0, now + segDuration)
-      src.connect(gain)
-      gain.connect(audioDest)
-
-      src.start(now, seg.start, segDuration)
-      await video.play()
-
-      await new Promise<void>((resolve) => {
-        const step = () => {
-          if (signal?.aborted) {
-            video.pause()
-            try {
-              src.stop()
-            } catch {
-              // Ignore
-            }
+      const seekTo = (timeSec: number) =>
+        new Promise<void>((resolve) => {
+          const clamped = Math.max(0, Math.min(video.duration || timeSec, timeSec))
+          if (Math.abs(video.currentTime - clamped) < 0.015) {
             resolve()
             return
           }
-
-          ctx2d.drawImage(video, 0, 0, canvas.width, canvas.height)
-          const segElapsed = Math.max(0, Math.min(segDuration, video.currentTime - seg.start))
-          const pct = Math.min(99, Math.round(((completedKept + segElapsed) / totalKept) * 100))
-          onProgress?.(pct)
-
-          if (video.currentTime >= seg.end - 0.015 || video.ended) {
-            video.pause()
-            try {
-              src.stop()
-            } catch {
-              // Ignore
-            }
+          let done = false
+          const finish = () => {
+            if (done) return
+            done = true
             resolve()
-            return
+          }
+          video.addEventListener("seeked", finish, { once: true })
+          setTimeout(finish, 1200)
+          video.currentTime = clamped
+        })
+
+      for (const seg of clip.analysis.keepSegments) {
+        if (signal?.aborted) {
+          if (recorder.state !== "inactive") recorder.stop()
+          throw new DOMException("Export aborted", "AbortError")
+        }
+
+        const segDuration = Math.max(0.05, seg.end - seg.start)
+        await seekTo(seg.start)
+        drawFramedMedia(ctx2d, video, srcW, srcH, canvas.width, canvas.height, {
+          blurredBg: false,
+        })
+
+        const src = audioCtx.createBufferSource()
+        src.buffer = clip.analysis.audioBuffer
+        const gain = audioCtx.createGain()
+        const now = audioCtx.currentTime
+        const fade = Math.min(0.012, segDuration / 4)
+        gain.gain.setValueAtTime(0, now)
+        gain.gain.linearRampToValueAtTime(1, now + fade)
+        gain.gain.setValueAtTime(1, Math.max(now + fade, now + segDuration - fade))
+        gain.gain.linearRampToValueAtTime(0, now + segDuration)
+        src.connect(gain)
+        gain.connect(audioDest)
+
+        video.playbackRate = 1.0
+        await video.play()
+        const segAudioStart = audioCtx.currentTime
+        src.start(segAudioStart, seg.start, segDuration)
+
+        await new Promise<void>((resolve) => {
+          const step = () => {
+            if (signal?.aborted) {
+              video.pause()
+              video.playbackRate = 1.0
+              try {
+                src.stop()
+              } catch {
+                // Ignore
+              }
+              resolve()
+              return
+            }
+
+            const elapsed = Math.max(0, audioCtx.currentTime - segAudioStart)
+            const videoOffset = Math.max(0, video.currentTime - seg.start)
+            const drift = elapsed - videoOffset
+
+            // Gentle audio-video sync lock via playbackRate adjustment
+            if (Math.abs(drift) > 0.12) {
+              video.playbackRate = drift > 0 ? 1.08 : 0.92
+            } else if (Math.abs(drift) < 0.04 && video.playbackRate !== 1.0) {
+              video.playbackRate = 1.0
+            }
+
+            drawFramedMedia(ctx2d, video, srcW, srcH, canvas.width, canvas.height, {
+              blurredBg: false,
+            })
+
+            const pct = Math.min(
+              99,
+              Math.round(((completedKept + Math.min(segDuration, elapsed)) / totalKept) * 100)
+            )
+            onProgress?.(pct, clipIdx)
+
+            if (elapsed >= segDuration - 0.01 || video.ended) {
+              video.pause()
+              video.playbackRate = 1.0
+              try {
+                src.stop()
+              } catch {
+                // Ignore
+              }
+              resolve()
+              return
+            }
+            rafId = requestAnimationFrame(step)
           }
           rafId = requestAnimationFrame(step)
-        }
-        rafId = requestAnimationFrame(step)
-      })
+        })
 
-      completedKept += segDuration
+        completedKept += segDuration
+      }
     }
 
     if (signal?.aborted) {
@@ -1546,7 +1680,7 @@ export async function exportAutoCutVideo(
       recorder.stop()
     }
     const resultBlob = await stoppedPromise
-    onProgress?.(100)
+    onProgress?.(100, activeClips.length - 1)
 
     const finalMime = resultBlob.type || mimeType || "video/webm"
     const fileExtension: "mp4" | "webm" = finalMime.toLowerCase().includes("mp4") ? "mp4" : "webm"
@@ -1557,11 +1691,24 @@ export async function exportAutoCutVideo(
       videoUrl,
       mimeType: finalMime,
       fileExtension,
-      durationSeconds: analysis.keptDuration,
+      durationSeconds: totalKept,
     }
   } finally {
     cleanup()
   }
+}
+
+/**
+ * Render and export a continuous video with silent dead-air segments skipped.
+ */
+export async function exportAutoCutVideo(
+  options: ExportAutoCutOptions
+): Promise<MergeVideoAudioResult> {
+  return exportMultiClipAutoCutVideo({
+    clips: [{ videoFile: options.videoFile, analysis: options.analysis }],
+    onProgress: (pct) => options.onProgress?.(pct),
+    signal: options.signal,
+  })
 }
 
 /**
