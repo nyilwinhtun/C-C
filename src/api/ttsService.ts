@@ -104,15 +104,44 @@ export class TtsError extends Error {
 }
 
 /**
- * Strip markdown symbols, timestamps like [0-3s], and emojis so only clean
- * spoken Burmese text is sent to TTS synthesis.
+ * Strip markdown symbols, timestamps like [0-3s] or 0:00 - 0:05, and emojis
+ * so only clean spoken Burmese/English text is sent to TTS synthesis.
+ * Never deletes actual spoken words, parenthetical phrases, or sentences.
  */
 export function cleanVoiceoverText(raw: string): string {
   const sanitized = sanitizeSpeechText(raw)
   return sanitized
-    .replace(/\[(hook|body|cta|intro|outro|scene\s*\d*)\]/gi, " ")
     .replace(/\s+\n/g, "\n")
     .trim()
+}
+
+/**
+ * Estimate spoken duration in seconds for Burmese/English voiceover text,
+ * accounting for playback speed and any [pause Xs] tags.
+ */
+export function estimateSpokenDurationSeconds(
+  rawText: string,
+  speed: number = 1.0
+): number {
+  if (!rawText || !rawText.trim()) return 0
+
+  let pauseSeconds = 0
+  const withoutPauses = rawText.replace(PAUSE_TAG_REGEX, (_m, sec: string) => {
+    const parsed = Number.parseFloat(sec)
+    if (Number.isFinite(parsed) && parsed > 0) {
+      pauseSeconds += parsed
+    }
+    return " "
+  })
+
+  const cleaned = cleanVoiceoverText(withoutPauses)
+  const nonSpaceChars = cleaned.replace(/\s+/g, "").length
+  if (nonSpaceChars === 0 && pauseSeconds === 0) return 0
+
+  const safeSpeed = Number.isFinite(speed) && speed > 0 ? speed : 1.0
+  // ~16.5 non-space Burmese chars/sec (~2.8 words/sec) at 1.0x speed
+  const speechSeconds = nonSpaceChars / (16.5 * safeSpeed)
+  return Math.max(1, Math.round(speechSeconds + pauseSeconds))
 }
 
 const BURMESE_DIGITS = [
@@ -289,9 +318,15 @@ export function normalizeBurmeseForTTS(
   let text = rawText
     // Remove pause tags so single-segment TTS never reads them aloud
     .replace(/\[pause\s+\d+(?:\.\d+)?\s*s?\]/gi, " ")
-    // Remove bracketed timestamps and timed/section headers like [0-3s], [0-3s Hook], [Hook]
-    .replace(/\[\s*\d+(?::\d+)?\s*s?(?:\s*[-–—]\s*\d+(?::\d+)?\s*s?)?[^\]]*\]/gi, " ")
-    .replace(/\[(hook|body|cta|intro|outro|scene\s*\d*)[^\]]*\]/gi, " ")
+    // Remove bracketed timestamps like [0-3s], [0-3s Hook], [0:00 - 0:05] without deleting spoken text
+    .replace(
+      /\[\s*\d+(?::\d+)?\s*(?:s\b|:\d+|\s*[-–—]\s*\d+(?::\d+)?\s*s?)(?:\s+[a-zA-Z0-9\s,&/\-]{1,40})?\s*\]/gi,
+      " "
+    )
+    // Remove standalone unbracketed timestamp ranges like 0:00 - 0:05
+    .replace(/(?:^|\s)\d{1,2}:\d{2}\s*[-–—]\s*\d{1,2}:\d{2}(?=\s|$)/gm, " ")
+    // Remove exact section-only tags like [Hook], [Body], [CTA], [Intro], [Outro], [Scene 1]
+    .replace(/\[(hook|body|cta|intro|outro|scene\s*\d*)\]/gi, " ")
     // Remove emojis, pictographs, variation selectors, and ZWJ sequences
     .replace(/[\p{Extended_Pictographic}\uFE0F\u200D\u20E3]/gu, "")
     // Remove markdown headings, bold/italic markers, backticks, underscores, tildes

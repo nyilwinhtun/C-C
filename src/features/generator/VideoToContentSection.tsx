@@ -6,6 +6,7 @@ import {
   Calendar,
   Check,
   ChevronDown,
+  Clock,
   Copy,
   Film,
   FolderOpen,
@@ -14,6 +15,8 @@ import {
   Loader2,
   Mic,
   Pencil,
+  Plus,
+  RefreshCw,
   RotateCcw,
   Save,
   Share2,
@@ -178,12 +181,14 @@ export function VideoToContentSection() {
   const clearUploadedVideo = useContentStore((state) => state.clearUploadedVideo)
 
   const resultRef = useRef<HTMLDivElement | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
   const prevLanguageRef = useRef(language)
 
   const [initialDraft] = useState<StoredVideoDraft>(() => loadVideoDraft(language))
 
   const [isDragging, setIsDragging] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [videoDurationSeconds, setVideoDurationSeconds] = useState<number | null>(null)
 
   const [platform, setPlatform] = useState<VideoPlatformOption>(initialDraft.platform)
   const [outputLanguage, setOutputLanguage] = useState<"en" | "my">(
@@ -191,6 +196,7 @@ export function VideoToContentSection() {
   )
 
   const [progressStage, setProgressStage] = useState<"extracting" | "analyzing" | null>(null)
+  const [activeVideoAction, setActiveVideoAction] = useState<"default" | "regenerate" | "expand" | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [mobileView, setMobileView] = useState<"create" | "result">("create")
   const [optionsOpen, setOptionsOpen] = useState(false)
@@ -248,6 +254,7 @@ export function VideoToContentSection() {
       const nextPreviewUrl = URL.createObjectURL(file)
       setErrorMessage(null)
       setUploadedVideo(file, nextPreviewUrl)
+      setVideoDurationSeconds(null)
       setResult(null)
       setMobileView("create")
     },
@@ -256,12 +263,14 @@ export function VideoToContentSection() {
 
   const handleClearFile = useCallback(() => {
     clearUploadedVideo()
+    setVideoDurationSeconds(null)
     setErrorMessage(null)
     setMobileView("create")
   }, [clearUploadedVideo])
 
   const handleResetDraft = useCallback(() => {
     clearUploadedVideo()
+    setVideoDurationSeconds(null)
     setProductNote("")
     setPlatform("TikTok / Reels")
     setOutputLanguage(language)
@@ -276,66 +285,110 @@ export function VideoToContentSection() {
     }
   }, [clearUploadedVideo, setProductNote, language])
 
-  const handleGenerate = useCallback(async () => {
-    if (!videoFile || progressStage) return
-    setErrorMessage(null)
-    if (typeof window !== "undefined" && window.innerWidth < 1024) {
-      setMobileView("result")
-    }
-    setProgressStage(
-      videoFile.size <= DIRECT_MODE_LIMIT_BYTES ? "analyzing" : "extracting"
-    )
-    try {
-      const generated = await generateVideoContent({
-        file: videoFile,
-        productNote: productNote.trim() || undefined,
-        platform,
-        language: outputLanguage,
-        brandSignature,
-        businessCategory,
-        customNiche,
-        onProgress: (stage) => setProgressStage(stage),
-      })
-      const ctaText =
-        outputLanguage === "en"
-          ? DEFAULT_ONLINE_SHOP_CTA_EN
-          : DEFAULT_ONLINE_SHOP_CTA_MY
-      const finalCaption =
-        autoAppendShopCta &&
-        generated.caption &&
-        !generated.caption.includes(ctaText)
-          ? `${generated.caption.trimEnd()}\n\n${ctaText}`
-          : generated.caption
-      const finalResult: VideoContentResult = {
-        ...generated,
-        caption: finalCaption,
-      }
-      setResult(finalResult)
-      const defaultTab: VideoOutputTab =
-        finalResult.hooks.length > 0
-          ? "hooks"
-          : finalResult.voiceoverScript
-            ? "voiceover"
-            : finalResult.caption
-              ? "caption"
-              : "cover"
-      setActiveTab(defaultTab)
-      setShowAllTabs(false)
-      toast.success(t(language, "generator.videoSuccess"))
+  const handleGenerate = useCallback(
+    async (mode: "default" | "regenerate" | "expand" = "default") => {
+      if (!videoFile || progressStage) return
+      setErrorMessage(null)
+      setActiveVideoAction(mode)
       if (typeof window !== "undefined" && window.innerWidth < 1024) {
         setMobileView("result")
       }
-    } catch (err) {
-      const message =
-        err instanceof Error && err.message
-          ? err.message
-          : t(language, "generator.videoError")
-      setErrorMessage(message)
-      toast.error(message)
-    } finally {
-      setProgressStage(null)
-    }
-  }, [videoFile, progressStage, productNote, platform, outputLanguage, brandSignature, businessCategory, customNiche, autoAppendShopCta, language])
+      setProgressStage(
+        videoFile.size <= DIRECT_MODE_LIMIT_BYTES ? "analyzing" : "extracting"
+      )
+      try {
+        const refDuration =
+          videoRef.current &&
+          Number.isFinite(videoRef.current.duration) &&
+          videoRef.current.duration > 0
+            ? Math.round(videoRef.current.duration)
+            : undefined
+        const resolvedDuration = videoDurationSeconds ?? refDuration
+        const targetDurationSeconds =
+          mode === "expand"
+            ? resolvedDuration
+              ? Math.round(resolvedDuration * 1.45)
+              : 25
+            : resolvedDuration
+
+        const generated = await generateVideoContent({
+          file: videoFile,
+          productNote: productNote.trim() || undefined,
+          platform,
+          language: outputLanguage,
+          brandSignature,
+          businessCategory,
+          customNiche,
+          targetDurationSeconds,
+          creativeAngleHint:
+            mode === "regenerate"
+              ? "Use a completely fresh, different creative hook, storytelling angle, and phrasing compared to the previous version."
+              : undefined,
+          expandFromScript:
+            mode === "expand" && result?.voiceoverScript
+              ? result.voiceoverScript
+              : undefined,
+          onProgress: (stage) => setProgressStage(stage),
+        })
+        const ctaText =
+          outputLanguage === "en"
+            ? DEFAULT_ONLINE_SHOP_CTA_EN
+            : DEFAULT_ONLINE_SHOP_CTA_MY
+        const finalCaption =
+          autoAppendShopCta &&
+          generated.caption &&
+          !generated.caption.includes(ctaText)
+            ? `${generated.caption.trimEnd()}\n\n${ctaText}`
+            : generated.caption
+        const finalResult: VideoContentResult = {
+          ...generated,
+          caption: finalCaption,
+        }
+        setResult(finalResult)
+        if (mode !== "expand") {
+          const defaultTab: VideoOutputTab =
+            finalResult.hooks.length > 0
+              ? "hooks"
+              : finalResult.voiceoverScript
+                ? "voiceover"
+                : finalResult.caption
+                  ? "caption"
+                  : "cover"
+          setActiveTab(defaultTab)
+          setShowAllTabs(false)
+        }
+        toast.success(t(language, "generator.videoSuccess"))
+        if (typeof window !== "undefined" && window.innerWidth < 1024) {
+          setMobileView("result")
+        }
+      } catch (err) {
+        const message =
+          err instanceof Error && err.message
+            ? err.message
+            : t(language, "generator.videoError")
+        setErrorMessage(message)
+        toast.error(message)
+      } finally {
+        setProgressStage(null)
+        setActiveVideoAction(null)
+      }
+    },
+    [
+      videoFile,
+      progressStage,
+      videoDurationSeconds,
+      productNote,
+      platform,
+      outputLanguage,
+      brandSignature,
+      businessCategory,
+      customNiche,
+      autoAppendShopCta,
+      result,
+      language,
+      setResult,
+    ]
+  )
 
   const copyText = useCallback(
     async (key: string, text: string) => {
@@ -612,10 +665,17 @@ export function VideoToContentSection() {
                 {previewUrl && (
                   <div className="relative overflow-hidden rounded-lg bg-black/90 flex items-center justify-center">
                     <video
+                      ref={videoRef}
                       src={previewUrl}
                       controls
                       playsInline
                       muted
+                      onLoadedMetadata={(e) => {
+                        const d = e.currentTarget.duration
+                        if (Number.isFinite(d) && d > 0) {
+                          setVideoDurationSeconds(Math.round(d))
+                        }
+                      }}
                       className="w-full max-h-[170px] lg:max-h-64 object-contain"
                     />
                   </div>
@@ -629,6 +689,15 @@ export function VideoToContentSection() {
                     <Badge variant="secondary" className="text-[11px] font-medium">
                       {formatFileSize(videoFile.size)}
                     </Badge>
+                    {videoDurationSeconds !== null && (
+                      <Badge
+                        variant="outline"
+                        className="text-[11px] border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5"
+                      >
+                        <Clock className="h-3 w-3 mr-1" aria-hidden="true" />
+                        {videoDurationSeconds}s
+                      </Badge>
+                    )}
                     <Badge
                       variant="outline"
                       className="text-[11px] border-blue-500/30 text-blue-600 dark:text-blue-400 bg-blue-500/5"
@@ -759,7 +828,7 @@ export function VideoToContentSection() {
             <div className="pt-2">
               <Button
                 type="button"
-                onClick={handleGenerate}
+                onClick={() => void handleGenerate("default")}
                 disabled={!videoFile || isGenerating}
                 className="w-full min-h-[44px] rounded-xl font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 border-0"
               >
@@ -848,6 +917,44 @@ export function VideoToContentSection() {
           </Card>
         ) : (
           <div className="space-y-3">
+            {/* 1-Tap Regenerate & Expand Controls */}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!videoFile || isGenerating}
+                onClick={() => void handleGenerate("regenerate")}
+                className="h-9 text-xs font-medium border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/10 text-blue-700 dark:text-blue-300 font-myanmar"
+              >
+                {isGenerating && activeVideoAction === "regenerate" ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin shrink-0" aria-hidden="true" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5 mr-1.5 shrink-0" aria-hidden="true" />
+                )}
+                <span className="truncate">
+                  {language === "my" ? "🔄 ထပ်ထုတ်မည်" : "🔄 Regenerate"}
+                </span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!videoFile || isGenerating || !result.voiceoverScript}
+                onClick={() => void handleGenerate("expand")}
+                className="h-9 text-xs font-medium border-indigo-500/30 bg-indigo-500/5 hover:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-myanmar"
+              >
+                {isGenerating && activeVideoAction === "expand" ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin shrink-0" aria-hidden="true" />
+                ) : (
+                  <Plus className="h-3.5 w-3.5 mr-1.5 shrink-0" aria-hidden="true" />
+                )}
+                <span className="truncate">
+                  {language === "my" ? "➕ ပိုရှည်ရှည် ရေးမည်" : "➕ Expand / Longer"}
+                </span>
+              </Button>
+            </div>
+
             <div className="flex items-center gap-1.5">
               <div
                 role="tablist"
@@ -1197,7 +1304,7 @@ export function VideoToContentSection() {
           <div className="flex items-center gap-2 max-w-2xl mx-auto">
             <Button
               type="button"
-              onClick={handleGenerate}
+              onClick={() => void handleGenerate("default")}
               disabled={!videoFile || isGenerating}
               className="flex-1 min-h-[44px] rounded-xl font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-0 shadow-md shadow-blue-500/20 font-myanmar"
             >

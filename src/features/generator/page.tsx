@@ -31,6 +31,7 @@ import {
   ImagePlus,
   Mic,
   Pencil,
+  Plus,
   SlidersHorizontal,
   ChevronDown,
 } from "lucide-react"
@@ -549,6 +550,7 @@ export function GeneratorPage() {
       businessCategory,
       customNiche: customNiche.trim() || undefined,
       includeHashtags: data.includeHashtags ?? true,
+      targetDurationSeconds: data.targetDurationSeconds ?? 15,
     })
   }
 
@@ -719,6 +721,9 @@ export function GeneratorPage() {
       customNiche: customNiche.trim() || undefined,
       language: values.language,
       includeHashtags: values.includeHashtags ?? true,
+      targetDurationSeconds: values.targetDurationSeconds ?? 15,
+      creativeAngleHint:
+        "Use a completely fresh, different creative hook, storytelling angle, and phrasing compared to the previous version.",
     })
   }, [result, form, generate, businessCategory, customNiche])
 
@@ -763,6 +768,10 @@ export function GeneratorPage() {
         customNiche: customNiche.trim() || undefined,
         language: selectedLang,
         includeHashtags: values.includeHashtags ?? true,
+        targetDurationSeconds:
+          params.id === "expand_longer"
+            ? Math.round((values.targetDurationSeconds ?? 15) * 1.45)
+            : values.targetDurationSeconds ?? 15,
         instruction: `${params.instruction}\n${languageDirective}`,
         currentContent: currentText,
       })
@@ -963,6 +972,41 @@ export function GeneratorPage() {
                         </option>
                       ))}
                     </Select>
+                  </div>
+                </div>
+
+                {/* Target Duration Selector Pills (15s / 30s / 60s) */}
+                <div className="grid gap-1.5">
+                  <Label className="text-xs leading-relaxed flex items-center gap-1.5 font-myanmar">
+                    <Clock className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" aria-hidden="true" />
+                    <span>{language === "my" ? "ကြာချိန် (စာသားအရှည်)" : "Target Duration"}</span>
+                  </Label>
+                  <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Target Duration">
+                    {([15, 30, 60] as const).map((sec) => {
+                      const selectedDuration = form.watch("targetDurationSeconds") ?? 15
+                      const isSelected = selectedDuration === sec
+                      return (
+                        <button
+                          key={sec}
+                          type="button"
+                          role="radio"
+                          aria-checked={isSelected}
+                          onClick={() =>
+                            form.setValue("targetDurationSeconds", sec, {
+                              shouldDirty: true,
+                              shouldValidate: true,
+                            })
+                          }
+                          className={`inline-flex items-center justify-center rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-all cursor-pointer font-myanmar ${
+                            isSelected
+                              ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-transparent shadow-xs"
+                              : "border-border/60 bg-background/80 text-muted-foreground hover:text-foreground hover:bg-accent/70"
+                          }`}
+                        >
+                          {language === "my" ? `${sec} စက္ကန့် (${sec}s)` : `${sec}s`}
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
 
@@ -1528,6 +1572,49 @@ export function GeneratorPage() {
                 >
                   <Calendar className="h-3 w-3 mr-1.5" aria-hidden="true" />
                   {t(language, "vault.schedule")}
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 w-full">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRegenerate}
+                  disabled={!result || isGeneratingFlag}
+                  className="w-full h-9 text-xs font-medium border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/10 text-blue-700 dark:text-blue-300 font-myanmar"
+                >
+                  {isGeneratingFlag && activeAction?.id === "regenerate" ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin shrink-0" aria-hidden="true" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5 mr-1.5 shrink-0" aria-hidden="true" />
+                  )}
+                  <span className="truncate">
+                    {language === "my" ? "🔄 ထပ်ထုတ်မည်" : "🔄 Regenerate"}
+                  </span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    runTransform({
+                      kind: "refine",
+                      id: "expand_longer",
+                      instruction:
+                        "Expand and enrich the following script/post with richer details, stronger storytelling, and a more compelling call-to-action so it fills more spoken time naturally without filler.",
+                    })
+                  }
+                  disabled={!contentToShow || isGeneratingFlag}
+                  className="w-full h-9 text-xs font-medium border-indigo-500/30 bg-indigo-500/5 hover:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-myanmar"
+                >
+                  {isGeneratingFlag && activeAction?.id === "expand_longer" ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin shrink-0" aria-hidden="true" />
+                  ) : (
+                    <Plus className="h-3.5 w-3.5 mr-1.5 shrink-0" aria-hidden="true" />
+                  )}
+                  <span className="truncate">
+                    {language === "my" ? "➕ ပိုရှည်ရှည် ရေးမည်" : "➕ Expand / Longer"}
+                  </span>
                 </Button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 w-full">

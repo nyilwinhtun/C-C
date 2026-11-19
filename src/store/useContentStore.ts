@@ -117,6 +117,7 @@ const defaultDraft: GeneratorFormValues = {
   salesAngle: "viral_story",
   language: "english",
   includeHashtags: true,
+  targetDurationSeconds: 15,
 }
 
 export const useContentStore = create<ContentState>()(

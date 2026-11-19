@@ -116,6 +116,8 @@ export interface GenerateContentRequest {
   customNiche?: string
   language: string
   includeHashtags: boolean
+  targetDurationSeconds?: number
+  creativeAngleHint?: string
   instruction?: string
   currentContent?: string
 }
@@ -206,6 +208,25 @@ function sanitizePlainText(text: string): string {
     .trim()
 }
 
+function buildDurationGuidance(
+  targetDurationSeconds?: number,
+  isMyanmar?: boolean
+): string {
+  if (!targetDurationSeconds || !Number.isFinite(targetDurationSeconds) || targetDurationSeconds <= 0) {
+    return ""
+  }
+  const d = Math.max(5, Math.min(180, Math.round(targetDurationSeconds)))
+  const targetWords = Math.round(d * 2.8)
+  const maxWords = Math.round(targetWords * 1.15)
+  const minChars = Math.round(targetWords * 5.7)
+  const maxChars = Math.round(targetWords * 6.7)
+
+  if (isMyanmar) {
+    return `\nTarget Spoken Duration: ${d} seconds. Required Length: ~${targetWords}–${maxWords} rich spoken Burmese words (~${minChars}–${maxChars} characters). STRICTLY DO NOT write a short 1–2 sentence summary! Write a full, naturally paced ${d}-second script/post so the voiceover fills the entire ${d} seconds from start to finish.`
+  }
+  return `\nTarget Spoken Duration: ${d} seconds. Required Length: ~${targetWords}–${maxWords} spoken words. STRICTLY DO NOT write a short 1–2 sentence summary! Write a full, naturally paced ${d}-second script/post so the voiceover fills the entire ${d} seconds from start to finish.`
+}
+
 function buildUserPrompt(request: GenerateContentRequest): string {
   const hashtagInstruction = request.includeHashtags
     ? "Include relevant hashtags at the end."
@@ -217,6 +238,13 @@ function buildUserPrompt(request: GenerateContentRequest): string {
   const angleGuide =
     SALES_ANGLE_GUIDANCE[normalizeSalesAngle(request.salesAngle)]
   const isMyanmarOnly = request.language === "myanmar" || request.language === "my"
+  const durationGuidance = buildDurationGuidance(
+    request.targetDurationSeconds,
+    isMyanmarOnly || request.language === "bilingual"
+  )
+  const creativeHint = request.creativeAngleHint?.trim()
+    ? `\nCreative Direction: ${request.creativeAngleHint.trim()}`
+    : ""
   const myanmarRules = isMyanmarOnly
     ? '\nStrict Myanmar Rules: Write 100% in natural conversational spoken Burmese (မြန်မာစကားပြော) using warm particles like "ဗျာ", "နော်", "တကယ်တမ်း". NEVER use stiff textbook endings like "ဖြစ်ပါသည်" or "ပါဝင်ပါသည်". Use Burmese script labels like မြင်ကွင်း:, အသံ:, ဖန်သားပြင်စာသား:, ပြောစကား: instead of English stage directions. Keep international brand names (e.g., Apple, Sony, Zara, TikTok, Facebook) in English spelling. Do NOT use Markdown symbols (*, **, # headings).'
     : "\nFormatting Rule: Output clean plain text with no Markdown symbols (*, **, # headings)."
@@ -229,7 +257,7 @@ Target Platform: ${request.platform}
 Target Content Type: ${request.contentType}
 Tone: ${request.tone}
 Output Language: ${request.language}
-${hashtagInstruction}${myanmarRules}
+${hashtagInstruction}${durationGuidance}${myanmarRules}
 
 Current content to transform:
 """
@@ -246,7 +274,7 @@ Content type: ${request.contentType}
 Tone: ${request.tone}
 Language: ${request.language}
 Topic: ${request.topic}
-${hashtagInstruction}${myanmarRules}
+${hashtagInstruction}${durationGuidance}${creativeHint}${myanmarRules}
 Write the content now.`
 }
 
@@ -1137,6 +1165,9 @@ export interface GenerateVideoContentParams {
   brandSignature?: string
   businessCategory?: BusinessCategory
   customNiche?: string
+  targetDurationSeconds?: number
+  creativeAngleHint?: string
+  expandFromScript?: string
   onProgress?: (stage: "extracting" | "analyzing") => void
 }
 
@@ -1326,6 +1357,9 @@ function buildVideoPrompt(params: {
   analysisMode: "direct" | "keyframes"
   businessCategory?: BusinessCategory
   customNiche?: string
+  targetDurationSeconds?: number
+  creativeAngleHint?: string
+  expandFromScript?: string
 }): string {
   const categoryGuide = getCategoryPersonaGuidance(
     params.businessCategory,
@@ -1340,30 +1374,53 @@ function buildVideoPrompt(params: {
       ? "Watch this short video carefully from start to finish."
       : "Review these 5 evenly spaced keyframes from a short video in chronological order."
 
+  const d =
+    params.targetDurationSeconds &&
+    Number.isFinite(params.targetDurationSeconds) &&
+    params.targetDurationSeconds > 0
+      ? Math.max(5, Math.min(180, Math.round(params.targetDurationSeconds)))
+      : 15
+  const targetWords = Math.round(d * 2.8)
+  const maxWords = Math.round(targetWords * 1.15)
+  const minChars = Math.round(targetWords * 5.7)
+  const maxChars = Math.round(targetWords * 6.7)
+  const hookEnd = Math.min(3, Math.max(2, Math.round(d * 0.2)))
+  const midEnd = d === 15 ? 10 : Math.max(hookEnd + 2, Math.round(d * 0.7))
+
+  const creativeBlock = params.creativeAngleHint?.trim()
+    ? `\nCREATIVE DIRECTION: ${params.creativeAngleHint.trim()}`
+    : ""
+  const expandBlock = params.expandFromScript?.trim()
+    ? `\nEXPAND & ENRICH TASK: Expand the following previous voiceoverScript with richer visual details, stronger storytelling, and a more compelling call-to-action so it fills the full duration naturally without rushing:\n"""\n${params.expandFromScript.trim()}\n"""`
+    : ""
+
   if (params.language === "my") {
     const endingInstruction = isShop
-      ? `   [10-15s Price & Call-to-Action]\n   (State the price/promo and CTA using natural spoken Burmese phrasing for all numbers, prices, percentages, and tricky English words—e.g. "လေးသောင်းငါးထောင် ကျပ်", "နှစ်ဆယ် ရာခိုင်နှုန်း", "ဖရီး ဒယ်လီဗာရီ", "စီအိုဒီ", "အခုပဲ အင်ဘောက်စ် မှာ လာမှာလိုက်နော်!"—for effortless reading)`
-      : `   [10-15s Key Takeaway & Call-to-Action]\n   (Deliver the punchy takeaway, lesson, or engaging question for viewers—e.g. Follow/Save/Comment CTA—in natural spoken Burmese without forcing a sales pitch)`
+      ? `   [${midEnd}-${d}s Price & Call-to-Action]\n   (State the price/promo and CTA using natural spoken Burmese phrasing for all numbers, prices, percentages, and tricky English words—e.g. "လေးသောင်းငါးထောင် ကျပ်", "နှစ်ဆယ် ရာခိုင်နှုန်း", "ဖရီး ဒယ်လီဗာရီ", "စီအိုဒီ", "အခုပဲ အင်ဘောက်စ် မှာ လာမှာလိုက်နော်!"—for effortless reading)`
+      : `   [${midEnd}-${d}s Key Takeaway & Call-to-Action]\n   (Deliver the punchy takeaway, lesson, or engaging question for viewers—e.g. Follow/Save/Comment CTA—in natural spoken Burmese without forcing a sales pitch)`
 
     return `You are Myanmar's #1 short-form video strategist and spoken Burmese copywriter (TikTok, Facebook Reels, YouTube Shorts) for creators of all niches.
 ${mediaContext}
+Exact Video Duration: ${d} seconds.
+Required Spoken Script Length: ~${targetWords}–${maxWords} rich spoken Burmese words (~${minChars}–${maxChars} characters).
+CRITICAL LENGTH RULE: STRICTLY DO NOT write a short 1–2 sentence summary! The voiceoverScript MUST be rich, detailed, and long enough to fill the entire ${d}-second video naturally from start to finish at normal speaking pace.
 Creator / Business Category: ${categoryGuide}
 Target Platform: ${params.platform}
-${noteBlock}
+${noteBlock}${creativeBlock}${expandBlock}
 
 Analyze the visual scenes, details, and pacing, then return ONLY a valid JSON object with these exact 4 keys:
 
-1. "hooks": An array of 3 scroll-stopping spoken Burmese hook strings for the first 3 seconds, covering these 3 distinct angles:
+1. "hooks": An array of 3 scroll-stopping spoken Burmese hook strings for the first ${hookEnd} seconds, covering these 3 distinct angles:
    - Hook 1 (Curiosity / သိချင်စိတ်နှိုးဆွ): Makes viewers stop and wonder what happens next.
    - Hook 2 (Value / Key Insight / တန်ဖိုးပေါ်လွင်): Highlights the main takeaway, surprising fact, or standout value.
    - Hook 3 (Relatable Problem / Story / ပြဿနာနှင့် ဇာတ်လမ်း): Calls out a relatable everyday moment or pain point.
 
-2. "voiceoverScript": A high-energy, natural spoken Burmese voiceover script strictly broken down into these 3 timed sections:
-   [0-3s Hook]
+2. "voiceoverScript": A high-energy, natural spoken Burmese voiceover script strictly broken down into these 3 timed sections (~${targetWords}–${maxWords} words total):
+   [0-${hookEnd}s Hook]
    (Punchy opening line that grabs attention immediately)
 
-   [3-10s Story, Demo & Core Point]
-   (Describe what is happening on screen and the #1 insight or benefit in natural conversational Burmese)
+   [${hookEnd}-${midEnd}s Story, Demo & Core Point]
+   (Describe what is happening on screen and the #1 insight or benefit in rich, natural conversational Burmese—do NOT rush or summarize in 1 sentence)
 
 ${endingInstruction}
 
@@ -1381,12 +1438,15 @@ CRITICAL LANGUAGE & STYLE RULES:
 
   return `You are a top short-form video sales strategist and social media copywriter.
 ${mediaContext}
+Exact Video Duration: ${d} seconds.
+Required Spoken Script Length: ~${targetWords}–${maxWords} spoken words.
+CRITICAL LENGTH RULE: STRICTLY DO NOT write a short 1–2 sentence summary! The voiceoverScript MUST be detailed and long enough to fill the entire ${d}-second video naturally from start to finish.
 Target Platform: ${params.platform}
-${noteBlock}
+${noteBlock}${creativeBlock}${expandBlock}
 
 Analyze the visual scenes, product details, and pacing, then return ONLY a valid JSON object with these exact 4 keys:
-1. "hooks": An array of 3 scroll-stopping hook strings for the first 3 seconds covering 3 angles: (1) Curiosity, (2) Price/Value, and (3) Problem-Solution.
-2. "voiceoverScript": A punchy spoken English voiceover script strictly broken down into [0-3s Hook], [3-10s Demo & Key Benefit], and [10-15s Price & Call-to-Action].
+1. "hooks": An array of 3 scroll-stopping hook strings for the first ${hookEnd} seconds covering 3 angles: (1) Curiosity, (2) Price/Value, and (3) Problem-Solution.
+2. "voiceoverScript": A punchy spoken English voiceover script (~${targetWords}–${maxWords} words total) strictly broken down into [0-${hookEnd}s Hook], [${hookEnd}-${midEnd}s Demo & Key Benefit], and [${midEnd}-${d}s Price & Call-to-Action].
 3. "coverTitles": An array of 2 short, punchy 3 to 5 word On-Screen Cover Text headlines ready to paste into CapCut.
 4. "caption": A ready-to-copy-paste ${params.platform} caption in English with relevant emojis and 4-6 hashtags at the end.
 
@@ -1736,6 +1796,9 @@ export async function generateVideoContent(
       analysisMode,
       businessCategory: params.businessCategory,
       customNiche: params.customNiche,
+      targetDurationSeconds: params.targetDurationSeconds,
+      creativeAngleHint: params.creativeAngleHint,
+      expandFromScript: params.expandFromScript,
     })
     return await generateVideoWithOpenAICompatible(
       mediaParts,
@@ -1757,6 +1820,9 @@ export async function generateVideoContent(
       analysisMode,
       businessCategory: params.businessCategory,
       customNiche: params.customNiche,
+      targetDurationSeconds: params.targetDurationSeconds,
+      creativeAngleHint: params.creativeAngleHint,
+      expandFromScript: params.expandFromScript,
     })
     try {
       return await generateVideoWithGemini(

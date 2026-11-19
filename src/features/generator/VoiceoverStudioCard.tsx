@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
+  Clock,
   Download,
   Film,
   Loader2,
@@ -16,6 +17,7 @@ import {
   BURMESE_VOICE_PRESETS,
   VOICEOVER_SPEEDS,
   cleanVoiceoverText,
+  estimateSpokenDurationSeconds,
   generateBurmeseVoiceover,
   type BurmeseVoiceType,
   type VoiceoverResult,
@@ -278,15 +280,28 @@ export function VoiceoverStudioCard({
       <CardContent className="p-3.5 sm:p-4 space-y-3.5">
         {/* Editable clean voiceover text */}
         <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <Label
-              htmlFor="voiceover-studio-text"
-              className="text-xs font-medium text-muted-foreground font-myanmar"
-            >
-              {language === "my"
-                ? "အသံဖတ်မည့် စာသား (ပြင်ဆင်နိုင်သည်)"
-                : "Spoken Burmese Script (Editable)"}
-            </Label>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Label
+                htmlFor="voiceover-studio-text"
+                className="text-xs font-medium text-muted-foreground font-myanmar"
+              >
+                {language === "my"
+                  ? "အသံဖတ်မည့် စာသား (ပြင်ဆင်နိုင်သည်)"
+                  : "Spoken Burmese Script (Editable)"}
+              </Label>
+              {editableScript.trim() && (
+                <Badge
+                  variant="outline"
+                  className="text-[11px] font-medium border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-myanmar"
+                >
+                  <Clock className="h-3 w-3 mr-1" aria-hidden="true" />
+                  {language === "my"
+                    ? `ခန့်မှန်းကြာချိန်: ~${estimateSpokenDurationSeconds(editableScript, speed)} စက္ကန့်`
+                    : `Est. duration: ~${estimateSpokenDurationSeconds(editableScript, speed)}s`}
+                </Badge>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => setEditableScript(cleanVoiceoverText(voiceoverScript))}

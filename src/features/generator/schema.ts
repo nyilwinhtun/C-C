@@ -29,6 +29,7 @@ export const generatorSchema = z.object({
     .default("viral_story"),
   language: z.enum(["myanmar", "english", "bilingual"]),
   includeHashtags: z.boolean().default(true),
+  targetDurationSeconds: z.number().int().positive().default(15),
 })
 
 export type GeneratorFormValues = z.infer<typeof generatorSchema>

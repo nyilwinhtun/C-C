@@ -37,6 +37,7 @@ import {
   VOICE_DELIVERY_PRESETS,
   VOICEOVER_SPEEDS,
   cleanVoiceoverText,
+  estimateSpokenDurationSeconds,
   generateBurmeseVoiceover,
   optimizeScriptPreservingPauses,
   playSoundEffectPreview,
@@ -657,12 +658,25 @@ export function VoiceoverPage() {
           {/* Script Input + 1-tap Pause Pills */}
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label
-                htmlFor="voiceover-page-text"
-                className="text-xs font-medium text-muted-foreground font-myanmar"
-              >
-                {isMy ? "အသံဖတ်မည့် စာသား" : "Spoken Script"}
-              </Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <Label
+                  htmlFor="voiceover-page-text"
+                  className="text-xs font-medium text-muted-foreground font-myanmar"
+                >
+                  {isMy ? "အသံဖတ်မည့် စာသား" : "Spoken Script"}
+                </Label>
+                {voiceoverDraftScript.trim() && (
+                  <Badge
+                    variant="outline"
+                    className="text-[11px] font-medium border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-myanmar"
+                  >
+                    <Clock className="h-3 w-3 mr-1" aria-hidden="true" />
+                    {isMy
+                      ? `ခန့်မှန်းကြာချိန်: ~${estimateSpokenDurationSeconds(voiceoverDraftScript, speed)} စက္ကန့်`
+                      : `Est. duration: ~${estimateSpokenDurationSeconds(voiceoverDraftScript, speed)}s`}
+                  </Badge>
+                )}
+              </div>
               <div className="flex items-center gap-2">
                 <Button
                   type="button"

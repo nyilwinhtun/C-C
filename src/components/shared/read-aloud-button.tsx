@@ -29,8 +29,16 @@ export function sanitizeSpeechText(raw: string): string {
   if (!raw) return ""
 
   return raw
-    // Remove bracketed timestamps like [0:00-0:03], [0-3s], [00:00 - 00:15], [0:00]
-    .replace(/\[\s*\d+(?::\d+)?\s*s?(?:\s*[-–—]\s*\d+(?::\d+)?\s*s?)?\s*\]/gi, " ")
+    // Remove bracketed timestamps like [0:00-0:03], [0-3s], [0-3s Hook], [10-15s Price & Call-to-Action]
+    // Only matches timestamps with optional ASCII section labels so Burmese/English spoken text is never deleted.
+    .replace(
+      /\[\s*\d+(?::\d+)?\s*(?:s\b|:\d+|\s*[-–—]\s*\d+(?::\d+)?\s*s?)(?:\s+[a-zA-Z0-9\s,&/\-]{1,40})?\s*\]/gi,
+      " "
+    )
+    // Remove standalone unbracketed timestamp ranges like 0:00 - 0:05 or 00:00-00:15
+    .replace(/(?:^|\s)\d{1,2}:\d{2}\s*[-–—]\s*\d{1,2}:\d{2}(?=\s|$)/gm, " ")
+    // Remove exact section-only tags like [Hook], [Body], [CTA], [Intro], [Outro], [Scene 1]
+    .replace(/\[(hook|body|cta|intro|outro|scene\s*\d*)\]/gi, " ")
     // Remove emojis, pictographs, variation selectors, and ZWJ sequences
     .replace(/[\p{Extended_Pictographic}\uFE0F\u200D\u20E3]/gu, "")
     // Remove markdown headings, bold/italic markers, and backticks
