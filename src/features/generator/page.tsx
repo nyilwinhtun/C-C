@@ -4,13 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Check,
   Copy,
-  Eraser,
   Loader2,
   Mic,
   Plus,
   SlidersHorizontal,
   Square,
   Trash2,
+  X,
 } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
 import { toast } from "@/components/ui/sonner"
@@ -102,6 +102,7 @@ export function GeneratorPage() {
   const {
     draftInput,
     setDraftInput,
+    clearTextPostDraft,
     voiceDnaSamples,
     setVoiceDnaSamples,
     shopProfile,
@@ -114,11 +115,13 @@ export function GeneratorPage() {
     setEditorialFormat,
     editorialResult,
     setEditorialResult,
+    clearEditorialResult,
     setVoiceoverDraftScript,
   } = useContentStore(
     useShallow((state) => ({
       draftInput: state.draftInput,
       setDraftInput: state.setDraftInput,
+      clearTextPostDraft: state.clearTextPostDraft,
       voiceDnaSamples: state.voiceDnaSamples,
       setVoiceDnaSamples: state.setVoiceDnaSamples,
       shopProfile: state.shopProfile,
@@ -131,6 +134,7 @@ export function GeneratorPage() {
       setEditorialFormat: state.setEditorialFormat,
       editorialResult: state.editorialResult,
       setEditorialResult: state.setEditorialResult,
+      clearEditorialResult: state.clearEditorialResult,
       setVoiceoverDraftScript: state.setVoiceoverDraftScript,
     }))
   )
@@ -180,6 +184,11 @@ export function GeneratorPage() {
       wavRecorderRef.current = null
     }
   }, [stopMediaResources])
+
+  const handleClearCanvas = () => {
+    setRawNotes("")
+    clearTextPostDraft()
+  }
 
   const handleNotesChange = (value: string) => {
     setRawNotes(value)
@@ -366,7 +375,9 @@ export function GeneratorPage() {
         tone: editorialTone,
         voiceDnaSamples,
       })
-      setEditorialResult({ ...editorialResult, hooks })
+      const latest = useContentStore.getState().editorialResult
+      if (!latest) return
+      setEditorialResult({ ...latest, hooks })
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "အဖွင့်စာကြောင်းအသစ်များ ဖန်တီး၍မရပါ"
@@ -378,6 +389,7 @@ export function GeneratorPage() {
 
   const handlePolish = async (mode: "shorten" | "humanize") => {
     if (!editorialResult || !activeText.trim()) return
+    const targetOption = editorialResult.activeOption
     setPolishingAction(mode)
     try {
       const refined = await polishEditorialDraft({
@@ -386,7 +398,13 @@ export function GeneratorPage() {
         tone: editorialTone,
         voiceDnaSamples,
       })
-      updateActiveText(refined)
+      const latest = useContentStore.getState().editorialResult
+      if (!latest) return
+      setEditorialResult(
+        targetOption === "A"
+          ? { ...latest, optionA: refined, hooks: [] }
+          : { ...latest, optionB: refined, hooks: [] }
+      )
       toast.success(
         mode === "shorten"
           ? "ပိုတိုကျစ်အောင် ချုံ့ပြီးပါပြီ"
@@ -444,17 +462,6 @@ export function GeneratorPage() {
             မူကြမ်းမှတ်စု
           </span>
         </div>
-
-        {rawNotes.trim().length > 0 && (
-          <button
-            type="button"
-            onClick={() => handleNotesChange("")}
-            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <Eraser className="h-3.5 w-3.5" />
-            <span>ရှင်းမည်</span>
-          </button>
-        )}
       </div>
 
       {/* Horizontal Quick Format Chips */}
@@ -480,13 +487,27 @@ export function GeneratorPage() {
       </div>
 
       {/* Single-Focus Writing Canvas (Apple Notes / Notion Inspired) */}
-      <div className="rounded-2xl border border-border/80 bg-[#FAF9F6] shadow-xs transition-colors focus-within:border-foreground/30 dark:bg-[#1C1C1E]">
+      <div className="relative rounded-2xl border border-border/80 bg-[#FAF9F6] shadow-xs transition-colors focus-within:border-foreground/30 dark:bg-[#1C1C1E]">
+        {rawNotes.length > 0 && (
+          <button
+            type="button"
+            onClick={handleClearCanvas}
+            aria-label="စာရှင်းမည်"
+            className="absolute right-2.5 top-2.5 z-10 inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/85 px-2.5 py-1 text-xs font-medium text-muted-foreground backdrop-blur-xs transition-colors hover:bg-muted hover:text-foreground active:scale-95"
+          >
+            <X className="h-3.5 w-3.5" />
+            <span>စာရှင်းမည်</span>
+          </button>
+        )}
         <Textarea
           value={rawNotes}
           onChange={(e) => handleNotesChange(e.target.value)}
           placeholder="စိတ်ထဲရှိတဲ့ အကြောင်းအရာ ဒါမှမဟုတ် ကုန်ပစ္စည်းအကြောင်း အကြမ်းဖျင်း ချရေးပါ..."
           rows={7}
-          className="min-h-[190px] w-full resize-y border-0 bg-transparent px-4 pt-4 pb-2 text-[15px] leading-[1.75] text-foreground placeholder:text-muted-foreground/65 focus-visible:ring-0 focus-visible:ring-offset-0 sm:min-h-[210px] sm:px-5 sm:pt-5"
+          className={cn(
+            "min-h-[190px] w-full resize-y border-0 bg-transparent px-4 pt-4 pb-2 text-[15px] leading-[1.75] text-foreground placeholder:text-muted-foreground/65 focus-visible:ring-0 focus-visible:ring-offset-0 sm:min-h-[210px] sm:px-5 sm:pt-5",
+            rawNotes.length > 0 && "pr-28 sm:pr-32"
+          )}
         />
 
         {/* Integrated Input Footer Bar with Mic Button */}
@@ -605,15 +626,26 @@ export function GeneratorPage() {
 
           {/* Result Card */}
           <div className="rounded-2xl border border-border/80 bg-card shadow-xs">
-            <div className="flex items-center justify-between border-b border-border/50 px-4 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
+            <div className="flex items-center justify-between gap-2 border-b border-border/50 px-4 py-2.5">
+              <span className="text-xs font-medium text-muted-foreground truncate">
                 {editorialResult.activeOption === "A"
                   ? "ရိုးရှင်းတိုက်ရိုက်ဟန် (Direct & Clear)"
                   : "ဇာတ်ကြောင်းပြောဟန် (Warm Storytelling)"}
               </span>
-              <span className="text-[11px] text-muted-foreground/75">
-                ဘယ်/ညာ ပွတ်ဆွဲ၍ ပြောင်းကြည့်နိုင်သည်
-              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="hidden text-[11px] text-muted-foreground/75 sm:inline">
+                  ဘယ်/ညာ ပွတ်ဆွဲ၍ ပြောင်းကြည့်နိုင်သည်
+                </span>
+                <button
+                  type="button"
+                  onClick={clearEditorialResult}
+                  aria-label="ဖျက်မည်"
+                  className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive active:scale-95"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>ဖျက်မည်</span>
+                </button>
+              </div>
             </div>
 
             <Textarea

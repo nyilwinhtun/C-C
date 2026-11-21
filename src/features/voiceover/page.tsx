@@ -132,6 +132,7 @@ export function VoiceoverPage() {
   const [activeAudio, setActiveAudio] = useState<StudioAudioResult | null>(null)
 
   const activeUrlRef = useRef<string | null>(null)
+  const untranscribedMyVoiceRef = useRef(false)
   const wavRecorderRef = useRef<WavAudioRecorderHandle | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const recordTimerRef = useRef<number | null>(null)
@@ -222,6 +223,7 @@ export function VoiceoverPage() {
     revokeActiveUrl()
     const url = URL.createObjectURL(finalBlob)
     activeUrlRef.current = url
+    untranscribedMyVoiceRef.current = true
 
     setActiveAudio({
       source: "my_voice",
@@ -329,26 +331,23 @@ export function VoiceoverPage() {
     toast.success("အသံဖိုင် ထည့်သွင်းပြီးပါပြီ။")
   }
 
-  const handleTranscribeRecording = async () => {
-    if (!activeAudio || activeAudio.source !== "my_voice") return
-    const sourceBlob = activeAudio.rawBlobForTranscribe ?? activeAudio.blob
-
+  const transcribeMyVoiceBlob = async (audio: StudioAudioResult): Promise<string | null> => {
+    const sourceBlob = audio.rawBlobForTranscribe ?? audio.blob
     setIsTranscribing(true)
     try {
       let uploadBlob: Blob = sourceBlob
-      let uploadMime = activeAudio.mimeType
-      let uploadName = "recording.wav"
+      let uploadMime = audio.mimeType
+      const uploadName = "recording.wav"
 
       try {
         const processed = await prepareAudioForGemini(sourceBlob)
         if (processed.isSilent) {
           toast.error("အသံမကြားရပါ — မိုက်ခရိုဖုန်း စစ်ဆေးပါ။")
-          return
+          return null
         }
         if (processed.wavBlob) {
           uploadBlob = processed.wavBlob
           uploadMime = processed.mimeType
-          uploadName = "recording.wav"
         }
       } catch {
         // Fallback to raw blob if browser cannot decode an uploaded file format
@@ -364,17 +363,26 @@ export function VoiceoverPage() {
       const trimmed = cleanedText.trim()
       if (!trimmed) {
         toast.info("စကားသံ မတွေ့ရှိပါ။")
-        return
+        return null
       }
+      return trimmed
+    } finally {
+      setIsTranscribing(false)
+    }
+  }
 
+  const handleTranscribeRecording = async () => {
+    if (!activeAudio || activeAudio.source !== "my_voice") return
+    try {
+      const trimmed = await transcribeMyVoiceBlob(activeAudio)
+      if (!trimmed) return
+      untranscribedMyVoiceRef.current = false
       const existing = voiceoverDraftScript.trim()
       setVoiceoverDraftScript(existing ? `${existing}\n\n${trimmed}` : trimmed)
       toast.success("စာသားအဖြစ် သန့်ရှင်းစွာ ပြောင်းလဲပြီးပါပြီ။")
     } catch (err) {
       const msg = err instanceof Error ? err.message : "စာသားပြောင်းလဲ၍ မရပါ။"
       toast.error(msg)
-    } finally {
-      setIsTranscribing(false)
     }
   }
 
@@ -383,7 +391,26 @@ export function VoiceoverPage() {
     unlockIosAudio()
     triggerHaptic(10)
 
-    const trimmed = cleanVoiceoverText(voiceoverDraftScript)
+    let scriptForTts = voiceoverDraftScript
+    const needsAutoTranscribe =
+      activeAudio?.source === "my_voice" &&
+      (untranscribedMyVoiceRef.current || !cleanVoiceoverText(scriptForTts))
+
+    if (needsAutoTranscribe && activeAudio) {
+      try {
+        const transcribed = await transcribeMyVoiceBlob(activeAudio)
+        if (!transcribed) return
+        untranscribedMyVoiceRef.current = false
+        scriptForTts = transcribed
+        setVoiceoverDraftScript(transcribed)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "စာသားပြောင်းလဲ၍ မရပါ။"
+        toast.error(msg)
+        return
+      }
+    }
+
+    const trimmed = cleanVoiceoverText(scriptForTts)
     if (!trimmed) {
       toast.error("အသံဖတ်ခိုင်းရန် စာသားအရင်ထည့်ပါ။")
       return
@@ -393,7 +420,7 @@ export function VoiceoverPage() {
     setVoiceProgress(null)
     try {
       let result = dialogueMode
-        ? await generateBurmeseDialogueVoiceover(voiceoverDraftScript, speed, {
+        ? await generateBurmeseDialogueVoiceover(scriptForTts, speed, {
             deliveryTone: "storytelling",
             customPronunciations,
             onProgress: setVoiceProgress,
@@ -443,7 +470,7 @@ export function VoiceoverPage() {
       })
 
       addAudioSession({
-        script: voiceoverDraftScript.trim(),
+        script: scriptForTts.trim(),
         voiceLabel: title,
         mode: dialogueMode ? "dialogue" : "single",
         durationSeconds: result.durationSeconds,
@@ -566,7 +593,10 @@ export function VoiceoverPage() {
           <div className="flex flex-col">
             <Textarea
               value={voiceoverDraftScript}
-              onChange={(e) => setVoiceoverDraftScript(e.target.value)}
+              onChange={(e) => {
+                untranscribedMyVoiceRef.current = false
+                setVoiceoverDraftScript(e.target.value)
+              }}
               rows={7}
               placeholder={SCRIPT_PLACEHOLDER}
               className="min-h-[210px] sm:min-h-[240px] w-full resize-none border-0 bg-transparent px-4 py-4 sm:px-5 sm:py-5 text-sm sm:text-base leading-[1.8] text-[#1C1917] dark:text-[#F5F5F4] placeholder:text-[#A8A29E] dark:placeholder:text-[#71717A] focus-visible:ring-0 focus-visible:ring-offset-0 font-myanmar"
@@ -753,10 +783,20 @@ export function VoiceoverPage() {
               type="button"
               onTouchStart={() => unlockIosAudio()}
               onClick={handleReadWithNarrator}
-              disabled={isGeneratingVoice || !voiceoverDraftScript.trim()}
+              disabled={
+                isGeneratingVoice ||
+                isTranscribing ||
+                isRecordingVoice ||
+                (!voiceoverDraftScript.trim() && activeAudio?.source !== "my_voice")
+              }
               className="w-full h-12 rounded-2xl bg-[#1C1917] hover:bg-[#292524] dark:bg-[#F5F5F4] dark:hover:bg-[#E7E5E4] text-[#FAF8F5] dark:text-[#18181B] text-sm font-semibold transition-all active:scale-[0.99] font-myanmar"
             >
-              {isGeneratingVoice ? (
+              {isTranscribing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
+                  <span>စာသားအဖြစ် ပြောင်းလဲနေပါသည်...</span>
+                </>
+              ) : isGeneratingVoice ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
                   <span>

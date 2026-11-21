@@ -61,6 +61,8 @@ export function IosAudioPlayer({
   className,
 }: IosAudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const prevSrcRef = useRef<string>("")
+  const playbackSpeedRef = useRef<number>(1.0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(initialDuration)
@@ -75,6 +77,7 @@ export function IosAudioPlayer({
   }, [src, initialDuration])
 
   useEffect(() => {
+    playbackSpeedRef.current = playbackSpeed
     const audio = audioRef.current
     if (!audio) return
     audio.playbackRate = playbackSpeed
@@ -83,6 +86,18 @@ export function IosAudioPlayer({
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
+
+    // Reset player state & revoke previous blob URL before loading new audio
+    // so sample-rate changes (e.g. 44.1kHz mic -> 24kHz TTS) never cause silent playback.
+    audio.pause()
+    audio.currentTime = 0
+    const prevSrc = prevSrcRef.current
+    if (prevSrc && prevSrc !== src && prevSrc.startsWith("blob:")) {
+      URL.revokeObjectURL(prevSrc)
+    }
+    audio.removeAttribute("src")
+    audio.load()
+    prevSrcRef.current = src
 
     const syncDuration = () => {
       if (Number.isFinite(audio.duration) && audio.duration > 0) {
@@ -98,7 +113,7 @@ export function IosAudioPlayer({
     }
     const onPause = () => setIsPlaying(false)
     const onPlay = () => {
-      audio.playbackRate = playbackSpeed
+      audio.playbackRate = playbackSpeedRef.current
       setIsPlaying(true)
     }
 
@@ -111,7 +126,10 @@ export function IosAudioPlayer({
     audio.addEventListener("pause", onPause)
     audio.addEventListener("play", onPlay)
 
-    audio.load()
+    if (src) {
+      audio.src = src
+      audio.load()
+    }
 
     return () => {
       audio.removeEventListener("loadedmetadata", syncDuration)
@@ -123,7 +141,7 @@ export function IosAudioPlayer({
       audio.removeEventListener("pause", onPause)
       audio.removeEventListener("play", onPlay)
     }
-  }, [src, playbackSpeed])
+  }, [src])
 
   const togglePlay = async () => {
     const audio = audioRef.current
@@ -194,7 +212,7 @@ export function IosAudioPlayer({
         className
       )}
     >
-      <audio ref={audioRef} src={src} playsInline preload="auto" className="sr-only" />
+      <audio ref={audioRef} playsInline preload="auto" className="sr-only" />
 
       {/* Top Metadata Row */}
       {(title || subtitle) && (

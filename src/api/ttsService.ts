@@ -718,10 +718,11 @@ function getSpeedPromptInstruction(speed: VoiceoverSpeed): string {
 export const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 
 /**
- * Split long scripts cleanly at sentence boundaries (`။` / newlines / punctuation)
- * so each TTS chunk (max ~160-200 chars) synthesizes reliably without Gemini truncation.
+ * Split long scripts cleanly at sentence boundaries (`။` / `.` / newlines / punctuation)
+ * so each TTS chunk (max ~360 chars, safely under Gemini's ~24s / 450-char truncation limit)
+ * synthesizes reliably and can be stitched seamlessly.
  */
-export function splitScriptIntoChunks(text: string, maxChunkChars = 180): string[] {
+export function splitScriptIntoChunks(text: string, maxChunkChars = 360): string[] {
   const normalized = text.trim()
   if (!normalized) return []
   if (normalized.length <= maxChunkChars) return [normalized]
@@ -970,28 +971,47 @@ async function synthesizeGeminiChunk(
   })
 
   let response: Response | null = null
-  if (cleanKey.startsWith("AQ.")) {
-    const vertexUrl = `https://aiplatform.googleapis.com/v1/publishers/google/models/${GEMINI_TTS_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
-    try {
-      const vertexRes = await fetch(vertexUrl, {
-        method: "POST",
-        headers,
-        body: requestBody,
-      })
-      if (vertexRes.ok) {
-        response = vertexRes
+  const maxAttempts = 2
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    response = null
+    if (cleanKey.startsWith("AQ.")) {
+      const vertexUrl = `https://aiplatform.googleapis.com/v1/publishers/google/models/${GEMINI_TTS_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
+      try {
+        const vertexRes = await fetch(vertexUrl, {
+          method: "POST",
+          headers,
+          body: requestBody,
+        })
+        if (vertexRes.ok) {
+          response = vertexRes
+        }
+      } catch {
+        // Fall back to generativelanguage.googleapis.com
       }
-    } catch {
-      // Fall back to generativelanguage.googleapis.com
     }
+
+    if (!response) {
+      try {
+        response = await fetch(standardUrl, {
+          method: "POST",
+          headers,
+          body: requestBody,
+        })
+      } catch (err) {
+        if (attempt === maxAttempts - 1) throw err
+      }
+    }
+
+    if (response?.ok) break
+    if (attempt < maxAttempts - 1 && (!response || response.status === 429 || response.status >= 500)) {
+      await new Promise((resolve) => window.setTimeout(resolve, 600 * (attempt + 1)))
+      continue
+    }
+    break
   }
 
   if (!response) {
-    response = await fetch(standardUrl, {
-      method: "POST",
-      headers,
-      body: requestBody,
-    })
+    throw new TtsError("Gemini audio generation failed: network error.")
   }
 
   if (!response.ok) {
@@ -1048,7 +1068,7 @@ async function synthesizeWithGemini(
   apiKey: string,
   onChunkProgress?: (currentChunk: number, totalChunks: number) => void
 ): Promise<{ blob: Blob; mimeType: string; fileExtension: "wav" | "mp3" }> {
-  const chunks = splitScriptIntoChunks(cleanedText, 180)
+  const chunks = splitScriptIntoChunks(cleanedText, 360)
   const chunkResults = []
   for (let i = 0; i < chunks.length; i += 1) {
     onChunkProgress?.(i + 1, chunks.length)
@@ -1692,7 +1712,7 @@ export async function generateBurmeseVoiceover(
   }
 
   // Multi-segment (with pauses) and/or intro SFX path
-  const segmentChunkCounts = speechSegments.map((seg) => splitScriptIntoChunks(seg.text, 180).length)
+  const segmentChunkCounts = speechSegments.map((seg) => splitScriptIntoChunks(seg.text, 360).length)
   const totalChunksAllSegments = Math.max(
     1,
     segmentChunkCounts.reduce((sum, count) => sum + count, 0)

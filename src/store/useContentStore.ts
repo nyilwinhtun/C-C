@@ -166,6 +166,7 @@ interface ContentState {
   setEditorialLength: (length: EditorialLength) => void
   setEditorialFormat: (format: EditorialFormat) => void
   setEditorialResult: (result: EditorialResult | null) => void
+  clearEditorialResult: () => void
   setMicFilterMode: (mode: MicFilterMode) => void
   clearUploadedVideo: () => void
   saveToVault: (
@@ -321,6 +322,7 @@ export const useContentStore = create<ContentState>()(
       setEditorialLength: (editorialLength) => set({ editorialLength }),
       setEditorialFormat: (editorialFormat) => set({ editorialFormat }),
       setEditorialResult: (editorialResult) => set({ editorialResult }),
+      clearEditorialResult: () => set({ editorialResult: null }),
       setMicFilterMode: (micFilterMode) => set({ micFilterMode }),
       addCustomPronunciation: (word, phonetic) =>
         set((state) => {
