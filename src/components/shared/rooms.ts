@@ -2,11 +2,13 @@ import {
   AudioLines,
   BookOpen,
   Camera,
+  Clapperboard,
   FileText,
   FolderKanban,
+  Lightbulb,
   Mic,
-  PenLine,
   Scissors,
+  SquarePen,
   Video,
   type LucideIcon,
 } from "lucide-react"
@@ -30,6 +32,8 @@ export interface WorkspaceRoom {
   defaultPageKey: string
   icon: LucideIcon
   tone: SquircleTone
+  activeColorClass: string
+  activePillClass: string
   tabs: RoomTab[]
 }
 
@@ -42,8 +46,10 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
     shortMy: "စာရေးမည်",
     shortEn: "Write",
     defaultPageKey: "text",
-    icon: PenLine,
+    icon: SquarePen,
     tone: "blue",
+    activeColorClass: "text-[#007AFF] dark:text-[#0A84FF]",
+    activePillClass: "bg-[#007AFF]/12 dark:bg-[#0A84FF]/18",
     tabs: [
       { key: "text", labelMy: "Post ရေးမည်", labelEn: "Text Post", icon: FileText },
       { key: "video", labelMy: "Video Script", labelEn: "Video Script", icon: Video },
@@ -58,7 +64,9 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
     shortEn: "Audio",
     defaultPageKey: "voiceover",
     icon: Mic,
-    tone: "indigo",
+    tone: "purple",
+    activeColorClass: "text-[#AF52DE] dark:text-[#BF5AF2]",
+    activePillClass: "bg-[#AF52DE]/12 dark:bg-[#BF5AF2]/18",
     tabs: [
       { key: "voiceover", labelMy: "AI အသံထည့်မည်", labelEn: "AI Voiceover", icon: Mic },
       { key: "transcriber", labelMy: "အသံမှ စာပြောင်းမည်", labelEn: "Voice-to-Text", icon: AudioLines },
@@ -73,8 +81,10 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
     shortMy: "မီဒီယာ",
     shortEn: "Media",
     defaultPageKey: "autocut",
-    icon: Scissors,
-    tone: "amber",
+    icon: Clapperboard,
+    tone: "orange",
+    activeColorClass: "text-[#FF9500] dark:text-[#FF9F0A]",
+    activePillClass: "bg-[#FF9500]/12 dark:bg-[#FF9F0A]/18",
     tabs: [
       { key: "autocut", labelMy: "ဗီဒီယို Auto-Cut", labelEn: "Video Auto-Cut", icon: Scissors },
       { key: "studio", labelMy: "ပုံဒီဇိုင်း Studio", labelEn: "Photo Studio", icon: Camera },
@@ -88,8 +98,10 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
     shortMy: "မှတ်စု",
     shortEn: "Vault",
     defaultPageKey: "vault",
-    icon: FolderKanban,
+    icon: Lightbulb,
     tone: "emerald",
+    activeColorClass: "text-[#34C759] dark:text-[#30D158]",
+    activePillClass: "bg-[#34C759]/12 dark:bg-[#30D158]/18",
     tabs: [{ key: "vault", labelMy: "Idea Vault & Calendar", labelEn: "Idea Vault & Calendar", icon: FolderKanban }],
   },
 ]

@@ -222,3 +222,22 @@
 .animate-dynamic-island {
   animation: dynamic-island-expand 0.34s cubic-bezier(0.32, 0.72, 0, 1) forwards;
 }
+
+@keyframes ios-tab-pop {
+  0% {
+    transform: scale(0.9) translateY(2px);
+  }
+  50% {
+    transform: scale(1.12) translateY(-2px);
+  }
+  80% {
+    transform: scale(0.98) translateY(0);
+  }
+  100% {
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-ios-tab-pop {
+  animation: ios-tab-pop 0.36s cubic-bezier(0.32, 0.72, 0, 1);
+}
