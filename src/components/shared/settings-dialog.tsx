@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState } from "react"
 import { t } from "@/locales/translations"
-import { useUIStore, DEFAULT_MODELS, type AIProvider } from "@/store/useUIStore"
+import {
+  useUIStore,
+  DEFAULT_MODELS,
+  isValidGeminiApiKey,
+  type AIProvider,
+} from "@/store/useUIStore"
 import { useContentStore, type ContentBackupData } from "@/store/useContentStore"
 import {
   BUSINESS_CATEGORIES,
@@ -74,7 +79,7 @@ const PROVIDER_INFO: Record<
     shortLabel: "Gemini",
     link: "https://makersuite.google.com/app/apikey",
     linkLabel: "Get free Gemini API key",
-    placeholder: "AIza...",
+    placeholder: "AIza... or AQ....",
   },
   groq: {
     label: "Groq",
@@ -658,9 +663,16 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </Button>
             <Button
               onClick={() => {
+                const trimmedKey = apiKeyInput.trim()
+                if (selectedProvider === "gemini" && trimmedKey && !isValidGeminiApiKey(trimmedKey)) {
+                  toast.error(
+                    "Invalid Gemini API key. Key must start with AIza or AQ. and be at least 20 characters."
+                  )
+                  return
+                }
                 const normalizedModel = modelInput.trim() || DEFAULT_MODELS[selectedProvider]
                 setAIProvider(selectedProvider)
-                setProviderApiKey(selectedProvider, apiKeyInput.trim())
+                setProviderApiKey(selectedProvider, trimmedKey)
                 setProviderModel(selectedProvider, normalizedModel)
                 setBrandSignature(signature)
                 setBusinessCategory(categoryInput)

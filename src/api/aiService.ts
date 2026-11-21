@@ -571,12 +571,23 @@ function getAiConfig() {
   }
 }
 
+function getGeminiRequestConfig(model: string, apiKey: string) {
+  const cleanKey = apiKey.trim()
+  return {
+    url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`,
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": cleanKey,
+    },
+  }
+}
+
 async function generateWithGemini(
   request: GenerateContentRequest,
   apiKey: string,
   model: string
 ): Promise<GeneratedContent> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+  const { url, headers } = getGeminiRequestConfig(model, apiKey)
   const body = {
     systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
     contents: [{ parts: [{ text: buildUserPrompt(request) }] }],
@@ -585,7 +596,7 @@ async function generateWithGemini(
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   })
 
@@ -888,7 +899,7 @@ async function suggestPhotoWithGemini(
   model: string
 ): Promise<PhotoSuggestionResult> {
   const base64Data = request.imageBase64.replace(/^data:[^;]+;base64,/, "")
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+  const { url, headers } = getGeminiRequestConfig(model, apiKey)
   const body = {
     contents: [
       {
@@ -913,7 +924,7 @@ async function suggestPhotoWithGemini(
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   })
 
@@ -1553,7 +1564,7 @@ async function generateVideoWithGemini(
   frameCount?: number,
   brandSignature?: string
 ): Promise<VideoContentResult> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+  const { url, headers } = getGeminiRequestConfig(model, apiKey)
   const body = {
     contents: [
       {
@@ -1570,7 +1581,7 @@ async function generateVideoWithGemini(
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   })
 
@@ -1950,7 +1961,7 @@ async function callGeminiMultimodalText(params: {
     )
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${geminiKey}`
+  const { url, headers } = getGeminiRequestConfig(GEMINI_VISION_MODEL, geminiKey)
   const body = {
     contents: [
       {
@@ -1974,7 +1985,7 @@ async function callGeminiMultimodalText(params: {
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   })
 

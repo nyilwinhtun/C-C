@@ -938,7 +938,8 @@ async function synthesizeGeminiChunk(
   | { kind: "pcm"; pcmBytes: Uint8Array; sampleRate: number }
   | { kind: "blob"; blob: Blob; mimeType: string; fileExtension: "wav" | "mp3" }
 > {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TTS_MODEL}:generateContent?key=${apiKey}`
+  const cleanKey = apiKey.trim()
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TTS_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
   const tonePreset = VOICE_DELIVERY_PRESETS[deliveryTone]
 
   const prompt = [
@@ -952,7 +953,10 @@ async function synthesizeGeminiChunk(
 
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": cleanKey,
+    },
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {

@@ -59,6 +59,12 @@ export const DEFAULT_MODELS: ProviderMap = {
   openrouter: "google/gemma-3-27b-it:free",
 }
 
+export function isValidGeminiApiKey(apiKey: string): boolean {
+  const trimmed = apiKey.trim()
+  if (trimmed.length < 20) return false
+  return trimmed.startsWith("AIza") || trimmed.startsWith("AQ.")
+}
+
 function readLocalKey(storageKey: string): string {
   if (typeof window === "undefined") return ""
   try {
@@ -263,6 +269,12 @@ export const useUIStore = create<UIState>()(
           } else if (legacySingleKey.startsWith("gsk_") && !apiKeys.groq) {
             apiKeys.groq = legacySingleKey
             writeLocalKey(API_KEY_STORAGE_KEYS.groq, legacySingleKey)
+          } else if (
+            (legacySingleKey.startsWith("AIza") || legacySingleKey.startsWith("AQ.")) &&
+            !apiKeys.gemini
+          ) {
+            apiKeys.gemini = legacySingleKey
+            writeLocalKey(API_KEY_STORAGE_KEYS.gemini, legacySingleKey)
           } else if (!apiKeys[provider]) {
             apiKeys[provider] = legacySingleKey
             writeLocalKey(API_KEY_STORAGE_KEYS[provider], legacySingleKey)
