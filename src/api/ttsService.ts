@@ -756,7 +756,7 @@ export async function prepareBurmeseSpeechText(
   useAiSpeechPrep = true
 ): Promise<string> {
   const deterministic = normalizeBurmeseForTTS(rawText, customRules)
-  if (!deterministic || !useAiSpeechPrep) return deterministic
+  if (!deterministic || !useAiSpeechPrep || deterministic.length > 1800) return deterministic
 
   const apiKey = getSavedGeminiApiKey()
   if (!apiKey) return deterministic
@@ -1178,7 +1178,7 @@ async function synthesizeWithGemini(
   apiKey: string,
   onChunkProgress?: (currentChunk: number, totalChunks: number) => void
 ): Promise<{ blob: Blob; mimeType: string; fileExtension: "wav" | "mp3" }> {
-  const chunks = splitScriptIntoChunks(cleanedText, 360)
+  const chunks = splitScriptIntoChunks(cleanedText, 420)
   const chunkResults = []
   for (let i = 0; i < chunks.length; i += 1) {
     onChunkProgress?.(i + 1, chunks.length)
@@ -1833,7 +1833,7 @@ export async function generateBurmeseVoiceover(
   }
 
   // Multi-segment (with pauses) and/or intro SFX path
-  const segmentChunkCounts = speechSegments.map((seg) => splitScriptIntoChunks(seg.text, 360).length)
+  const segmentChunkCounts = speechSegments.map((seg) => splitScriptIntoChunks(seg.text, 420).length)
   const totalChunksAllSegments = Math.max(
     1,
     segmentChunkCounts.reduce((sum, count) => sum + count, 0)

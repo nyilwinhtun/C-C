@@ -10,7 +10,6 @@ import {
   formatAudioClockDuration,
   mixVoiceoverWithAutoDuckingMusic,
   toBurmeseDigits,
-  type BurmeseVoiceType,
 } from "@/api/ttsService"
 import { IosAudioPlayer } from "@/components/shared/IosAudioPlayer"
 import { Button } from "@/components/ui/button"
@@ -117,6 +116,7 @@ export function VoiceoverPage() {
     setVoiceCustomMusicFile,
     ttsStatus,
     ttsProgress,
+    pdfExtractionStatus,
     generatedAudioUrl,
     generatedAudioBlob,
     generatedAudioExtension,
@@ -149,6 +149,7 @@ export function VoiceoverPage() {
       setVoiceCustomMusicFile: state.setVoiceCustomMusicFile,
       ttsStatus: state.ttsStatus,
       ttsProgress: state.ttsProgress,
+      pdfExtractionStatus: state.pdfExtractionStatus,
       generatedAudioUrl: state.generatedAudioUrl,
       generatedAudioBlob: state.generatedAudioBlob,
       generatedAudioExtension: state.generatedAudioExtension,
@@ -283,7 +284,10 @@ export function VoiceoverPage() {
   // Transcription state
   const [isTranscribing, setIsTranscribing] = useState(false)
 
-  const isGeneratingVoice = ttsStatus === "preparing" || ttsStatus === "generating"
+  const isExtractingPdf =
+    pdfExtractionStatus === "extracting" || pdfExtractionStatus === "rewriting"
+  const isGeneratingVoice =
+    isExtractingPdf || ttsStatus === "preparing" || ttsStatus === "generating"
 
   const wavRecorderRef = useRef<WavAudioRecorderHandle | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -331,7 +335,6 @@ export function VoiceoverPage() {
     return () => cancelAnimationFrame(rafId)
   }, [showTeleprompter, teleprompterScrolling, teleprompterSpeed])
 
-  const activeNarratorType: BurmeseVoiceType = selectedVoice === "thiha" ? "male" : "female"
   const hasActiveSettings =
     voiceSpeed !== 1.0 || voiceDialogueMode || voiceMusicPreset !== "none"
 
@@ -976,11 +979,13 @@ export function VoiceoverPage() {
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
                   <span>
-                    {ttsStatus === "preparing"
-                      ? t(language, "booth.preparingText")
-                      : ttsProgress && ttsProgress.total > 1
-                        ? `${t(language, "booth.generatingAudio")} (${language === "my" ? toBurmeseDigits(ttsProgress.current) : ttsProgress.current}/${language === "my" ? toBurmeseDigits(ttsProgress.total) : ttsProgress.total})`
-                        : t(language, "booth.generatingAudio")}
+                    {isExtractingPdf
+                      ? "စာမျက်နှာများကို ဖတ်ရှုသန့်စင်နေပါသည်..."
+                      : ttsStatus === "preparing"
+                        ? t(language, "booth.preparingText")
+                        : ttsProgress && ttsProgress.total > 1
+                          ? `အသံဖိုင် တစ်ဆက်တည်း ပေါင်းစပ်နေပါသည်... (${language === "my" ? toBurmeseDigits(ttsProgress.current) : ttsProgress.current}/${language === "my" ? toBurmeseDigits(ttsProgress.total) : ttsProgress.total})`
+                          : t(language, "booth.generatingAudio")}
                   </span>
                 </>
               ) : (
@@ -1053,11 +1058,6 @@ export function VoiceoverPage() {
         onMusicPresetChange={setVoiceMusicPreset}
         customMusicFile={voiceCustomMusicFile}
         onCustomMusicFileChange={setVoiceCustomMusicFile}
-        activeVoiceType={activeNarratorType}
-        onLoadStoryToCanvas={(text) => {
-          setVoiceScriptText(text)
-          toast.success("စာသားကွက်ထဲသို့ ထည့်သွင်းပြီးပါပြီ။")
-        }}
       />
     </div>
   )

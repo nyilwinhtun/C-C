@@ -1,27 +1,22 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   BookOpen,
   FileText,
   Loader2,
   Music,
-  Pause,
   Play,
-  SkipBack,
-  SkipForward,
   Square,
   Upload,
   Users,
 } from "lucide-react"
-import { extractTextFromDocument, rewriteChapterAsRecap } from "@/api/aiService"
+import { useShallow } from "zustand/react/shallow"
 import {
-  generateBurmeseVoiceover,
   toBurmeseDigits,
-  type BurmeseVoiceType,
   type VoiceoverSpeed,
 } from "@/api/ttsService"
-import { splitTextIntoSmartChunks } from "@/features/audiobook/chapterSplitter"
+import { getPdfPageCount } from "@/lib/pdfVision"
 import { setIosAudioSessionPlayback, unlockIosAudio } from "@/lib/iosAudio"
 import {
   previewBackgroundMusic,
@@ -41,6 +36,7 @@ import {
 } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 import { t } from "@/locales/translations"
+import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
 
 const STUDIO_SPEEDS: VoiceoverSpeed[] = [0.85, 1.0, 1.15]
@@ -68,8 +64,6 @@ interface StudioSettingsSheetProps {
   onMusicPresetChange: (preset: BackgroundMusicPreset) => void
   customMusicFile: File | null
   onCustomMusicFileChange: (file: File | null) => void
-  activeVoiceType: BurmeseVoiceType
-  onLoadStoryToCanvas: (text: string) => void
 }
 
 export function StudioSettingsSheet({
@@ -84,63 +78,47 @@ export function StudioSettingsSheet({
   onMusicPresetChange,
   customMusicFile,
   onCustomMusicFileChange,
-  activeVoiceType,
-  onLoadStoryToCanvas,
 }: StudioSettingsSheetProps) {
   const language = useUIStore((state) => state.language)
+  const {
+    pdfReadingMode,
+    setPdfReadingMode,
+    pdfExtractionStatus,
+    ttsStatus,
+    ttsProgress,
+    extractAndReadPdfStory,
+  } = useContentStore(
+    useShallow((state) => ({
+      pdfReadingMode: state.pdfReadingMode,
+      setPdfReadingMode: state.setPdfReadingMode,
+      pdfExtractionStatus: state.pdfExtractionStatus,
+      ttsStatus: state.ttsStatus,
+      ttsProgress: state.ttsProgress,
+      extractAndReadPdfStory: state.extractAndReadPdfStory,
+    }))
+  )
+
   const [isPreviewingMusic, setIsPreviewingMusic] = useState(false)
   const customMusicInputRef = useRef<HTMLInputElement | null>(null)
 
   // E-book / PDF Storyteller state
-  const [storyText, setStoryText] = useState("")
-  const [storyFileName, setStoryFileName] = useState<string | null>(null)
-  const [storyMode, setStoryMode] = useState<"direct" | "recap">("direct")
-  const [isExtractingBook, setIsExtractingBook] = useState(false)
-  const [isRewritingRecap, setIsRewritingRecap] = useState(false)
-
-  // Continuous chunked playback state
-  const [queueActive, setQueueActive] = useState(false)
-  const [queuePlaying, setQueuePlaying] = useState(false)
-  const [queueLoading, setQueueLoading] = useState(false)
-  const [queueIndex, setQueueIndex] = useState(0)
-
+  const [selectedBookFile, setSelectedBookFile] = useState<File | null>(null)
+  const [totalPdfPages, setTotalPdfPages] = useState<number | null>(null)
+  const [startPage, setStartPage] = useState(1)
+  const [endPage, setEndPage] = useState(3)
+  const [isLoadingPdfMeta, setIsLoadingPdfMeta] = useState(false)
   const bookInputRef = useRef<HTMLInputElement | null>(null)
-  const queueAudioRef = useRef<HTMLAudioElement | null>(null)
-  const queueCacheRef = useRef<Map<number, Promise<string>>>(new Map())
-  const queueRunIdRef = useRef(0)
-  const activeUrlsRef = useRef<string[]>([])
-
-  const smartChunks = useMemo(() => {
-    return splitTextIntoSmartChunks(storyText, 500, 800)
-  }, [storyText])
-
-  const revokeQueueUrls = () => {
-    for (const url of activeUrlsRef.current) {
-      URL.revokeObjectURL(url)
-    }
-    activeUrlsRef.current = []
-  }
-
-  const stopAutoQueue = () => {
-    queueRunIdRef.current += 1
-    const audio = queueAudioRef.current
-    if (audio) {
-      audio.pause()
-      audio.removeAttribute("src")
-    }
-    queueCacheRef.current.clear()
-    setQueueActive(false)
-    setQueuePlaying(false)
-    setQueueLoading(false)
-  }
 
   useEffect(() => {
     return () => {
       stopBackgroundMusicPreview()
-      stopAutoQueue()
-      revokeQueueUrls()
     }
   }, [])
+
+  const isExtracting =
+    pdfExtractionStatus === "extracting" || pdfExtractionStatus === "rewriting"
+  const isSynthesizing = ttsStatus === "preparing" || ttsStatus === "generating"
+  const isStoryBusy = isLoadingPdfMeta || isExtracting || isSynthesizing
 
   const handleToggleMusicPreview = async () => {
     unlockIosAudio()
@@ -164,124 +142,54 @@ export function StudioSettingsSheet({
     }
   }
 
-  const handleBookUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBookFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     e.target.value = ""
     if (!file) return
 
-    setIsExtractingBook(true)
-    try {
-      stopAutoQueue()
-      revokeQueueUrls()
-      const extracted = await extractTextFromDocument(file)
-      setStoryText(extracted)
-      setStoryFileName(file.name)
-      toast.success(`"${file.name}" မှ စာသားများကို ထုတ်ယူပြီးပါပြီ။`)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "စာအုပ်ဖိုင်မှ စာသားထုတ်ယူ၍ မရပါ။"
-      toast.error(msg)
-    } finally {
-      setIsExtractingBook(false)
-    }
-  }
+    const isPdf =
+      file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
 
-  const handleRewriteStoryAsRecap = async () => {
-    if (!storyText.trim()) return
-    setIsRewritingRecap(true)
-    try {
-      stopAutoQueue()
-      revokeQueueUrls()
-      const recap = await rewriteChapterAsRecap(storyText.slice(0, 12000), "my")
-      setStoryText(recap)
-      toast.success("YouTube Recap ဇာတ်ကြောင်းပြော ပုံစံသို့ ပြောင်းလဲပြီးပါပြီ။")
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Recap ပြောင်းလဲ၍ မရပါ။"
-      toast.error(msg)
-    } finally {
-      setIsRewritingRecap(false)
-    }
-  }
-
-  const fetchChunkAudioUrl = (index: number, runId: number): Promise<string> => {
-    const cached = queueCacheRef.current.get(index)
-    if (cached) return cached
-
-    const text = smartChunks[index]
-    const promise = generateBurmeseVoiceover(text, activeVoiceType, speed, {
-      deliveryTone: "storytelling",
-    }).then((res) => {
-      if (queueRunIdRef.current !== runId) {
-        URL.revokeObjectURL(res.audioUrl)
-        throw new Error("Playback cancelled")
-      }
-      activeUrlsRef.current.push(res.audioUrl)
-      return res.audioUrl
-    })
-    queueCacheRef.current.set(index, promise)
-    return promise
-  }
-
-  const playQueueChunkAt = async (index: number, runId: number) => {
-    if (queueRunIdRef.current !== runId || index < 0 || index >= smartChunks.length) {
-      if (index >= smartChunks.length) {
-        setQueuePlaying(false)
-      }
+    setSelectedBookFile(file)
+    if (!isPdf) {
+      setTotalPdfPages(null)
+      setStartPage(1)
+      setEndPage(1)
       return
     }
-    setQueueIndex(index)
-    setQueueLoading(true)
+
+    setIsLoadingPdfMeta(true)
     try {
-      const url = await fetchChunkAudioUrl(index, runId)
-      if (queueRunIdRef.current !== runId) return
-
-      // Pre-fetch next chunk while current chunk plays
-      if (index + 1 < smartChunks.length) {
-        void fetchChunkAudioUrl(index + 1, runId).catch(() => {})
-      }
-
-      const audio = queueAudioRef.current
-      if (!audio) return
-      setIosAudioSessionPlayback()
-      audio.src = url
-      audio.currentTime = 0
-      setQueueLoading(false)
-      setQueuePlaying(true)
-      await audio.play()
-    } catch (err) {
-      if (queueRunIdRef.current !== runId) return
-      setQueueLoading(false)
-      setQueuePlaying(false)
-      const msg = err instanceof Error ? err.message : "အသံဖွင့်၍ မရပါ။"
-      toast.error(msg)
+      const count = await getPdfPageCount(file)
+      setTotalPdfPages(count)
+      setStartPage(1)
+      setEndPage(Math.min(3, count))
+    } catch {
+      setSelectedBookFile(null)
+      setTotalPdfPages(null)
+      toast.error("PDF ဖိုင်ကို ဖွင့်၍ မရပါ။")
+    } finally {
+      setIsLoadingPdfMeta(false)
     }
   }
 
-  const handleStartContinuousPlayback = () => {
-    if (smartChunks.length === 0) return
+  const handleExtractAndRead = async () => {
+    if (!selectedBookFile || isStoryBusy) return
     unlockIosAudio()
     setIosAudioSessionPlayback()
-    const runId = queueRunIdRef.current + 1
-    queueRunIdRef.current = runId
-    queueCacheRef.current.clear()
-    setQueueActive(true)
-    void playQueueChunkAt(0, runId)
-  }
 
-  const handleToggleQueuePlayPause = async () => {
-    unlockIosAudio()
-    setIosAudioSessionPlayback()
-    const audio = queueAudioRef.current
-    if (!audio) return
-    if (queuePlaying) {
-      audio.pause()
-      setQueuePlaying(false)
-    } else {
-      try {
-        await audio.play()
-        setQueuePlaying(true)
-      } catch {
-        setQueuePlaying(false)
-      }
+    const maxPages = totalPdfPages ?? 1
+    const safeStart = Math.max(1, Math.min(maxPages, startPage || 1))
+    const safeEnd = Math.max(safeStart, Math.min(maxPages, endPage || safeStart))
+
+    const ok = await extractAndReadPdfStory({
+      file: selectedBookFile,
+      startPage: safeStart,
+      endPage: safeEnd,
+      mode: pdfReadingMode,
+    })
+    if (ok) {
+      onOpenChange(false)
     }
   }
 
@@ -469,10 +377,10 @@ export function StudioSettingsSheet({
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
                   <BookOpen className="h-3.5 w-3.5 shrink-0" />
-                  <span>စာအုပ်ဇာတ်ကြောင်းပြော (PDF / EPUB)</span>
+                  <span>စာအုပ်ဇာတ်ကြောင်းပြော (PDF / E-book)</span>
                 </div>
                 <p className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar mt-0.5">
-                  စာအုပ်ဖိုင်တင်ပြီး တိုက်ရိုက်ဖတ်မည် သို့မဟုတ် YouTube Recap ပုံစံ နားထောင်ပါ
+                  မြန်မာစာအုပ် PDF များကို စာမျက်နှာအလိုက် သန့်စင်ပြီး အသံဖိုင်တစ်ဆက်တည်း နားထောင်ပါ
                 </p>
               </div>
               <input
@@ -480,174 +388,138 @@ export function StudioSettingsSheet({
                 type="file"
                 accept=".pdf,.epub,.txt,.md,application/pdf,application/epub+zip,text/plain"
                 className="hidden"
-                onChange={handleBookUpload}
+                onChange={handleBookFileSelect}
               />
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={() => bookInputRef.current?.click()}
-                disabled={isExtractingBook}
+                disabled={isStoryBusy}
                 className="h-8 px-3 text-xs shrink-0 font-myanmar"
               >
-                {isExtractingBook ? (
+                {isLoadingPdfMeta ? (
                   <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
                 ) : (
                   <Upload className="h-3.5 w-3.5 mr-1.5" />
                 )}
-                {isExtractingBook ? "ထုတ်ယူနေ..." : "PDF/EPUB တင်မည်"}
+                PDF စာအုပ်ရွေးရန်
               </Button>
             </div>
 
-            {storyText && (
-              <div className="space-y-2.5 pt-1 border-t border-[#E7E5E4] dark:border-[#3F3F46]">
+            {selectedBookFile && (
+              <div className="space-y-3 pt-2 border-t border-[#E7E5E4] dark:border-[#3F3F46]">
                 <div className="flex items-center justify-between gap-2 text-[11px] text-[#57534E] dark:text-[#A1A1AA]">
-                  <span className="inline-flex items-center gap-1 truncate">
-                    <FileText className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{storyFileName || "Document"}</span>
+                  <span className="inline-flex items-center gap-1.5 truncate text-[#1C1917] dark:text-[#F5F5F4] font-medium">
+                    <FileText className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{selectedBookFile.name}</span>
                   </span>
-                  <span className="tabular-nums shrink-0 font-myanmar">
-                    {toBurmeseDigits(smartChunks.length)} ပိုင်း
-                  </span>
+                  {totalPdfPages !== null && (
+                    <span className="tabular-nums shrink-0 font-myanmar">
+                      စုစုပေါင်း {toBurmeseDigits(totalPdfPages)} စာမျက်နှာ
+                    </span>
+                  )}
                 </div>
 
-                {/* Direct Read vs YouTube Recap */}
+                {totalPdfPages !== null && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#18181B] px-3 py-2">
+                    <span className="text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                      စာမျက်နှာ (မှ - အထိ)
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min={1}
+                        max={totalPdfPages}
+                        value={startPage}
+                        disabled={isStoryBusy}
+                        onChange={(e) => {
+                          const val = Math.max(1, Math.min(totalPdfPages, Number(e.target.value) || 1))
+                          setStartPage(val)
+                          if (endPage < val) setEndPage(val)
+                        }}
+                        aria-label="Start page"
+                        className="w-14 h-7 rounded-lg border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#27272A] px-2 text-center text-xs font-semibold tabular-nums text-[#1C1917] dark:text-[#F5F5F4]"
+                      />
+                      <span className="text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">မှ</span>
+                      <input
+                        type="number"
+                        min={startPage}
+                        max={totalPdfPages}
+                        value={endPage}
+                        disabled={isStoryBusy}
+                        onChange={(e) => {
+                          const val = Math.max(startPage, Math.min(totalPdfPages, Number(e.target.value) || startPage))
+                          setEndPage(val)
+                        }}
+                        aria-label="End page"
+                        className="w-14 h-7 rounded-lg border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#27272A] px-2 text-center text-xs font-semibold tabular-nums text-[#1C1917] dark:text-[#F5F5F4]"
+                      />
+                      <span className="text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">အထိ</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Reading Mode: Direct Full Read vs Storyteller Recap */}
                 <div className="grid grid-cols-2 gap-1.5">
                   <button
                     type="button"
-                    onClick={() => setStoryMode("direct")}
+                    disabled={isStoryBusy}
+                    onClick={() => setPdfReadingMode("direct")}
                     className={cn(
-                      "rounded-xl border py-1.5 text-[11px] font-semibold transition-colors cursor-pointer font-myanmar",
-                      storyMode === "direct"
+                      "rounded-xl border px-2 py-2 text-[11px] font-semibold transition-colors cursor-pointer font-myanmar",
+                      pdfReadingMode === "direct"
                         ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B]"
                         : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
                     )}
                   >
-                    တိုက်ရိုက်ဖတ်မည်
+                    စာသားအတိုင်း အပြည့်ဖတ်မည်
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setStoryMode("recap")
-                      void handleRewriteStoryAsRecap()
-                    }}
-                    disabled={isRewritingRecap}
+                    disabled={isStoryBusy}
+                    onClick={() => setPdfReadingMode("recap")}
                     className={cn(
-                      "rounded-xl border py-1.5 text-[11px] font-semibold transition-colors cursor-pointer font-myanmar",
-                      storyMode === "recap"
+                      "rounded-xl border px-2 py-2 text-[11px] font-semibold transition-colors cursor-pointer font-myanmar",
+                      pdfReadingMode === "recap"
                         ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B]"
                         : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
                     )}
                   >
-                    {isRewritingRecap ? "ပြင်ဆင်နေ..." : "YouTube Recap ပုံစံ"}
+                    အနှစ်ချုပ် ဇာတ်ကြောင်းပြောမည်
                   </button>
                 </div>
 
-                {/* Continuous Chunked Playback */}
-                <audio
-                  ref={queueAudioRef}
-                  playsInline
-                  preload="auto"
-                  className="sr-only"
-                  onEnded={() => {
-                    const next = queueIndex + 1
-                    if (next < smartChunks.length) {
-                      void playQueueChunkAt(next, queueRunIdRef.current)
-                    } else {
-                      setQueuePlaying(false)
-                    }
-                  }}
-                />
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {!queueActive ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      onTouchStart={() => unlockIosAudio()}
-                      onClick={handleStartContinuousPlayback}
-                      disabled={smartChunks.length === 0 || isRewritingRecap}
-                      className="h-8 px-3 text-xs font-myanmar bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B]"
-                    >
-                      <Play className="h-3.5 w-3.5 mr-1.5 fill-current" />
-                      ဆက်တိုက်နားထောင်မည်
-                    </Button>
-                  ) : (
-                    <div className="flex items-center gap-1.5">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          if (queueIndex > 0) {
-                            void playQueueChunkAt(queueIndex - 1, queueRunIdRef.current)
-                          }
-                        }}
-                        disabled={queueIndex === 0 || queueLoading}
-                        className="h-8 w-8 p-0"
-                        aria-label="Previous chunk"
-                      >
-                        <SkipBack className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={handleToggleQueuePlayPause}
-                        disabled={queueLoading}
-                        className="h-8 px-3 text-xs bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B]"
-                      >
-                        {queueLoading ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : queuePlaying ? (
-                          <Pause className="h-3.5 w-3.5 fill-current" />
-                        ) : (
-                          <Play className="h-3.5 w-3.5 fill-current" />
-                        )}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          if (queueIndex + 1 < smartChunks.length) {
-                            void playQueueChunkAt(queueIndex + 1, queueRunIdRef.current)
-                          }
-                        }}
-                        disabled={queueIndex + 1 >= smartChunks.length || queueLoading}
-                        className="h-8 w-8 p-0"
-                        aria-label="Next chunk"
-                      >
-                        <SkipForward className="h-3.5 w-3.5" />
-                      </Button>
-                      <span className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] tabular-nums px-1 font-myanmar">
-                        {toBurmeseDigits(queueIndex + 1)}/{toBurmeseDigits(smartChunks.length)}
+                <Button
+                  type="button"
+                  size="sm"
+                  onTouchStart={() => unlockIosAudio()}
+                  onClick={handleExtractAndRead}
+                  disabled={isStoryBusy}
+                  className="w-full h-10 rounded-xl bg-[#1C1917] hover:bg-[#292524] dark:bg-[#F5F5F4] dark:hover:bg-[#E7E5E4] text-[#FAF8F5] dark:text-[#18181B] text-xs font-semibold font-myanmar"
+                >
+                  {isExtracting ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                      <span>စာမျက်နှာများကို ဖတ်ရှုသန့်စင်နေပါသည်...</span>
+                    </>
+                  ) : isSynthesizing ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                      <span>
+                        အသံဖိုင် တစ်ဆက်တည်း ပေါင်းစပ်နေပါသည်...
+                        {ttsProgress && ttsProgress.total > 1
+                          ? ` (${toBurmeseDigits(ttsProgress.current)}/${toBurmeseDigits(ttsProgress.total)})`
+                          : ""}
                       </span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={stopAutoQueue}
-                        className="h-8 px-2 text-xs text-[#57534E]"
-                      >
-                        <Square className="h-3 w-3 mr-1 fill-current" />
-                        ရပ်
-                      </Button>
-                    </div>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-3.5 w-3.5 mr-1.5 fill-current" />
+                      <span>စာသားထုတ်ပြီး အသံဖတ်မည်</span>
+                    </>
                   )}
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      onLoadStoryToCanvas(storyText)
-                      onOpenChange(false)
-                    }}
-                    className="h-8 px-3 text-xs font-myanmar ml-auto"
-                  >
-                    စာသားကွက်ထဲ ထည့်မည်
-                  </Button>
-                </div>
+                </Button>
               </div>
             )}
           </section>

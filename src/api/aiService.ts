@@ -2085,6 +2085,88 @@ export async function extractTextFromDocument(file: File): Promise<string> {
   })
 }
 
+const PDF_VISION_EXTRACTION_PROMPT = [
+  "You are a Burmese (Myanmar) & English OCR and Unicode normalization specialist.",
+  "Examine the attached PDF page images in exact page order and transcribe EVERY visible Burmese and English body word accurately.",
+  "STRICT RULES:",
+  "1. Output 100% clean, standard Myanmar Unicode (မြန်မာယူနီကုဒ်). Automatically fix any legacy Zawgyi, WinInnwa, or non-standard font glyph ordering into valid Unicode.",
+  "2. Strip running headers, footers, and standalone page numbers.",
+  "3. Normalize numbers, dates, currencies, and symbols into natural spoken Burmese words (e.g., 2026 -> နှစ်ထောင့်နှစ်ဆယ့်ခြောက်, 100% -> ရာနှုန်းပြည့်) and place proper Burmese punctuation (`၊` and `။`) at natural clause and sentence boundaries for smooth voiceover reading.",
+  "4. Preserve paragraph breaks and natural reading order. Do NOT summarize, translate, or add any commentary, markdown headings, or page labels. Output plain text only.",
+].join("\n")
+
+/**
+ * Extract 100% clean, standard Myanmar Unicode text from rendered PDF page images
+ * via Gemini 2.5 Flash Vision—completely bypassing broken raw PDF text/Zawgyi layers.
+ */
+export async function extractCleanUnicodeFromPdfImages(
+  pages: ReadonlyArray<{ pageNumber: number; mimeType: string; base64Data: string }>
+): Promise<string> {
+  if (pages.length === 0) {
+    throw new Error("No PDF page images provided for extraction.")
+  }
+
+  const { apiKeys } = getAiConfig()
+  const geminiKey = apiKeys.gemini.trim()
+  if (!geminiKey) {
+    throw new ApiError(
+      401,
+      "Gemini API key is required in Settings for PDF Vision extraction."
+    )
+  }
+
+  const batchSize = 5
+  const extractedBatches: string[] = []
+
+  for (let i = 0; i < pages.length; i += batchSize) {
+    const batch = pages.slice(i, i + batchSize)
+    const imageParts = batch.map((page) => ({
+      inlineData: {
+        mimeType: page.mimeType,
+        data: page.base64Data,
+      },
+    }))
+
+    const body = {
+      contents: [
+        {
+          parts: [...imageParts, { text: PDF_VISION_EXTRACTION_PROMPT }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.1,
+        topP: 0.95,
+        maxOutputTokens: 8192,
+      },
+    }
+
+    const res = await fetchGeminiGenerateContent(GEMINI_VISION_MODEL, geminiKey, body)
+    if (!res.ok) {
+      const text = await res.text().catch(() => "")
+      throw parseApiError("Gemini", res.status, text)
+    }
+
+    const data = await res.json()
+    const parts: Array<{ text?: string; thought?: boolean }> =
+      data.candidates?.[0]?.content?.parts ?? []
+    const content = parts
+      .filter((part) => !part.thought && typeof part.text === "string")
+      .map((part) => part.text)
+      .join("")
+      .trim()
+
+    if (content) {
+      extractedBatches.push(content)
+    }
+  }
+
+  const combined = extractedBatches.join("\n\n").trim()
+  if (!combined) {
+    throw new Error("Could not extract readable text from the selected PDF pages.")
+  }
+  return combined
+}
+
 export type AudioTranscriptionLanguage = "auto" | "my" | "en"
 export type AudioTopicHint = "general" | "tech" | "sales" | "storytelling"
 

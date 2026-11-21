@@ -1,11 +1,15 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import type { GeneratorFormValues } from "@/features/generator/schema"
-import type {
-  GeneratedContent,
-  VideoContentResult,
-  VideoPlatformOption,
+import {
+  extractCleanUnicodeFromPdfImages,
+  extractTextFromDocument,
+  rewriteChapterAsRecap,
+  type GeneratedContent,
+  type VideoContentResult,
+  type VideoPlatformOption,
 } from "@/api/aiService"
+import { renderPdfPagesToImages } from "@/lib/pdfVision"
 import {
   normalizeBusinessCategory,
   normalizeSalesAngle,
@@ -27,6 +31,8 @@ import { toast } from "@/components/ui/sonner"
 
 export type StudioVoiceChoice = "self" | "nilar" | "thiha"
 export type TtsStatus = "idle" | "preparing" | "generating" | "done" | "error"
+export type PdfReadingMode = "direct" | "recap"
+export type PdfExtractionStatus = "idle" | "extracting" | "rewriting" | "error"
 export interface TtsProgress {
   current: number
   total: number
@@ -154,6 +160,9 @@ interface ContentState {
   ttsStatus: TtsStatus
   ttsProgress: TtsProgress | null
   ttsError: string | null
+  pdfReadingMode: PdfReadingMode
+  pdfExtractionStatus: PdfExtractionStatus
+  pdfExtractionError: string | null
   generatedAudioUrl: string | null
   generatedAudioBlob: Blob | null
   generatedAudioMimeType: string
@@ -211,7 +220,17 @@ interface ContentState {
     durationSeconds: number
     title: string
   }) => void
-  generateStudioVoiceover: (scriptOverride?: string) => Promise<void>
+  generateStudioVoiceover: (
+    scriptOverride?: string,
+    options?: { useAiSpeechPrep?: boolean; customTitle?: string }
+  ) => Promise<void>
+  setPdfReadingMode: (mode: PdfReadingMode) => void
+  extractAndReadPdfStory: (params: {
+    file: File
+    startPage: number
+    endPage: number
+    mode: PdfReadingMode
+  }) => Promise<boolean>
   addCustomPronunciation: (word: string, phonetic: string) => void
   removeCustomPronunciation: (id: string) => void
   setVoiceDnaSamples: (samples: string[]) => void
@@ -279,6 +298,9 @@ export const useContentStore = create<ContentState>()(
       ttsStatus: "idle",
       ttsProgress: null,
       ttsError: null,
+      pdfReadingMode: "direct",
+      pdfExtractionStatus: "idle",
+      pdfExtractionError: null,
       generatedAudioUrl: null,
       generatedAudioBlob: null,
       generatedAudioMimeType: "audio/wav",
@@ -415,7 +437,77 @@ export const useContentStore = create<ContentState>()(
             ttsError: null,
           }
         }),
-      generateStudioVoiceover: async (scriptOverride) => {
+      setPdfReadingMode: (pdfReadingMode) => set({ pdfReadingMode }),
+      extractAndReadPdfStory: async ({ file, startPage, endPage, mode }) => {
+        const state = get()
+        if (
+          state.pdfExtractionStatus === "extracting" ||
+          state.pdfExtractionStatus === "rewriting" ||
+          state.ttsStatus === "preparing" ||
+          state.ttsStatus === "generating"
+        ) {
+          return false
+        }
+
+        const isPdf =
+          file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+
+        set({
+          pdfReadingMode: mode,
+          pdfExtractionStatus: "extracting",
+          pdfExtractionError: null,
+        })
+
+        try {
+          let extractedText = ""
+          if (isPdf) {
+            const pageImages = await renderPdfPagesToImages(file, startPage, endPage)
+            extractedText = await extractCleanUnicodeFromPdfImages(pageImages)
+          } else {
+            extractedText = await extractTextFromDocument(file)
+          }
+
+          let finalScript = extractedText.trim()
+          if (!finalScript) {
+            throw new Error("စာမျက်နှာများမှ စာသားထုတ်ယူ၍ မရပါ။")
+          }
+
+          if (mode === "recap") {
+            set({ pdfExtractionStatus: "rewriting" })
+            finalScript = await rewriteChapterAsRecap(finalScript.slice(0, 12000), "my")
+          }
+
+          set((prev) => ({
+            voiceScriptText: finalScript,
+            selectedVoice: prev.selectedVoice === "self" ? "nilar" : prev.selectedVoice,
+            pdfExtractionStatus: "idle",
+            pdfExtractionError: null,
+          }))
+
+          const baseTitle = file.name.replace(/\.[^.]+$/, "").trim()
+          const pageSuffix = isPdf
+            ? startPage === endPage
+              ? ` (စာ-${startPage})`
+              : ` (စာ-${startPage}-${endPage})`
+            : ""
+
+          await get().generateStudioVoiceover(finalScript, {
+            useAiSpeechPrep: false,
+            customTitle: `${baseTitle}${pageSuffix}`,
+          })
+          return get().ttsStatus === "done"
+        } catch (err) {
+          const msg =
+            err instanceof Error ? err.message : "စာအုပ်ဖိုင်မှ စာသားထုတ်ယူ၍ မရပါ။"
+          set({
+            pdfExtractionStatus: "error",
+            pdfExtractionError: msg,
+          })
+          toast.error(msg)
+          return false
+        }
+      },
+      generateStudioVoiceover: async (scriptOverride, options) => {
         const state = get()
         if (state.ttsStatus === "preparing" || state.ttsStatus === "generating") {
           return
@@ -436,6 +528,7 @@ export const useContentStore = create<ContentState>()(
         const musicPreset = state.voiceMusicPreset
         const customMusicFile = state.voiceCustomMusicFile
         const customPronunciations = state.customPronunciations
+        const useAiSpeechPrep = options?.useAiSpeechPrep ?? true
 
         set({
           ttsStatus: "preparing",
@@ -448,6 +541,7 @@ export const useContentStore = create<ContentState>()(
             ? await generateBurmeseDialogueVoiceover(rawScript, speed, {
                 deliveryTone: "storytelling",
                 customPronunciations,
+                useAiSpeechPrep,
                 onStageChange: (stage) => {
                   set({ ttsStatus: stage })
                 },
@@ -461,6 +555,7 @@ export const useContentStore = create<ContentState>()(
             : await generateBurmeseVoiceover(cleaned, voiceType, speed, {
                 deliveryTone: "storytelling",
                 customPronunciations,
+                useAiSpeechPrep,
                 onStageChange: (stage) => {
                   set({ ttsStatus: stage })
                 },
@@ -496,11 +591,13 @@ export const useContentStore = create<ContentState>()(
             URL.revokeObjectURL(prevUrl)
           }
 
-          const title = dialogueMode
-            ? "နီလာ + သီဟ"
-            : state.selectedVoice === "thiha"
-              ? "သီဟ"
-              : "နီလာ"
+          const title =
+            options?.customTitle ||
+            (dialogueMode
+              ? "နီလာ + သီဟ"
+              : state.selectedVoice === "thiha"
+                ? "သီဟ"
+                : "နီလာ")
 
           set({
             ttsStatus: "done",
