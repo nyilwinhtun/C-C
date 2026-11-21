@@ -39,6 +39,8 @@ import { Separator } from "@/components/ui/separator"
 const PRESET_MODELS: Record<AIProvider, string[]> = {
   gemini: [
     "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
   ],
   groq: [
@@ -59,6 +61,10 @@ const PRESET_MODELS: Record<AIProvider, string[]> = {
 }
 
 const MODEL_LABELS: Record<string, string> = {
+  "gemini-2.5-flash": "Gemini 2.5 Flash (မြန်ဆန်ပြီး အသုံးအများဆုံး / Recommended)",
+  "gemini-2.5-pro": "Gemini 2.5 Pro (စာရေးသားမှုနှင့် တွေးခေါ်မှု အကောင်းဆုံး)",
+  "gemini-2.5-flash-lite": "Gemini 2.5 Flash-Lite (အပေါ့ပါးဆုံးနှင့် Quota အသက်သာဆုံး)",
+  "gemini-2.0-flash": "Gemini 2.0 Flash (တည်ငြိမ်သော ဗားရှင်း)",
   "google/gemma-3-27b-it:free": "Gemma 3 27B (Free - No VPN)",
   "qwen/qwen2.5-vl-72b-instruct:free": "Qwen 2.5 VL 72B (Free - Vision)",
 }
@@ -435,7 +441,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   {MODEL_LABELS[preset] ?? preset}
                 </option>
               ))}
-              <option value="custom">Custom model...</option>
+              <option value="custom">Custom Model (ကိုယ်တိုင် Model အမည် ရိုက်ထည့်ရန်)</option>
             </Select>
             {(isCustomMode || !isPreset) && (
               <Input

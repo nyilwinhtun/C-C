@@ -93,7 +93,6 @@ const DEPRECATED_GEMINI_MODELS = new Set([
   "gemini-1.5-pro",
   "gemini-pro",
   "gemini-pro-vision",
-  "gemini-2.5-flash-lite",
   "gemini-3.5-flash-lite",
 ])
 
