@@ -40,18 +40,20 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
+import { t } from "@/locales/translations"
+import { useUIStore } from "@/store/useUIStore"
 
 const STUDIO_SPEEDS: VoiceoverSpeed[] = [0.85, 1.0, 1.15]
 
 const MUSIC_PRESET_OPTIONS: Array<{
   id: BackgroundMusicPreset
-  labelMy: string
+  labelKey: string
 }> = [
-  { id: "none", labelMy: "မထည့်ပါ" },
-  { id: "upbeat_promo", labelMy: "တက်ကြွ" },
-  { id: "soft_vlog", labelMy: "နူးညံ့" },
-  { id: "calm_lofi", labelMy: "Lo-Fi" },
-  { id: "custom", labelMy: "ကိုယ်ပိုင်ဖိုင်" },
+  { id: "none", labelKey: "booth.musicNone" },
+  { id: "upbeat_promo", labelKey: "booth.musicUpbeat" },
+  { id: "soft_vlog", labelKey: "booth.musicSoft" },
+  { id: "calm_lofi", labelKey: "booth.musicLofi" },
+  { id: "custom", labelKey: "booth.musicCustom" },
 ]
 
 interface StudioSettingsSheetProps {
@@ -85,6 +87,7 @@ export function StudioSettingsSheet({
   activeVoiceType,
   onLoadStoryToCanvas,
 }: StudioSettingsSheetProps) {
+  const language = useUIStore((state) => state.language)
   const [isPreviewingMusic, setIsPreviewingMusic] = useState(false)
   const customMusicInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -293,10 +296,10 @@ export function StudioSettingsSheet({
         <SheetHeader className="px-5 py-3 border-b border-[#E7E5E4] dark:border-[#3F3F46]">
           <div>
             <SheetTitle className="text-base font-semibold text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
-              ⚙️ စတူဒီယို ညှိနှိုင်းရန်
+              {t(language, "booth.sheetTitle")}
             </SheetTitle>
             <SheetDescription className="text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
-              အသံမြန်နှုန်း၊ စကားပြောစနစ်၊ နောက်ခံတေးဂီတနှင့် စာအုပ်ဇာတ်ကြောင်းပြော
+              {t(language, "booth.sheetDesc")}
             </SheetDescription>
           </div>
           <SheetClose onClick={() => onOpenChange(false)} aria-label="Close settings" />
@@ -306,7 +309,7 @@ export function StudioSettingsSheet({
           {/* 1. Voice Speed */}
           <section className="space-y-2">
             <Label className="text-xs font-semibold text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
-              စကားပြော အနှေး/အမြန်
+              {t(language, "booth.speedLabel")}
             </Label>
             <div className="grid grid-cols-3 gap-2">
               {STUDIO_SPEEDS.map((option) => {
@@ -335,10 +338,10 @@ export function StudioSettingsSheet({
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
                 <Users className="h-3.5 w-3.5 shrink-0" />
-                <span>နှစ်ယောက်အပြန်အလှန် စကားပြောစနစ်</span>
+                <span>{t(language, "booth.dialogueLabel")}</span>
               </div>
               <p className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar mt-0.5">
-                Nilar: / Thiha: ဖြင့် ရေးပါ သို့မဟုတ် စာကြောင်းအလိုက် အလှည့်ကျဖတ်ပါမည်
+                {t(language, "booth.dialogueDesc")}
               </p>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
@@ -353,7 +356,7 @@ export function StudioSettingsSheet({
                   }}
                   className="h-8 px-2.5 text-[11px] font-myanmar"
                 >
-                  နမူနာထည့်
+                  {t(language, "booth.loadSample")}
                 </Button>
               )}
               <button
@@ -376,7 +379,7 @@ export function StudioSettingsSheet({
             <div className="flex items-center justify-between gap-2">
               <Label className="text-xs font-semibold text-[#1C1917] dark:text-[#F5F5F4] flex items-center gap-1.5 font-myanmar">
                 <Music className="h-3.5 w-3.5" />
-                <span>နောက်ခံတေးဂီတ (Auto-Ducking)</span>
+                <span>{t(language, "booth.musicLabel")}</span>
               </Label>
               {musicPreset !== "none" && (
                 <button
@@ -387,12 +390,12 @@ export function StudioSettingsSheet({
                   {isPreviewingMusic ? (
                     <>
                       <Square className="h-2.5 w-2.5 fill-current" />
-                      <span>ရပ်မည်</span>
+                      <span>{t(language, "booth.musicStopPreview")}</span>
                     </>
                   ) : (
                     <>
                       <Play className="h-2.5 w-2.5 fill-current" />
-                      <span>နားထောင်ကြည့်မည်</span>
+                      <span>{t(language, "booth.musicPreview")}</span>
                     </>
                   )}
                 </button>
@@ -421,7 +424,7 @@ export function StudioSettingsSheet({
                         : "border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#27272A] text-[#57534E] dark:text-[#A1A1AA]"
                     )}
                   >
-                    {opt.labelMy}
+                    {t(language, opt.labelKey)}
                   </button>
                 )
               })}

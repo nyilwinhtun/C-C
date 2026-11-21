@@ -5,13 +5,17 @@ import {
   Check,
   Columns2,
   Download,
+  Eraser,
   Flame,
   ImagePlus,
+  Loader2,
   MessageSquareQuote,
   Palette,
   RefreshCw,
+  RotateCcw,
   Rows2,
   Share2,
+  Sparkles,
   Star,
   Store,
   Tag,
@@ -26,6 +30,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
+import { t } from "@/locales/translations"
+import { generateProductScene } from "@/api/aiService"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
 import { isShoppingCategory } from "@/types"
@@ -74,15 +80,63 @@ const TEMPLATE_OPTIONS: {
 
 const CONTROL_TABS: {
   id: ControlTabId
-  label: string
-  labelMy: string
+  labelKey: string
   icon: typeof LayoutTemplate
 }[] = [
-  { id: "template", label: "Template", labelMy: "ဒီဇိုင်း", icon: LayoutTemplate },
-  { id: "text_price", label: "Text & Badge", labelMy: "စာသားနှင့်တံဆိပ်", icon: Type },
-  { id: "theme_color", label: "Theme Color", labelMy: "အရောင်", icon: Palette },
-  { id: "shop_footer", label: "Footer & Logo", labelMy: "အောက်ခြေနှင့် Logo", icon: Store },
+  { id: "template", labelKey: "photoStudio.tabTemplate", icon: LayoutTemplate },
+  { id: "scene_bg", labelKey: "photoStudio.tabScene", icon: Sparkles },
+  { id: "text_price", labelKey: "photoStudio.tabText", icon: Type },
+  { id: "theme_color", labelKey: "photoStudio.tabTheme", icon: Palette },
+  { id: "shop_footer", labelKey: "photoStudio.tabFooter", icon: Store },
 ]
+
+const STUDIO_BACKDROPS = [
+  { id: "white", color: "#FFFFFF", labelKey: "photoStudio.backdropWhite" },
+  { id: "slate", color: "#E2E8F0", labelKey: "photoStudio.backdropSlate" },
+  { id: "indigo", color: "#312E81", labelKey: "photoStudio.backdropIndigo" },
+  { id: "sunset", color: "#F59E0B", labelKey: "photoStudio.backdropSunset" },
+  { id: "emerald", color: "#065F46", labelKey: "photoStudio.backdropEmerald" },
+  { id: "black", color: "#09090B", labelKey: "photoStudio.backdropBlack" },
+] as const
+
+const SCENE_PRESETS = [
+  {
+    id: "white",
+    labelKey: "photoStudio.scenePresetWhite",
+    prompt: "Clean minimalist pure white studio tabletop with soft diffused commercial lighting and subtle natural contact shadow",
+  },
+  {
+    id: "desk",
+    labelKey: "photoStudio.scenePresetDesk",
+    prompt: "Modern minimalist dark oak tech desk setup with soft ambient LED rim light, sleek matte desk mat, and shallow depth-of-field background",
+  },
+  {
+    id: "marble",
+    labelKey: "photoStudio.scenePresetMarble",
+    prompt: "Luxury cream Carrara marble vanity surface with warm golden sunlight beams and soft botanical shadows",
+  },
+  {
+    id: "cafe",
+    labelKey: "photoStudio.scenePresetCafe",
+    prompt: "Warm rustic wooden cafe table with cozy golden hour ambient light and softly blurred warm cafe interior background",
+  },
+] as const
+
+async function compositeCutoutWithBackdrop(
+  cutoutUrl: string,
+  backdropHex: string
+): Promise<string> {
+  const img = await loadImageElement(cutoutUrl)
+  const canvas = document.createElement("canvas")
+  canvas.width = img.naturalWidth || 1080
+  canvas.height = img.naturalHeight || 1080
+  const ctx = canvas.getContext("2d")
+  if (!ctx) throw new Error("Canvas context unavailable")
+  ctx.fillStyle = backdropHex
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL("image/png")
+}
 
 function loadImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -189,6 +243,13 @@ export function PhotoStudioPage() {
   }))
 
   const [primaryDataUrl, setPrimaryDataUrl] = useState<string | null>(null)
+  const [originalPrimaryDataUrl, setOriginalPrimaryDataUrl] = useState<string | null>(null)
+  const [cutoutDataUrl, setCutoutDataUrl] = useState<string | null>(null)
+  const [backdropColor, setBackdropColor] = useState<string>("#FFFFFF")
+  const [isRemovingBg, setIsRemovingBg] = useState(false)
+  const [scenePrompt, setScenePrompt] = useState("")
+  const [selectedScenePreset, setSelectedScenePreset] = useState<string | null>(null)
+  const [isGeneratingScene, setIsGeneratingScene] = useState(false)
   const [secondaryDataUrl, setSecondaryDataUrl] = useState<string | null>(null)
   const [primaryImg, setPrimaryImg] = useState<HTMLImageElement | null>(null)
   const [secondaryImg, setSecondaryImg] = useState<HTMLImageElement | null>(null)
@@ -306,13 +367,98 @@ export function PhotoStudioPage() {
       reader.onload = () => {
         const result = typeof reader.result === "string" ? reader.result : null
         if (!result) return
-        if (slot === "primary") setPrimaryDataUrl(result)
-        else setSecondaryDataUrl(result)
+        if (slot === "primary") {
+          setPrimaryDataUrl(result)
+          setOriginalPrimaryDataUrl(result)
+          setCutoutDataUrl(null)
+        } else {
+          setSecondaryDataUrl(result)
+        }
       }
       reader.readAsDataURL(file)
     },
     [isMy]
   )
+
+  const handleRemoveBackground = useCallback(async () => {
+    const sourceUrl = originalPrimaryDataUrl ?? primaryDataUrl
+    if (!sourceUrl) {
+      toast.error(t(language, "photoStudio.sceneUploadFirst"))
+      return
+    }
+    setIsRemovingBg(true)
+    try {
+      const { removeBackground } = await import("@imgly/background-removal")
+      const res = await fetch(sourceUrl)
+      const blob = await res.blob()
+      const cutoutBlob = await removeBackground(blob)
+      const cutoutUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () =>
+          typeof r.result === "string" ? resolve(r.result) : reject(new Error("Read failed"))
+        r.onerror = () => reject(new Error("Read failed"))
+        r.readAsDataURL(cutoutBlob)
+      })
+      setCutoutDataUrl(cutoutUrl)
+      const composited = await compositeCutoutWithBackdrop(cutoutUrl, backdropColor)
+      setPrimaryDataUrl(composited)
+      toast.success(t(language, "photoStudio.cutoutSuccess"))
+    } catch (err) {
+      console.error("Local background removal failed:", err)
+      toast.error(t(language, "photoStudio.cutoutError"))
+    } finally {
+      setIsRemovingBg(false)
+    }
+  }, [originalPrimaryDataUrl, primaryDataUrl, backdropColor, language])
+
+  const handleSelectBackdrop = useCallback(
+    async (hex: string) => {
+      setBackdropColor(hex)
+      if (!cutoutDataUrl) return
+      try {
+        const composited = await compositeCutoutWithBackdrop(cutoutDataUrl, hex)
+        setPrimaryDataUrl(composited)
+      } catch (err) {
+        console.error("Failed to composite backdrop:", err)
+      }
+    },
+    [cutoutDataUrl]
+  )
+
+  const handleGenerateAiScene = useCallback(async () => {
+    const sourceUrl = originalPrimaryDataUrl ?? primaryDataUrl
+    if (!sourceUrl) {
+      toast.error(t(language, "photoStudio.sceneUploadFirst"))
+      return
+    }
+    const promptToUse = scenePrompt.trim()
+    if (!promptToUse) return
+
+    setIsGeneratingScene(true)
+    try {
+      const mimeMatch = sourceUrl.match(/^data:([^;]+);base64,/)
+      const result = await generateProductScene({
+        imageBase64: sourceUrl,
+        mimeType: mimeMatch?.[1] || "image/jpeg",
+        scenePrompt: promptToUse,
+      })
+      setCutoutDataUrl(null)
+      setPrimaryDataUrl(result.imageDataUrl)
+      toast.success(t(language, "photoStudio.sceneGenerateSuccess"))
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : t(language, "photoStudio.sceneGenerateError")
+      toast.error(msg)
+    } finally {
+      setIsGeneratingScene(false)
+    }
+  }, [originalPrimaryDataUrl, primaryDataUrl, scenePrompt, language])
+
+  const handleRevertToOriginal = useCallback(() => {
+    if (!originalPrimaryDataUrl) return
+    setPrimaryDataUrl(originalPrimaryDataUrl)
+    setCutoutDataUrl(null)
+  }, [originalPrimaryDataUrl])
 
   const handleLogoFile = useCallback(
     async (file: File | undefined) => {
@@ -624,14 +770,14 @@ export function PhotoStudioPage() {
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
-                    "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all",
+                    "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer",
                     isActive
                       ? "border-primary bg-primary text-primary-foreground shadow-sm"
                       : "border-border bg-card text-muted-foreground hover:bg-muted/70 hover:text-foreground"
                   )}
                 >
                   <Icon className="h-3.5 w-3.5" />
-                  {isMy ? tab.labelMy : tab.label}
+                  {t(language, tab.labelKey)}
                 </button>
               )
             })}
@@ -639,6 +785,162 @@ export function PhotoStudioPage() {
 
           {/* Active Tab Panel */}
           <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-4 shadow-sm">
+            {activeTab === "scene_bg" && (
+              <div className="space-y-4">
+                {/* 1. Local Background Removal (No API Quota) */}
+                <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <Eraser className="h-4 w-4 text-primary" />
+                      <span className="text-xs font-semibold">
+                        {t(language, "photoStudio.cutoutTitle")}
+                      </span>
+                    </div>
+                    <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                      {t(language, "photoStudio.cutoutBadge")}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    {t(language, "photoStudio.cutoutDesc")}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={!primaryDataUrl || isRemovingBg || isGeneratingScene}
+                      onClick={handleRemoveBackground}
+                      className="h-8 gap-1.5 rounded-lg text-xs font-semibold"
+                    >
+                      {isRemovingBg ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <span>{t(language, "photoStudio.cutoutProcessing")}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Eraser className="h-3.5 w-3.5" />
+                          <span>{t(language, "photoStudio.cutoutBtn")}</span>
+                        </>
+                      )}
+                    </Button>
+                    {originalPrimaryDataUrl && primaryDataUrl !== originalPrimaryDataUrl && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={handleRevertToOriginal}
+                        className="h-8 gap-1 text-xs text-muted-foreground"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        <span>{t(language, "photoStudio.sceneResetOriginal")}</span>
+                      </Button>
+                    )}
+                  </div>
+
+                  {cutoutDataUrl && (
+                    <div className="space-y-1.5 pt-2 border-t border-border/60">
+                      <Label className="text-[11px] text-muted-foreground">
+                        {t(language, "photoStudio.backdropPickerLabel")}
+                      </Label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {STUDIO_BACKDROPS.map((b) => {
+                          const active = backdropColor === b.color
+                          return (
+                            <button
+                              key={b.id}
+                              type="button"
+                              onClick={() => handleSelectBackdrop(b.color)}
+                              title={t(language, b.labelKey)}
+                              className={cn(
+                                "h-7 w-7 rounded-full border-2 transition-transform cursor-pointer",
+                                active
+                                  ? "border-primary scale-110 ring-2 ring-primary/30"
+                                  : "border-border hover:scale-105"
+                              )}
+                              style={{ backgroundColor: b.color }}
+                            />
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. AI Scene Studio */}
+                <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    <span className="text-xs font-semibold">
+                      {t(language, "photoStudio.sceneStudioTitle")}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    {t(language, "photoStudio.sceneStudioDesc")}
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {SCENE_PRESETS.map((preset) => {
+                      const active = selectedScenePreset === preset.id
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          disabled={!primaryDataUrl || isGeneratingScene}
+                          onClick={() => {
+                            setSelectedScenePreset(preset.id)
+                            setScenePrompt(preset.prompt)
+                          }}
+                          className={cn(
+                            "rounded-lg border px-2.5 py-2 text-left text-[11px] font-medium transition-all cursor-pointer disabled:opacity-50",
+                            active
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border bg-background hover:bg-muted/60"
+                          )}
+                        >
+                          {t(language, preset.labelKey)}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] text-muted-foreground">
+                      {t(language, "photoStudio.sceneCustomLabel")}
+                    </Label>
+                    <Textarea
+                      value={scenePrompt}
+                      onChange={(e) => {
+                        setScenePrompt(e.target.value)
+                        setSelectedScenePreset(null)
+                      }}
+                      rows={2}
+                      placeholder={t(language, "photoStudio.sceneCustomPlaceholder")}
+                      className="min-h-[60px] text-xs bg-background"
+                      disabled={!primaryDataUrl || isGeneratingScene}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={!primaryDataUrl || !scenePrompt.trim() || isGeneratingScene || isRemovingBg}
+                    onClick={handleGenerateAiScene}
+                    className="w-full h-9 gap-1.5 rounded-lg text-xs font-semibold"
+                  >
+                    {isGeneratingScene ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span>{t(language, "photoStudio.sceneGenerating")}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-3.5 w-3.5" />
+                        <span>{t(language, "photoStudio.sceneGenerateBtn")}</span>
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {activeTab === "template" && (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">

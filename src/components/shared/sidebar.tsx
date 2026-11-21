@@ -16,7 +16,7 @@ import { t } from "@/locales/translations"
 import { CCLogo } from "@/components/shared/cc-logo"
 import { QuickIdeaDialog } from "@/components/shared/quick-idea-dialog"
 import { SquircleIcon } from "@/components/shared/squircle-icon"
-import { getRoomForPageKey, WORKSPACE_ROOMS, type WorkspaceRoom } from "@/components/shared/rooms"
+import { getRoomForPageKey, getRoomTitle, WORKSPACE_ROOMS, type WorkspaceRoom } from "@/components/shared/rooms"
 import { useUIStore, type UIState } from "@/store/useUIStore"
 import { useContentStore } from "@/store/useContentStore"
 import { useShallow } from "zustand/react/shallow"
@@ -40,7 +40,7 @@ function RoomNavButton({
   collapsed,
   bgIndicator,
 }: RoomNavButtonProps) {
-  const label = language === "my" ? room.titleMy : room.titleEn
+  const label = getRoomTitle(room, language)
 
   return (
     <button

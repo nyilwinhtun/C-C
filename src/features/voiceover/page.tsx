@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Loader2, Pause, Play, Settings2, Upload } from "lucide-react"
+import { Loader2, Mic, Pause, Play, Radio, Settings2, Square, Upload } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
 import { transcribeAudioWithGemini } from "@/api/aiService"
 import {
@@ -26,14 +26,49 @@ import {
   type WavAudioRecorderHandle,
 } from "@/lib/iosAudio"
 import { cn, triggerHaptic } from "@/lib/utils"
+import { t } from "@/locales/translations"
 import { getAudioBlobDurationSeconds } from "@/lib/videoAudioMerger"
 import { useContentStore } from "@/store/useContentStore"
+import { useUIStore } from "@/store/useUIStore"
 import { StudioSettingsSheet } from "./StudioSettingsSheet"
 
-const WAVEFORM_BAR_COUNT = 28
+interface LiveSpeechRecognitionAlternative {
+  transcript: string
+}
 
-const SCRIPT_PLACEHOLDER =
-  "အသံဖတ်ခိုင်းမယ့် စာသား ဒါမှမဟုတ် ကိုယ်တိုင်ဖတ်မယ့် စာသားကို ဒီမှာ ရေးပါ (အလွတ်စကားပြောသွင်းလိုပါက ဒီအတိုင်း အသံဖမ်းနိုင်ပါသည်)..."
+interface LiveSpeechRecognitionResult {
+  isFinal: boolean
+  0: LiveSpeechRecognitionAlternative
+}
+
+interface LiveSpeechRecognitionEvent {
+  resultIndex: number
+  results: ArrayLike<LiveSpeechRecognitionResult>
+}
+
+interface LiveSpeechRecognitionLike {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  onresult: ((event: LiveSpeechRecognitionEvent) => void) | null
+  onerror: ((event: { error?: string }) => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type LiveSpeechRecognitionCtor = new () => LiveSpeechRecognitionLike
+
+function getLiveSpeechRecognitionCtor(): LiveSpeechRecognitionCtor | null {
+  if (typeof window === "undefined") return null
+  const win = window as Window & {
+    SpeechRecognition?: LiveSpeechRecognitionCtor
+    webkitSpeechRecognition?: LiveSpeechRecognitionCtor
+  }
+  return win.SpeechRecognition ?? win.webkitSpeechRecognition ?? null
+}
+
+const WAVEFORM_BAR_COUNT = 28
 
 function formatRecordTimer(seconds: number): string {
   const mins = Math.floor(seconds / 60)
@@ -65,6 +100,8 @@ function triggerBlobDownload(url: string, filename: string) {
 }
 
 export function VoiceoverPage() {
+  const language = useUIStore((state) => state.language)
+
   const {
     voiceScriptText,
     setVoiceScriptText,
@@ -94,6 +131,8 @@ export function VoiceoverPage() {
     generateStudioVoiceover,
     micFilterMode,
     setMicFilterMode,
+    liveModeEnabled,
+    setLiveModeEnabled,
   } = useContentStore(
     useShallow((state) => ({
       voiceScriptText: state.voiceScriptText,
@@ -124,8 +163,107 @@ export function VoiceoverPage() {
       generateStudioVoiceover: state.generateStudioVoiceover,
       micFilterMode: state.micFilterMode,
       setMicFilterMode: state.setMicFilterMode,
+      liveModeEnabled: state.liveModeEnabled,
+      setLiveModeEnabled: state.setLiveModeEnabled,
     }))
   )
+
+  // Live Mode Speech-to-Text state
+  const liveSpeechSupported = Boolean(getLiveSpeechRecognitionCtor())
+  const [isLiveListening, setIsLiveListening] = useState(false)
+  const [liveInterimText, setLiveInterimText] = useState("")
+  const [liveSpeechLang, setLiveSpeechLang] = useState<"my-MM" | "en-US">(
+    language === "my" ? "my-MM" : "en-US"
+  )
+  const liveRecognitionRef = useRef<LiveSpeechRecognitionLike | null>(null)
+  const voiceScriptRef = useRef(voiceScriptText)
+  useEffect(() => {
+    voiceScriptRef.current = voiceScriptText
+  }, [voiceScriptText])
+
+  const stopLiveSpeech = useCallback(() => {
+    try {
+      liveRecognitionRef.current?.stop()
+    } catch {
+      // Ignore stop errors
+    }
+    liveRecognitionRef.current = null
+    setIsLiveListening(false)
+    setLiveInterimText("")
+  }, [])
+
+  useEffect(() => {
+    if (!liveModeEnabled && isLiveListening) {
+      stopLiveSpeech()
+    }
+  }, [liveModeEnabled, isLiveListening, stopLiveSpeech])
+
+  useEffect(() => {
+    return () => {
+      try {
+        liveRecognitionRef.current?.stop()
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }, [])
+
+  const toggleLiveSpeech = useCallback(() => {
+    if (isLiveListening) {
+      stopLiveSpeech()
+      return
+    }
+    const Ctor = getLiveSpeechRecognitionCtor()
+    if (!Ctor) {
+      toast.error(t(language, "booth.liveUnsupported"))
+      return
+    }
+    triggerHaptic(8)
+    const recognition = new Ctor()
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = liveSpeechLang
+
+    recognition.onresult = (event) => {
+      let finalChunk = ""
+      let interimChunk = ""
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const res = event.results[i]
+        const transcript = res?.[0]?.transcript ?? ""
+        if (res.isFinal) {
+          finalChunk += transcript
+        } else {
+          interimChunk += transcript
+        }
+      }
+      setLiveInterimText(interimChunk.trim())
+      if (finalChunk.trim()) {
+        const current = voiceScriptRef.current.trim()
+        const next = current ? `${current} ${finalChunk.trim()}` : finalChunk.trim()
+        setVoiceScriptText(next)
+      }
+    }
+
+    recognition.onerror = () => {
+      setIsLiveListening(false)
+      setLiveInterimText("")
+    }
+
+    recognition.onend = () => {
+      setIsLiveListening(false)
+      setLiveInterimText("")
+      liveRecognitionRef.current = null
+    }
+
+    try {
+      recognition.start()
+      liveRecognitionRef.current = recognition
+      setIsLiveListening(true)
+    } catch {
+      setIsLiveListening(false)
+      toast.error(t(language, "booth.liveUnsupported"))
+    }
+  }, [isLiveListening, liveSpeechLang, language, setVoiceScriptText, stopLiveSpeech])
 
   // Studio settings sheet visibility
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -428,10 +566,8 @@ export function VoiceoverPage() {
   }
 
   const narratorButtonLabel = voiceDialogueMode
-    ? "နီလာ + သီဟ အသံဖြင့် ဖတ်မည်"
-    : selectedVoice === "thiha"
-      ? "သီဟ အသံဖြင့် ဖတ်မည်"
-      : "နီလာ အသံဖြင့် ဖတ်မည်"
+    ? t(language, "booth.generateDialogueBtn")
+    : t(language, "booth.generateBtn")
 
   return (
     <div className="mx-auto w-full max-w-2xl pb-8 space-y-5">
@@ -439,28 +575,134 @@ export function VoiceoverPage() {
       <div className="flex items-center justify-between gap-3 px-0.5">
         <div className="min-w-0">
           <h1 className="text-lg sm:text-xl font-semibold tracking-tight text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
-            အသံသွင်းခန်း
+            {t(language, "nav.voiceover")}
           </h1>
           <p className="text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
-            စာသားရေးပြီး ကိုယ်တိုင်ဖတ်ပါ သို့မဟုတ် နီလာ၊ သီဟ အသံဖြင့် နားထောင်ပါ
+            {t(language, "booth.scriptPlaceholder")}
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          className={cn(
-            "relative inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-all active:scale-95 cursor-pointer font-myanmar",
-            "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46]"
-          )}
-        >
-          <Settings2 className="h-3.5 w-3.5 text-[#57534E] dark:text-[#A1A1AA]" />
-          <span>⚙️ ညှိရန်</span>
-          {hasActiveSettings && (
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-600 dark:bg-amber-400" />
-          )}
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic(8)
+              setLiveModeEnabled(!liveModeEnabled)
+            }}
+            aria-pressed={liveModeEnabled}
+            className={cn(
+              "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-all active:scale-95 cursor-pointer font-myanmar",
+              liveModeEnabled
+                ? "border-[#E11D48] bg-[#E11D48]/10 text-[#E11D48]"
+                : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46]"
+            )}
+          >
+            <Radio className={cn("h-3.5 w-3.5", liveModeEnabled && "animate-pulse")} />
+            <span>{t(language, "booth.liveMode")}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className={cn(
+              "relative inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-all active:scale-95 cursor-pointer font-myanmar",
+              "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46]"
+            )}
+          >
+            <Settings2 className="h-3.5 w-3.5 text-[#57534E] dark:text-[#A1A1AA]" />
+            <span>{t(language, "booth.settingsBtn")}</span>
+            {hasActiveSettings && (
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-600 dark:bg-amber-400" />
+            )}
+          </button>
+        </div>
       </div>
+
+      {/* Live Mode Panel */}
+      {liveModeEnabled && (
+        <div className="rounded-[20px] border border-[#E11D48]/30 bg-[#E11D48]/[0.04] dark:bg-[#E11D48]/[0.08] p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#E11D48] px-2 py-0.5 text-[10px] font-bold tracking-wider text-white uppercase">
+                <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+                LIVE
+              </span>
+              <span className="text-sm font-semibold text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                {t(language, "booth.liveTitle")}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <div className="inline-flex rounded-lg border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#18181B] p-0.5 text-[11px]">
+                <button
+                  type="button"
+                  disabled={isLiveListening}
+                  onClick={() => setLiveSpeechLang("my-MM")}
+                  className={cn(
+                    "rounded-md px-2 py-1 font-medium cursor-pointer transition-colors",
+                    liveSpeechLang === "my-MM"
+                      ? "bg-[#1C1917] text-white dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                      : "text-muted-foreground"
+                  )}
+                >
+                  {t(language, "booth.liveLangMy")}
+                </button>
+                <button
+                  type="button"
+                  disabled={isLiveListening}
+                  onClick={() => setLiveSpeechLang("en-US")}
+                  className={cn(
+                    "rounded-md px-2 py-1 font-medium cursor-pointer transition-colors",
+                    liveSpeechLang === "en-US"
+                      ? "bg-[#1C1917] text-white dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                      : "text-muted-foreground"
+                  )}
+                >
+                  {t(language, "booth.liveLangEn")}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <p className="text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+            {liveSpeechSupported ? t(language, "booth.liveDesc") : t(language, "booth.liveUnsupported")}
+          </p>
+
+          {liveSpeechSupported && (
+            <div className="flex flex-wrap items-center gap-2.5">
+              <Button
+                type="button"
+                size="sm"
+                onClick={toggleLiveSpeech}
+                className={cn(
+                  "h-9 rounded-xl gap-1.5 text-xs font-semibold font-myanmar",
+                  isLiveListening
+                    ? "bg-[#E11D48] hover:bg-[#BE123C] text-white"
+                    : "bg-[#1C1917] hover:bg-[#292524] dark:bg-[#F5F5F4] dark:hover:bg-[#E7E5E4] text-white dark:text-[#18181B]"
+                )}
+              >
+                {isLiveListening ? (
+                  <>
+                    <Square className="h-3.5 w-3.5 fill-current" />
+                    <span>{t(language, "booth.liveStop")}</span>
+                  </>
+                ) : (
+                  <>
+                    <Mic className="h-3.5 w-3.5" />
+                    <span>{t(language, "booth.liveStart")}</span>
+                  </>
+                )}
+              </Button>
+
+              {isLiveListening && (
+                <span className="text-xs font-medium text-[#E11D48] font-myanmar animate-pulse">
+                  {liveInterimText || t(language, "booth.liveListening")}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 1. Unified Single-Sheet Script Canvas + Auto-Teleprompter */}
       <div className="rounded-[20px] border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] overflow-hidden transition-colors">
@@ -532,7 +774,7 @@ export function VoiceoverPage() {
                 setVoiceScriptText(e.target.value)
               }}
               rows={7}
-              placeholder={SCRIPT_PLACEHOLDER}
+              placeholder={t(language, "booth.scriptPlaceholder")}
               className="min-h-[210px] sm:min-h-[240px] w-full resize-none border-0 bg-transparent px-4 py-4 sm:px-5 sm:py-5 text-sm sm:text-base leading-[1.8] text-[#1C1917] dark:text-[#F5F5F4] placeholder:text-[#A8A29E] dark:placeholder:text-[#71717A] focus-visible:ring-0 focus-visible:ring-offset-0 font-myanmar"
             />
             {voiceScriptText.trim() && (
@@ -561,9 +803,9 @@ export function VoiceoverPage() {
       >
         {(
           [
-            { id: "self", icon: "🎙️", label: "ကိုယ်တိုင်" },
-            { id: "nilar", icon: "👩", label: "နီလာ" },
-            { id: "thiha", icon: "👨", label: "သီဟ" },
+            { id: "self", icon: "🎙️", label: t(language, "booth.voiceSelf") },
+            { id: "nilar", icon: "👩", label: t(language, "booth.voiceNilar") },
+            { id: "thiha", icon: "👨", label: t(language, "booth.voiceThiha") },
           ] as const
         ).map((pill) => {
           const active = selectedVoice === pill.id
@@ -657,8 +899,8 @@ export function VoiceoverPage() {
                 >
                   {(
                     [
-                      { id: "raw", label: "Studio Raw (ကြည်လင်ပြတ်သား)" },
-                      { id: "light", label: "Light Filter" },
+                      { id: "raw", label: t(language, "booth.micRaw") },
+                      { id: "light", label: t(language, "booth.micLight") },
                     ] as const
                   ).map((mode) => {
                     const active = micFilterMode === mode.id
@@ -685,7 +927,7 @@ export function VoiceoverPage() {
               ) : (
                 <span className="inline-flex items-center gap-1.5 text-xs text-[#E11D48] font-medium font-myanmar">
                   <span className="h-1.5 w-1.5 rounded-full bg-[#E11D48] animate-pulse" />
-                  အသံဖမ်းနေပါသည် — ရပ်ရန် နှိပ်ပါ
+                  {t(language, "booth.recording")}
                 </span>
               )}
 
@@ -705,7 +947,7 @@ export function VoiceoverPage() {
                     className="inline-flex items-center gap-1 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] underline underline-offset-4 hover:opacity-80 cursor-pointer font-myanmar"
                   >
                     <Upload className="h-3 w-3" />
-                    <span>ဖိုင်တင်မည်</span>
+                    <span>{t(language, "booth.uploadAudio")}</span>
                   </button>
                 </>
               )}
@@ -728,17 +970,17 @@ export function VoiceoverPage() {
               {isTranscribing ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
-                  <span>စာသားအဖြစ် ပြောင်းလဲနေပါသည်...</span>
+                  <span>{t(language, "booth.transcribing")}</span>
                 </>
               ) : isGeneratingVoice ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
                   <span>
                     {ttsStatus === "preparing"
-                      ? "စာသား ပြင်ဆင်နေပါသည်..."
+                      ? t(language, "booth.preparingText")
                       : ttsProgress && ttsProgress.total > 1
-                        ? `အသံဖိုင် ပြင်ဆင်နေပါသည်... (${toBurmeseDigits(ttsProgress.current)}/${toBurmeseDigits(ttsProgress.total)})`
-                        : "အသံဖိုင် ပြင်ဆင်နေပါသည်..."}
+                        ? `${t(language, "booth.generatingAudio")} (${language === "my" ? toBurmeseDigits(ttsProgress.current) : ttsProgress.current}/${language === "my" ? toBurmeseDigits(ttsProgress.total) : ttsProgress.total})`
+                        : t(language, "booth.generatingAudio")}
                   </span>
                 </>
               ) : (
@@ -784,10 +1026,10 @@ export function VoiceoverPage() {
               {isTranscribing ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" aria-hidden="true" />
-                  <span>စာသားအဖြစ် ပြောင်းလဲနေပါသည်...</span>
+                  <span>{t(language, "booth.transcribing")}</span>
                 </>
               ) : (
-                <span>📝 စာသားအဖြစ် ပြန်ပြောင်းမည်</span>
+                <span>{t(language, "booth.transcribeBtn")}</span>
               )}
             </Button>
           )}

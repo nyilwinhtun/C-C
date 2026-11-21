@@ -172,6 +172,7 @@ interface ContentState {
   editorialFormat: EditorialFormat
   editorialResult: EditorialResult | null
   micFilterMode: MicFilterMode
+  liveModeEnabled: boolean
   isSyncing: boolean
   setDraftInput: (input: Partial<GeneratorFormValues>) => void
   setTextPostResult: (result: GeneratedContent | null) => void
@@ -221,6 +222,7 @@ interface ContentState {
   setEditorialResult: (result: EditorialResult | null) => void
   clearEditorialResult: () => void
   setMicFilterMode: (mode: MicFilterMode) => void
+  setLiveModeEnabled: (enabled: boolean) => void
   clearUploadedVideo: () => void
   saveToVault: (
     item: Omit<SavedVaultItem, "id" | "status"> & {
@@ -300,6 +302,7 @@ export const useContentStore = create<ContentState>()(
       editorialFormat: "fb_sales",
       editorialResult: null,
       micFilterMode: "raw",
+      liveModeEnabled: false,
       isSyncing: false,
 
       setDraftInput: (input) =>
@@ -544,6 +547,7 @@ export const useContentStore = create<ContentState>()(
       setEditorialResult: (editorialResult) => set({ editorialResult }),
       clearEditorialResult: () => set({ editorialResult: null }),
       setMicFilterMode: (micFilterMode) => set({ micFilterMode }),
+      setLiveModeEnabled: (liveModeEnabled) => set({ liveModeEnabled }),
       addCustomPronunciation: (word, phonetic) =>
         set((state) => {
           const cleanWord = word.trim()
@@ -720,6 +724,7 @@ export const useContentStore = create<ContentState>()(
         editorialFormat: state.editorialFormat ?? "fb_sales",
         editorialResult: state.editorialResult ?? null,
         micFilterMode: state.micFilterMode ?? "raw",
+        liveModeEnabled: state.liveModeEnabled ?? false,
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState as Partial<ContentState> | undefined) ?? {}

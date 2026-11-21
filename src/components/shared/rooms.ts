@@ -12,9 +12,11 @@ import {
 } from "lucide-react"
 import type { Language } from "@/store/useUIStore"
 import type { SquircleTone } from "@/components/shared/squircle-icon"
+import { t } from "@/locales/translations"
 
 export interface RoomTab {
   key: string
+  labelKey: string
   labelMy: string
   labelEn: string
   icon: LucideIcon
@@ -23,6 +25,8 @@ export interface RoomTab {
 export interface WorkspaceRoom {
   id: "write" | "audio" | "media" | "vault"
   emoji: string
+  titleKey: string
+  shortKey: string
   titleMy: string
   titleEn: string
   shortMy: string
@@ -39,7 +43,9 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
   {
     id: "write",
     emoji: "✍️",
-    titleMy: "စာရေးနှင့် ဇာတ်ညွှန်း",
+    titleKey: "rooms.write.title",
+    shortKey: "rooms.write.short",
+    titleMy: "ပို့စ်ရေးရန်နှင့် ဇာတ်ညွှန်း",
     titleEn: "Writing & Scripts",
     shortMy: "စာရေးမည်",
     shortEn: "Write",
@@ -49,14 +55,16 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
     activeColorClass: "text-[#1C1917] dark:text-[#F5F5F4]",
     activePillClass: "bg-[#1C1917]/10 dark:bg-[#F5F5F4]/12",
     tabs: [
-      { key: "text", labelMy: "Post ရေးမည်", labelEn: "Post Writer", icon: PenLine },
-      { key: "video", labelMy: "Video Script", labelEn: "Video Script", icon: Video },
+      { key: "text", labelKey: "nav.text", labelMy: "ပို့စ်ရေးရန်", labelEn: "Post Writer", icon: PenLine },
+      { key: "video", labelKey: "nav.video", labelMy: "ဗီဒီယို ဇာတ်ညွှန်း", labelEn: "Video Script", icon: Video },
     ],
   },
   {
     id: "audio",
     emoji: "🎙️",
-    titleMy: "အသံသွင်းခန်းနှင့် စာသား",
+    titleKey: "rooms.audio.title",
+    shortKey: "rooms.audio.short",
+    titleMy: "အသံသွင်းခန်းနှင့် မှတ်စု",
     titleEn: "Recording Booth & Notes",
     shortMy: "အသံသွင်းခန်း",
     shortEn: "Booth",
@@ -66,31 +74,35 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
     activeColorClass: "text-[#1C1917] dark:text-[#F5F5F4]",
     activePillClass: "bg-[#1C1917]/10 dark:bg-[#F5F5F4]/12",
     tabs: [
-      { key: "voiceover", labelMy: "အသံသွင်းခန်း", labelEn: "Recording Booth", icon: Mic },
-      { key: "transcriber", labelMy: "အသံမှ စာသားသို့", labelEn: "Voice Notes", icon: FileText },
-      { key: "audiobook", labelMy: "စာအုပ်ဇာတ်ကြောင်းပြော", labelEn: "Storyteller", icon: BookOpen },
+      { key: "voiceover", labelKey: "nav.voiceover", labelMy: "အသံသွင်းခန်း", labelEn: "Recording Booth", icon: Mic },
+      { key: "transcriber", labelKey: "nav.transcriber", labelMy: "အသံမှတ်စု", labelEn: "Voice Notes", icon: FileText },
+      { key: "audiobook", labelKey: "nav.audiobook", labelMy: "စာအုပ်ဖတ်ပြစက်", labelEn: "Storyteller", icon: BookOpen },
     ],
   },
   {
     id: "media",
     emoji: "🎬",
-    titleMy: "ဗီဒီယိုနှင့် ပုံဒီဇိုင်း",
+    titleKey: "rooms.media.title",
+    shortKey: "rooms.media.short",
+    titleMy: "ဓာတ်ပုံစတူဒီယိုနှင့် ဗီဒီယို",
     titleEn: "Video & Photo Studio",
-    shortMy: "မီဒီယာ",
+    shortMy: "စတူဒီယို",
     shortEn: "Media",
-    defaultPageKey: "autocut",
+    defaultPageKey: "studio",
     icon: Scissors,
     tone: "slate",
     activeColorClass: "text-[#1C1917] dark:text-[#F5F5F4]",
     activePillClass: "bg-[#1C1917]/10 dark:bg-[#F5F5F4]/12",
     tabs: [
-      { key: "autocut", labelMy: "အကောင်းဆုံး အခန်းဖြတ်ရန်", labelEn: "Highlight Cutter", icon: Scissors },
-      { key: "studio", labelMy: "ပုံဒီဇိုင်း Studio", labelEn: "Photo Studio", icon: Camera },
+      { key: "studio", labelKey: "nav.studio", labelMy: "ဓာတ်ပုံစတူဒီယို", labelEn: "Photo Studio", icon: Camera },
+      { key: "autocut", labelKey: "nav.autocut", labelMy: "ဗီဒီယို အသံတိတ်ဖြတ်စက်", labelEn: "Highlight Cutter", icon: Scissors },
     ],
   },
   {
     id: "vault",
     emoji: "📁",
+    titleKey: "rooms.vault.title",
+    shortKey: "rooms.vault.short",
     titleMy: "မှတ်စုနှင့် အချိန်ဇယား",
     titleEn: "Vault & Calendar",
     shortMy: "မှတ်စု",
@@ -100,7 +112,7 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
     tone: "slate",
     activeColorClass: "text-[#1C1917] dark:text-[#F5F5F4]",
     activePillClass: "bg-[#1C1917]/10 dark:bg-[#F5F5F4]/12",
-    tabs: [{ key: "vault", labelMy: "Idea Vault & Calendar", labelEn: "Idea Vault & Calendar", icon: FolderKanban }],
+    tabs: [{ key: "vault", labelKey: "nav.vault", labelMy: "မှတ်စုနှင့် အချိန်ဇယား", labelEn: "Vault & Calendar", icon: FolderKanban }],
   },
 ]
 
@@ -112,5 +124,13 @@ export function getRoomForPageKey(pageKey: string): WorkspaceRoom {
 }
 
 export function getRoomTitle(room: WorkspaceRoom, language: Language): string {
-  return language === "my" ? room.titleMy : room.titleEn
+  return t(language, room.titleKey)
+}
+
+export function getRoomShort(room: WorkspaceRoom, language: Language): string {
+  return t(language, room.shortKey)
+}
+
+export function getTabLabel(tab: RoomTab, language: Language): string {
+  return t(language, tab.labelKey)
 }

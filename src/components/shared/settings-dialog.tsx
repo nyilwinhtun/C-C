@@ -19,6 +19,7 @@ import {
 } from "@/types"
 import { useShallow } from "zustand/react/shallow"
 import {
+  Camera,
   ChevronDown,
   Download,
   Eye,
@@ -29,6 +30,7 @@ import {
   Mic,
   Moon,
   Plus,
+  Radio,
   RefreshCw,
   Settings,
   ShieldAlert,
@@ -133,6 +135,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     setAIProvider,
     setProviderApiKey,
     setProviderModel,
+    setActivePageKey,
   } = useUIStore(
     useShallow((state) => ({
       language: state.language,
@@ -147,6 +150,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       setAIProvider: state.setAIProvider,
       setProviderApiKey: state.setProviderApiKey,
       setProviderModel: state.setProviderModel,
+      setActivePageKey: state.setActivePageKey,
     }))
   )
 
@@ -158,9 +162,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     savedVault,
     generatedHistory,
     micFilterMode,
+    liveModeEnabled,
     voiceDnaSamples,
     shopProfile,
     setMicFilterMode,
+    setLiveModeEnabled,
     setVoiceDnaSamples,
     setShopProfile,
     importBackup,
@@ -173,9 +179,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       savedVault: state.savedVault,
       generatedHistory: state.generatedHistory,
       micFilterMode: state.micFilterMode,
+      liveModeEnabled: state.liveModeEnabled,
       voiceDnaSamples: state.voiceDnaSamples,
       shopProfile: state.shopProfile,
       setMicFilterMode: state.setMicFilterMode,
+      setLiveModeEnabled: state.setLiveModeEnabled,
       setVoiceDnaSamples: state.setVoiceDnaSamples,
       setShopProfile: state.setShopProfile,
       importBackup: state.importBackup,
@@ -202,6 +210,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   // Group 2: Studio Preferences state
   const [micModeInput, setMicModeInput] = useState<MicFilterMode>(micFilterMode)
+  const [liveModeInput, setLiveModeInput] = useState<boolean>(liveModeEnabled)
 
   // Group 3: Brand & Voice DNA state
   const [dnaSamplesInput, setDnaSamplesInput] = useState<string[]>(voiceDnaSamples)
@@ -231,6 +240,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       setShowGeminiKey(false)
       setShowAdvancedApi(aiProvider !== "gemini" || isGeminiCustom)
       setMicModeInput(micFilterMode)
+      setLiveModeInput(liveModeEnabled)
       setDnaSamplesInput(
         voiceDnaSamples.length > 0 ? [...voiceDnaSamples] : ["", "", ""]
       )
@@ -363,7 +373,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         const cacheKeys = await caches.keys()
         await Promise.all(cacheKeys.map((key) => caches.delete(key)))
       }
-      toast.success("ဗားရှင်းအသစ် ရယူပြီး ပြန်လည်စတင်နေပါသည်...")
+      toast.success(t(language, "settings.updateReloading"))
       setTimeout(() => {
         window.location.reload()
       }, 400)
@@ -376,9 +386,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const handleSaveSettings = () => {
     const trimmedGeminiKey = geminiKeyInput.trim()
     if (trimmedGeminiKey && !isValidGeminiApiKey(trimmedGeminiKey)) {
-      toast.error(
-        "Invalid Gemini API key. Key must start with AIza or AQ. and be at least 20 characters."
-      )
+      toast.error(t(language, "settings.invalidGeminiKey"))
       return
     }
 
@@ -396,6 +404,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     setProviderModel("groq", normalizedGroqModel)
 
     setMicFilterMode(micModeInput)
+    setLiveModeEnabled(liveModeInput)
     setVoiceDnaSamples(dnaSamplesInput)
     setShopProfile({
       name: shopProfileInput.name.trim(),
@@ -430,10 +439,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         </div>
 
         <div className="space-y-5 pt-2">
-          {/* 1. ချိတ်ဆက်မှု (API & Model) */}
+          {/* 1. API & Model */}
           <section className="space-y-4">
             <h3 className="px-1 text-xs font-semibold tracking-wide text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
-              ချိတ်ဆက်မှု (API & Model)
+              {t(language, "settings.groupApi")}
             </h3>
 
             <div className="rounded-[20px] border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-4 space-y-4">
@@ -449,7 +458,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     </label>
                     {isGeminiSaved && (
                       <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                        Saved ✓
+                        {t(language, "settings.savedBadge")}
                       </span>
                     )}
                   </div>
@@ -512,7 +521,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                       {MODEL_LABELS[preset] ?? preset}
                     </option>
                   ))}
-                  <option value="custom">Custom Model (ကိုယ်တိုင်ရိုက်ထည့်ရန်)</option>
+                  <option value="custom">{t(language, "settings.customModelOption")}</option>
                 </Select>
               </div>
 
@@ -524,7 +533,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   aria-expanded={showAdvancedApi}
                   className="flex w-full items-center justify-between py-1 text-xs font-medium text-[#57534E] dark:text-[#A1A1AA] hover:text-[#1C1917] dark:hover:text-[#F5F5F4] transition-colors cursor-pointer font-myanmar"
                 >
-                  <span>အဆင့်မြင့် ချိတ်ဆက်မှု (Advanced)</span>
+                  <span>{t(language, "settings.advancedApi")}</span>
                   <ChevronDown
                     className={cn(
                       "h-4 w-4 transition-transform duration-200",
@@ -686,10 +695,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </div>
           </section>
 
-          {/* 2. ဖန်တီးမှု ပုံစံ (Studio Preferences) */}
+          {/* 2. Studio Preferences */}
           <section className="space-y-4">
             <h3 className="px-1 text-xs font-semibold tracking-wide text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
-              ဖန်တီးမှု ပုံစံ (Studio Preferences)
+              {t(language, "settings.groupPreferences")}
             </h3>
 
             <div className="rounded-[20px] border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-4 space-y-4">
@@ -697,10 +706,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               <div className="flex items-center justify-between gap-3">
                 <div className="space-y-0.5">
                   <p className="text-sm font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
-                    အသွင်အပြင် (Appearance)
+                    {t(language, "settings.appearance")}
                   </p>
-                  <p className="text-xs text-[#57534E] dark:text-[#A1A1AA]">
-                    {theme === "dark" ? "Soft Studio Charcoal" : "Warm Paper Light"}
+                  <p className="text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                    {theme === "dark" ? t(language, "settings.themeDark") : t(language, "settings.themeLight")}
                   </p>
                 </div>
 
@@ -744,12 +753,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 </div>
               </div>
 
-              {/* အသံဖမ်း ကြည်လင်မှု (Studio Raw / Light Filter) */}
+              {/* Mic Clarity (Studio Raw / Light Filter) */}
               <div className="pt-3 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2.5">
                 <div className="flex items-center gap-2">
                   <Mic className="h-4 w-4 text-[#57534E] dark:text-[#A1A1AA]" />
                   <p className="text-sm font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
-                    အသံဖမ်း ကြည်လင်မှု
+                    {t(language, "settings.micClarity")}
                   </p>
                 </div>
 
@@ -758,13 +767,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     [
                       {
                         id: "raw",
-                        title: "Studio Raw",
-                        sub: "ကြည်လင်ပြတ်သား",
+                        title: t(language, "booth.micRaw"),
+                        sub: t(language, "booth.micRawSub"),
                       },
                       {
                         id: "light",
-                        title: "Light Filter",
-                        sub: "ဆူညံသံအနည်းငယ်လျှော့",
+                        title: t(language, "booth.micLight"),
+                        sub: t(language, "booth.micLightSub"),
                       },
                     ] as const
                   ).map((opt) => {
@@ -796,12 +805,73 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 </div>
               </div>
 
+              {/* Live Mode Toggle & Quick Studio Launchers */}
+              <div className="pt-3 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2.5">
+                <label className="flex cursor-pointer items-center justify-between gap-3">
+                  <div className="flex items-start gap-2 min-w-0">
+                    <Radio className="h-4 w-4 text-[#E11D48] shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                        {t(language, "settings.liveModeLabel")}
+                      </p>
+                      <p className="text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                        {t(language, "settings.liveModeDesc")}
+                      </p>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={liveModeInput}
+                    onChange={(e) => {
+                      triggerHaptic(6)
+                      const next = e.target.checked
+                      setLiveModeInput(next)
+                      setLiveModeEnabled(next)
+                    }}
+                    className="h-4 w-4 shrink-0 accent-[#1C1917] dark:accent-[#F5F5F4]"
+                  />
+                </label>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      triggerHaptic(8)
+                      setLiveModeInput(true)
+                      setLiveModeEnabled(true)
+                      setActivePageKey("voiceover")
+                      onOpenChange(false)
+                    }}
+                    className="h-8 rounded-xl text-xs font-medium gap-1.5 bg-[#FAF8F5] dark:bg-[#18181B] border-[#E7E5E4] dark:border-[#3F3F46] font-myanmar"
+                  >
+                    <Radio className="h-3.5 w-3.5 text-[#E11D48]" />
+                    <span className="truncate">{t(language, "settings.openLiveBooth")}</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      triggerHaptic(8)
+                      setActivePageKey("studio")
+                      onOpenChange(false)
+                    }}
+                    className="h-8 rounded-xl text-xs font-medium gap-1.5 bg-[#FAF8F5] dark:bg-[#18181B] border-[#E7E5E4] dark:border-[#3F3F46] font-myanmar"
+                  >
+                    <Camera className="h-3.5 w-3.5" />
+                    <span className="truncate">{t(language, "settings.openPhotoStudio")}</span>
+                  </Button>
+                </div>
+              </div>
+
               {/* Language Row */}
               <div className="flex items-center justify-between gap-3 pt-3 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80">
                 <div className="flex items-center gap-2">
                   <Globe className="h-4 w-4 text-[#57534E] dark:text-[#A1A1AA]" />
                   <span className="text-sm font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
-                    ဘာသာစကား (Language)
+                    {t(language, "settings.languageLabel")}
                   </span>
                 </div>
                 <Button
@@ -820,10 +890,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </div>
           </section>
 
-          {/* 3. ကိုယ်ပိုင် အချက်အလက် (Brand & Voice DNA) */}
+          {/* 3. Brand & Voice DNA */}
           <section className="space-y-4">
             <h3 className="px-1 text-xs font-semibold tracking-wide text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
-              ကိုယ်ပိုင် အချက်အလက် (Brand & Voice DNA)
+              {t(language, "settings.groupBrand")}
             </h3>
 
             <div className="rounded-[20px] border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-4 space-y-4">
@@ -831,10 +901,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
-                    Personal Voice DNA (ကိုယ်ပိုင် အရေးအသား)
+                    {t(language, "settings.dnaTitle")}
                   </p>
                   <span className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
-                    နမူနာ ၁–၃ ခု
+                    {t(language, "settings.dnaCount")}
                   </span>
                 </div>
 
@@ -847,14 +917,16 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                           value={val}
                           onChange={(e) => handleDnaSampleChange(idx, e.target.value)}
                           rows={2}
-                          placeholder={`နမူနာပို့စ် ${idx + 1} (သင်အရင်က ရေးဖူးတဲ့ စာသားပုံစံ...)`}
+                          placeholder={t(language, "settings.dnaSamplePlaceholder", {
+                            num: String(idx + 1),
+                          })}
                           className="min-h-[68px] resize-y rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] border-[#E7E5E4] dark:border-[#3F3F46] pr-9 text-xs leading-relaxed font-myanmar"
                           disabled={loading}
                         />
                         {val.trim().length > 0 && (
                           <button
                             type="button"
-                            aria-label="နမူနာ ဖျက်မည်"
+                            aria-label="Clear sample"
                             onClick={() => handleDnaSampleChange(idx, "")}
                             className="absolute right-2.5 top-2 rounded-md p-1 text-[#57534E] hover:text-[#1C1917] dark:text-[#A1A1AA] dark:hover:text-[#F5F5F4] cursor-pointer"
                           >
@@ -876,7 +948,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                       className="inline-flex items-center gap-1 text-xs font-medium text-[#57534E] hover:text-[#1C1917] dark:text-[#A1A1AA] dark:hover:text-[#F5F5F4] cursor-pointer font-myanmar"
                     >
                       <Plus className="h-3.5 w-3.5" />
-                      <span>နမူနာ ထပ်ထည့်မည်</span>
+                      <span>{t(language, "settings.dnaAddSample")}</span>
                     </button>
                   )}
                 </div>
@@ -885,7 +957,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               {/* Shop / Page Contact Footer */}
               <div className="space-y-2.5 pt-3 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80">
                 <p className="text-sm font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
-                  ဆိုင် / Page ဆက်သွယ်ရန် (Contact Footer)
+                  {t(language, "settings.shopFooterTitle")}
                 </p>
 
                 <div className="space-y-2">
@@ -894,7 +966,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     onChange={(e) =>
                       setShopProfileInput((prev) => ({ ...prev, name: e.target.value }))
                     }
-                    placeholder="ဆိုင် / Page အမည်"
+                    placeholder={t(language, "settings.shopNamePlaceholder")}
                     className="h-9 rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] border-[#E7E5E4] dark:border-[#3F3F46] text-xs sm:text-sm font-myanmar"
                     disabled={loading}
                   />
@@ -903,7 +975,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     onChange={(e) =>
                       setShopProfileInput((prev) => ({ ...prev, phone: e.target.value }))
                     }
-                    placeholder="ဖုန်းနံပါတ် (ဥပမာ - 09-7xx-xxx-xxx)"
+                    placeholder={t(language, "settings.shopPhonePlaceholder")}
                     className="h-9 rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] border-[#E7E5E4] dark:border-[#3F3F46] text-xs sm:text-sm"
                     disabled={loading}
                   />
@@ -916,7 +988,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                       }))
                     }
                     rows={2}
-                    placeholder="လိပ်စာ / မှာယူရန် အချက်အလက်"
+                    placeholder={t(language, "settings.shopAddressPlaceholder")}
                     className="min-h-[60px] rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] border-[#E7E5E4] dark:border-[#3F3F46] text-xs sm:text-sm font-myanmar"
                     disabled={loading}
                   />
@@ -924,7 +996,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
                 <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] px-3 py-2.5">
                   <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
-                    ပို့စ်အောက်ခြေတွင် အလိုအလျောက် ထည့်မည်
+                    {t(language, "settings.autoAppendFooter")}
                   </span>
                   <input
                     type="checkbox"
@@ -952,7 +1024,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#F5F5F4] cursor-pointer font-myanmar"
               >
                 <Download className="h-3.5 w-3.5" />
-                <span>Backup</span>
+                <span>{t(language, "settings.backupBtn")}</span>
               </button>
               <button
                 type="button"
@@ -961,7 +1033,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#F5F5F4] cursor-pointer font-myanmar"
               >
                 <Upload className="h-3.5 w-3.5" />
-                <span>Restore</span>
+                <span>{t(language, "settings.restoreBtn")}</span>
               </button>
               <input
                 ref={fileInputRef}
@@ -978,7 +1050,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#F5F5F4] cursor-pointer font-myanmar"
               >
                 <RefreshCw className={cn("h-3.5 w-3.5", checkingUpdate && "animate-spin")} />
-                <span>{checkingUpdate ? "Updating..." : "Update"}</span>
+                <span>{checkingUpdate ? t(language, "settings.updatingBtn") : t(language, "settings.updateBtn")}</span>
               </button>
             </div>
 

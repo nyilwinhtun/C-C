@@ -34,6 +34,7 @@ import {
 } from "@/lib/iosAudio"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
+import { t } from "@/locales/translations"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -50,30 +51,30 @@ import { cn } from "@/lib/utils"
 
 const FORMAT_CHIPS: Array<{
   id: EditorialFormatOption
-  label: string
+  labelKey: string
 }> = [
-  { id: "fb_sales", label: "Facebook အရောင်းပို့စ်" },
-  { id: "tiktok_script", label: "TikTok ဗီဒီယိုစာသား" },
-  { id: "product_review", label: "Product Review" },
-  { id: "personal_story", label: "ကိုယ်တွေ့မျှဝေပို့စ်" },
+  { id: "fb_sales", labelKey: "postWriter.formatFbSales" },
+  { id: "tiktok_script", labelKey: "postWriter.formatTiktokScript" },
+  { id: "product_review", labelKey: "postWriter.formatProductReview" },
+  { id: "personal_story", labelKey: "postWriter.formatPersonalStory" },
 ]
 
 const TONE_OPTIONS: Array<{
   id: EditorialToneOption
-  label: string
+  labelKey: string
 }> = [
-  { id: "warm_friend", label: "မိတ်ဆွေလို နွေးထွေးစွာ" },
-  { id: "calm_clear", label: "ရိုးရှင်းတည်ငြိမ်စွာ" },
-  { id: "light_humorous", label: "ပေါ့ပေါ့ပါးပါး ဟာသနှော၍" },
+  { id: "warm_friend", labelKey: "postWriter.toneWarm" },
+  { id: "calm_clear", labelKey: "postWriter.toneCalm" },
+  { id: "light_humorous", labelKey: "postWriter.toneHumorous" },
 ]
 
 const LENGTH_OPTIONS: Array<{
   id: EditorialLengthOption
-  label: string
+  labelKey: string
 }> = [
-  { id: "short", label: "တိုတိုကျစ်ကျစ်" },
-  { id: "medium", label: "အနေတော်" },
-  { id: "detailed", label: "အသေးစိတ်" },
+  { id: "short", labelKey: "postWriter.lengthShort" },
+  { id: "medium", labelKey: "postWriter.lengthMedium" },
+  { id: "detailed", labelKey: "postWriter.lengthDetailed" },
 ]
 
 function formatTimer(totalSeconds: number): string {
@@ -97,7 +98,12 @@ function replaceOpeningLine(text: string, newHook: string): string {
 }
 
 export function GeneratorPage() {
-  const setActivePageKey = useUIStore((state) => state.setActivePageKey)
+  const { language, setActivePageKey } = useUIStore(
+    useShallow((state) => ({
+      language: state.language,
+      setActivePageKey: state.setActivePageKey,
+    }))
+  )
 
   const {
     draftInput,
@@ -480,7 +486,7 @@ export function GeneratorPage() {
                   : "border-border/80 bg-card text-muted-foreground hover:border-foreground/25 hover:text-foreground"
               )}
             >
-              {chip.label}
+              {t(language, chip.labelKey)}
             </button>
           )
         })}
@@ -492,17 +498,17 @@ export function GeneratorPage() {
           <button
             type="button"
             onClick={handleClearCanvas}
-            aria-label="စာရှင်းမည်"
+            aria-label={t(language, "postWriter.clearBtn")}
             className="absolute right-2.5 top-2.5 z-10 inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/85 px-2.5 py-1 text-xs font-medium text-muted-foreground backdrop-blur-xs transition-colors hover:bg-muted hover:text-foreground active:scale-95"
           >
             <X className="h-3.5 w-3.5" />
-            <span>စာရှင်းမည်</span>
+            <span>{t(language, "postWriter.clearBtn")}</span>
           </button>
         )}
         <Textarea
           value={rawNotes}
           onChange={(e) => handleNotesChange(e.target.value)}
-          placeholder="စိတ်ထဲရှိတဲ့ အကြောင်းအရာ ဒါမှမဟုတ် ကုန်ပစ္စည်းအကြောင်း အကြမ်းဖျင်း ချရေးပါ..."
+          placeholder={t(language, "postWriter.canvasPlaceholder")}
           rows={7}
           className={cn(
             "min-h-[190px] w-full resize-y border-0 bg-transparent px-4 pt-4 pb-2 text-[15px] leading-[1.75] text-foreground placeholder:text-muted-foreground/65 focus-visible:ring-0 focus-visible:ring-offset-0 sm:min-h-[210px] sm:px-5 sm:pt-5",
@@ -516,18 +522,18 @@ export function GeneratorPage() {
             {isRecording ? (
               <span className="inline-flex items-center gap-1.5 font-medium text-red-600 dark:text-red-400">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
-                အသံဖမ်းနေသည် {formatTimer(recordingSeconds)}
+                {t(language, "postWriter.recordingHint")} {formatTimer(recordingSeconds)}
               </span>
             ) : isTranscribing ? (
               <span className="inline-flex items-center gap-1.5 text-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                စာသားပြောင်းနေသည်...
+                {t(language, "postWriter.transcribing")}
               </span>
             ) : (
               <span>
                 {rawNotes.trim().length > 0
-                  ? `${rawNotes.trim().length} စာလုံး`
-                  : "အသံဖြင့်လည်း ပြော၍ ထည့်နိုင်ပါသည်"}
+                  ? `${rawNotes.trim().length} ${t(language, "generator.characters")}`
+                  : t(language, "postWriter.micStart")}
               </span>
             )}
           </div>
@@ -536,7 +542,7 @@ export function GeneratorPage() {
             type="button"
             disabled={isTranscribing}
             onClick={isRecording ? handleStopRecording : handleStartRecording}
-            aria-label={isRecording ? "အသံဖမ်းမှု ရပ်မည်" : "အသံဖြင့် မှတ်စုသွင်းမည်"}
+            aria-label={isRecording ? t(language, "postWriter.micStop") : t(language, "postWriter.micStart")}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all active:scale-95 disabled:opacity-50",
               isRecording
@@ -547,12 +553,12 @@ export function GeneratorPage() {
             {isRecording ? (
               <>
                 <Square className="h-3.5 w-3.5 fill-current" />
-                <span>ရပ်မည်</span>
+                <span>{t(language, "postWriter.micStop")}</span>
               </>
             ) : (
               <>
                 <Mic className="h-3.5 w-3.5" />
-                <span>အသံသွင်းမည်</span>
+                <span>{t(language, "postWriter.micStart")}</span>
               </>
             )}
           </button>
@@ -570,10 +576,10 @@ export function GeneratorPage() {
           {isGenerating ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              စာသား ချောမွေ့အောင် ရေးနေသည်...
+              {t(language, "postWriter.writing")}
             </>
           ) : (
-            "စာသား ပြန်ချောရန်"
+            t(language, "postWriter.writeBtn")
           )}
         </Button>
 
@@ -583,7 +589,7 @@ export function GeneratorPage() {
           onClick={() => setSettingsOpen(true)}
           className="h-11 shrink-0 rounded-xl border-border/80 bg-card px-3.5 text-[14px] font-medium text-foreground shadow-xs hover:bg-muted/70"
         >
-          <span>⚙️ ညှိရန်</span>
+          <span>{t(language, "postWriter.settingsBtn")}</span>
         </Button>
       </div>
 
@@ -607,7 +613,7 @@ export function GeneratorPage() {
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                Option A · ရိုးရှင်းတိုက်ရိုက်ဟန်
+                {t(language, "postWriter.optionA")}
               </button>
               <button
                 type="button"
@@ -619,7 +625,7 @@ export function GeneratorPage() {
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                Option B · ဇာတ်ကြောင်းပြောဟန်
+                {t(language, "postWriter.optionB")}
               </button>
             </div>
           </div>
@@ -689,12 +695,12 @@ export function GeneratorPage() {
                 {copied ? (
                   <>
                     <Check className="mr-2 h-4 w-4" />
-                    ကူးယူပြီးပါပြီ
+                    {t(language, "generator.copySuccess")}
                   </>
                 ) : (
                   <>
                     <Copy className="mr-2 h-4 w-4" />
-                    Copy စာသားကူးရန်
+                    {t(language, "generator.copy")}
                   </>
                 )}
               </Button>
@@ -714,7 +720,7 @@ export function GeneratorPage() {
               ) : (
                 <span>🪝</span>
               )}
-              <span>အဖွင့်စာကြောင်း အသစ် ၃ မျိုး</span>
+              <span>{t(language, "postWriter.polishHooks")}</span>
             </button>
 
             <button
@@ -728,7 +734,7 @@ export function GeneratorPage() {
               ) : (
                 <span>✂️</span>
               )}
-              <span>ပိုတိုအောင် ချုံ့မယ်</span>
+              <span>{t(language, "postWriter.polishShorten")}</span>
             </button>
 
             <button
@@ -742,7 +748,7 @@ export function GeneratorPage() {
               ) : (
                 <span>🌿</span>
               )}
-              <span>ပိုလူသားဆန်အောင် ပြင်မယ်</span>
+              <span>{t(language, "postWriter.polishHumanize")}</span>
             </button>
 
             <button
@@ -752,7 +758,7 @@ export function GeneratorPage() {
               className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
             >
               <span>🎙️</span>
-              <span>အသံစတူဒီယိုသို့ ပို့မည်</span>
+              <span>{t(language, "postWriter.sendToBooth")}</span>
             </button>
           </div>
         </div>
@@ -765,10 +771,10 @@ export function GeneratorPage() {
           <div>
             <SheetTitle className="flex items-center gap-2 text-base font-semibold">
               <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-              <span>စာရေးဟန် ညှိရန်</span>
+              <span>{t(language, "postWriter.sheetTitle")}</span>
             </SheetTitle>
             <SheetDescription className="text-xs">
-              သင့်ကိုယ်ပိုင် အရေးအသားဟန်နှင့် ဆိုင်အချက်အလက်များကို သိမ်းဆည်းထားပါမည်။
+              {t(language, "postWriter.sheetDesc")}
             </SheetDescription>
           </div>
           <SheetClose onClick={() => setSettingsOpen(false)} />
@@ -779,7 +785,7 @@ export function GeneratorPage() {
           <section className="space-y-4">
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                စာသားလေသံ
+                {t(language, "postWriter.toneLabel")}
               </Label>
               <div className="flex flex-wrap gap-2">
                 {TONE_OPTIONS.map((tone) => (
@@ -794,7 +800,7 @@ export function GeneratorPage() {
                         : "border-border bg-background text-muted-foreground hover:text-foreground"
                     )}
                   >
-                    {tone.label}
+                    {t(language, tone.labelKey)}
                   </button>
                 ))}
               </div>
@@ -802,7 +808,7 @@ export function GeneratorPage() {
 
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                စာသားအရှည်
+                {t(language, "postWriter.lengthLabel")}
               </Label>
               <div className="grid grid-cols-3 gap-2">
                 {LENGTH_OPTIONS.map((len) => (
@@ -817,7 +823,7 @@ export function GeneratorPage() {
                         : "border-border bg-background text-muted-foreground hover:text-foreground"
                     )}
                   >
-                    {len.label}
+                    {t(language, len.labelKey)}
                   </button>
                 ))}
               </div>
@@ -828,13 +834,10 @@ export function GeneratorPage() {
           <section className="space-y-2.5 border-t border-border/50 pt-5">
             <div className="flex items-center justify-between">
               <Label className="text-sm font-semibold text-foreground">
-                ကိုယ်ပိုင် အရေးအသားဟန် (Personal Voice DNA)
+                {t(language, "postWriter.voiceDnaLabel")}
               </Label>
-              <span className="text-[11px] text-muted-foreground">နမူနာ ၁–၃ ခု</span>
+              <span className="text-[11px] text-muted-foreground">{t(language, "settings.dnaCount")}</span>
             </div>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              သင်ကိုယ်တိုင် ရေးထားတဲ့ ပို့စ် ၁ ခုမှ ၃ ခုအထိ ထည့်ထားပါ။ သင့်စကားလုံးသုံးနှုန်းပုံနဲ့ စာကြောင်းအသွားအလာအတိုင်း အတိအကျ လိုက်ရေးပေးပါမယ်။
-            </p>
 
             <div className="space-y-2.5">
               {Array.from({ length: visibleSampleCount }).map((_, idx) => {
@@ -845,13 +848,13 @@ export function GeneratorPage() {
                       value={val}
                       onChange={(e) => handleVoiceSampleChange(idx, e.target.value)}
                       rows={3}
-                      placeholder={`နမူနာပို့စ် ${idx + 1} (ဥပမာ - သင်အရင်က ရေးဖူးတဲ့ Facebook post တစ်ခု...)`}
+                      placeholder={t(language, "postWriter.voiceDnaPlaceholder", { num: String(idx + 1) })}
                       className="min-h-[82px] resize-y rounded-xl bg-background pr-9 text-xs leading-relaxed"
                     />
                     {val.trim().length > 0 && (
                       <button
                         type="button"
-                        aria-label="နမူနာ ဖျက်မည်"
+                        aria-label="Clear sample"
                         onClick={() => handleVoiceSampleChange(idx, "")}
                         className="absolute right-2.5 top-2.5 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                       >
@@ -873,7 +876,7 @@ export function GeneratorPage() {
                   className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  <span>နမူနာ ထပ်ထည့်မည်</span>
+                  <span>{t(language, "postWriter.addSample")}</span>
                 </button>
               )}
             </div>
@@ -882,34 +885,34 @@ export function GeneratorPage() {
           {/* 3. Saved Brand / Shop Profile */}
           <section className="space-y-3 border-t border-border/50 pt-5">
             <Label className="text-sm font-semibold text-foreground">
-              ဆိုင်/Page အချက်အလက် (Saved Brand / Shop Profile)
+              {t(language, "postWriter.shopLabel")}
             </Label>
 
             <div className="space-y-2.5">
               <Input
                 value={shopProfile.name}
                 onChange={(e) => setShopProfile({ name: e.target.value })}
-                placeholder="ဆိုင် / Page အမည်"
+                placeholder={t(language, "postWriter.shopName")}
                 className="h-10 rounded-xl bg-background text-sm"
               />
               <Input
                 value={shopProfile.phone}
                 onChange={(e) => setShopProfile({ phone: e.target.value })}
-                placeholder="ဖုန်းနံပါတ် (ဥပမာ - 09-7xx-xxx-xxx)"
+                placeholder={t(language, "postWriter.shopPhone")}
                 className="h-10 rounded-xl bg-background text-sm"
               />
               <Textarea
                 value={shopProfile.address}
                 onChange={(e) => setShopProfile({ address: e.target.value })}
                 rows={2}
-                placeholder="လိပ်စာ / မှာယူရန် အချက်အလက်"
+                placeholder={t(language, "postWriter.shopAddress")}
                 className="min-h-[64px] rounded-xl bg-background text-sm"
               />
             </div>
 
             <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-border/70 bg-background px-3.5 py-3">
               <span className="text-xs font-medium text-foreground sm:text-sm">
-                ပို့စ်အောက်ခြေတွင် အလိုအလျောက် ထည့်မည်
+                {t(language, "postWriter.autoAppend")}
               </span>
               <input
                 type="checkbox"
@@ -925,7 +928,7 @@ export function GeneratorPage() {
             onClick={() => setSettingsOpen(false)}
             className="h-10 w-full rounded-xl bg-neutral-900 text-sm font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
           >
-            သိမ်းဆည်းပြီး ပိတ်မည်
+            {t(language, "postWriter.doneBtn")}
           </Button>
         </SheetContent>
       </Sheet>

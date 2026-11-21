@@ -14,7 +14,7 @@ import { Sidebar } from "@/components/shared/sidebar"
 import { SettingsDialog } from "@/components/shared/settings-dialog"
 import { PWAInstallBanner } from "@/components/shared/pwa-install-banner"
 import { IosSegmentedControl } from "@/components/shared/ios-segmented-control"
-import { WORKSPACE_ROOMS, getRoomForPageKey, getRoomTitle } from "@/components/shared/rooms"
+import { WORKSPACE_ROOMS, getRoomForPageKey, getRoomShort, getRoomTitle, getTabLabel } from "@/components/shared/rooms"
 import { useUIStore } from "@/store/useUIStore"
 import { useContentStore } from "@/store/useContentStore"
 import { useShallow } from "zustand/react/shallow"
@@ -113,7 +113,7 @@ export function Layout() {
                 onChange={setActivePageKey}
                 options={activeRoom.tabs.map((tab) => ({
                   value: tab.key,
-                  label: language === "my" ? tab.labelMy : tab.labelEn,
+                  label: getTabLabel(tab, language),
                   icon: tab.icon,
                   badge:
                     tab.key === "voiceover" && isBgTtsActive ? (
@@ -195,7 +195,7 @@ export function Layout() {
                     isActive ? "font-bold" : "font-medium"
                   )}
                 >
-                  {language === "my" ? room.shortMy : room.shortEn}
+                  {getRoomShort(room, language)}
                 </span>
               </button>
             )

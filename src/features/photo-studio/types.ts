@@ -18,6 +18,7 @@ export type PosterFontStyle = "modern_clean" | "bold_promo"
 
 export type ControlTabId =
   | "template"
+  | "scene_bg"
   | "text_price"
   | "theme_color"
   | "shop_footer"
