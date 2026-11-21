@@ -1,3 +1,5 @@
+import { decodeAudioBlob } from "@/lib/iosAudio"
+
 export interface ProcessedAudioResult {
   isSilent: boolean
   rms: number
@@ -60,25 +62,10 @@ function encodeMonoWav16Bit(samples: Float32Array, sampleRate: number): Blob {
  * quiet microphone gain, and encode as a clean 16kHz mono 16-bit WAV.
  */
 export async function prepareAudioForGemini(blob: Blob): Promise<ProcessedAudioResult> {
-  const AudioCtx =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-
-  if (!AudioCtx) {
-    throw new Error("Web Audio API is not supported in this browser.")
-  }
-
-  const decodeCtx = new AudioCtx()
-  let decoded: AudioBuffer
-  try {
-    const arrayBuffer = await blob.arrayBuffer()
-    decoded = await decodeCtx.decodeAudioData(arrayBuffer.slice(0))
-  } finally {
-    await decodeCtx.close().catch(() => {})
-  }
+  const decoded = await decodeAudioBlob(blob)
 
   const durationSeconds = decoded.duration
-  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || decoded.length === 0) {
     return {
       isSilent: true,
       rms: 0,
@@ -89,22 +76,33 @@ export async function prepareAudioForGemini(blob: Blob): Promise<ProcessedAudioR
     }
   }
 
-  // Mix down to mono and resample to 16kHz
-  const OfflineCtx =
-    window.OfflineAudioContext ||
-    (window as unknown as { webkitOfflineAudioContext?: typeof OfflineAudioContext })
-      .webkitOfflineAudioContext
-  if (!OfflineCtx) {
-    throw new Error("OfflineAudioContext is not supported in this browser.")
+  // Mix down to mono and resample to 16kHz in JS so iOS WebKit OfflineAudioContext
+  // sample-rate restrictions (>= 44100 Hz) never throw NotSupportedError.
+  const srcLength = decoded.length
+  const srcChannels = Math.max(1, decoded.numberOfChannels)
+  const mono = new Float32Array(srcLength)
+  for (let ch = 0; ch < srcChannels; ch += 1) {
+    const channelData = decoded.getChannelData(ch)
+    for (let i = 0; i < srcLength; i += 1) {
+      mono[i] += channelData[i] / srcChannels
+    }
   }
-  const targetLength = Math.max(1, Math.ceil(durationSeconds * TARGET_SAMPLE_RATE))
-  const offlineCtx = new OfflineCtx(1, targetLength, TARGET_SAMPLE_RATE)
-  const source = offlineCtx.createBufferSource()
-  source.buffer = decoded
-  source.connect(offlineCtx.destination)
-  source.start(0)
-  const rendered = await offlineCtx.startRendering()
-  const samples = rendered.getChannelData(0)
+
+  let samples: Float32Array
+  if (decoded.sampleRate === TARGET_SAMPLE_RATE) {
+    samples = mono
+  } else {
+    const targetLength = Math.max(1, Math.round((srcLength * TARGET_SAMPLE_RATE) / decoded.sampleRate))
+    samples = new Float32Array(targetLength)
+    const ratio = decoded.sampleRate / TARGET_SAMPLE_RATE
+    for (let i = 0; i < targetLength; i += 1) {
+      const srcPos = i * ratio
+      const idx0 = Math.min(srcLength - 1, Math.floor(srcPos))
+      const idx1 = Math.min(srcLength - 1, idx0 + 1)
+      const frac = srcPos - idx0
+      samples[i] = mono[idx0] * (1 - frac) + mono[idx1] * frac
+    }
+  }
 
   let sumSq = 0
   let peak = 0

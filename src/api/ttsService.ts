@@ -1,4 +1,5 @@
 import { sanitizeSpeechText } from "@/components/shared/read-aloud-button"
+import { decodeAudioBlob, getAudioContextConstructor, unlockIosAudio } from "@/lib/iosAudio"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
 
@@ -686,19 +687,13 @@ function concatenatePcmBuffersToWav(pcmChunks: Uint8Array[], gapMs = 120): Blob 
 }
 
 async function decodeBlobToAudioBuffer(blob: Blob): Promise<AudioBuffer> {
-  const AudioCtx =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-  if (!AudioCtx) {
-    throw new TtsError("Web Audio API is not supported in this browser.")
-  }
-
-  const ctx = new AudioCtx()
   try {
-    const arrayBuffer = await blob.arrayBuffer()
-    return await ctx.decodeAudioData(arrayBuffer)
-  } finally {
-    await ctx.close().catch(() => {})
+    return await decodeAudioBlob(blob)
+  } catch (err) {
+    if (err instanceof TtsError) throw err
+    throw new TtsError(
+      err instanceof Error ? err.message : "Could not decode synthesized audio."
+    )
   }
 }
 
@@ -1426,12 +1421,12 @@ export function synthesizeSfxSamples(sfx: SoundEffectType, sampleRate: number): 
 
 export async function playSoundEffectPreview(sfx: SoundEffectType): Promise<void> {
   if (sfx === "none" || typeof window === "undefined") return
-  const AudioCtx =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-  if (!AudioCtx) return
+  const unlocked = unlockIosAudio()
+  const AudioCtx = getAudioContextConstructor()
+  if (!AudioCtx && !unlocked) return
 
-  const ctx = new AudioCtx()
+  const ctx = unlocked && unlocked.state !== "closed" ? unlocked : new AudioCtx!()
+  const shouldClose = ctx !== unlocked
   try {
     if (ctx.state === "suspended") {
       await ctx.resume()
@@ -1449,7 +1444,9 @@ export async function playSoundEffectPreview(sfx: SoundEffectType): Promise<void
       window.setTimeout(resolve, Math.ceil((samples.length / ctx.sampleRate) * 1000) + 80)
     })
   } finally {
-    await ctx.close().catch(() => {})
+    if (shouldClose) {
+      await ctx.close().catch(() => {})
+    }
   }
 }
 

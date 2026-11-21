@@ -180,7 +180,7 @@ export function IosAudioPlayer({
         className
       )}
     >
-      <audio ref={audioRef} src={src} playsInline preload="auto" className="hidden" />
+      <audio ref={audioRef} src={src} playsInline preload="auto" className="sr-only" />
 
       {/* Top Metadata Row */}
       {(title || subtitle) && (

@@ -34,6 +34,7 @@ import { prepareAudioForGemini } from "@/lib/audioProcessor"
 import {
   MIN_VALID_RECORDING_BYTES,
   createSafeAudioMediaRecorder,
+  getRecorderTimesliceMs,
   resolveRecordedAudioMime,
   unlockIosAudio,
 } from "@/lib/iosAudio"
@@ -467,7 +468,12 @@ export function VoiceoverPage() {
       recordingSecondsRef.current = 0
       setRecordingSeconds(0)
       setIsRecordingVoice(true)
-      recorder.start(250)
+      const timesliceMs = getRecorderTimesliceMs(mimeType)
+      if (timesliceMs !== undefined) {
+        recorder.start(timesliceMs)
+      } else {
+        recorder.start()
+      }
       recordTimerRef.current = window.setInterval(() => {
         recordingSecondsRef.current += 1
         setRecordingSeconds(recordingSecondsRef.current)
@@ -986,6 +992,7 @@ export function VoiceoverPage() {
                     type="button"
                     size="sm"
                     variant="default"
+                    onTouchStart={() => unlockIosAudio()}
                     onClick={startVoiceRecording}
                     disabled={isTranscribingVoice || isGeneratingVoice || isMergingVideo}
                     className="h-8 px-3 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white border-0 font-myanmar"
@@ -2040,6 +2047,7 @@ export function VoiceoverPage() {
             <div className="flex flex-col sm:flex-row gap-2">
               <Button
                 type="button"
+                onTouchStart={() => unlockIosAudio()}
                 onClick={handleMergeVideo}
                 disabled={!activeVoiceoverAudio || !hasReadyMedia || isMergingVideo || isGeneratingVoice || isRecordingVoice}
                 className="flex-1 h-10 text-xs sm:text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white border-0 disabled:opacity-50"

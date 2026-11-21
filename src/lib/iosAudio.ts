@@ -19,6 +19,14 @@ const SILENT_WAV_DATA_URI =
 let sharedUnlockCtx: AudioContext | null = null
 let sharedPrimerAudio: HTMLAudioElement | null = null
 
+export function isAppleTouchDevice(): boolean {
+  if (typeof navigator === "undefined") return false
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  )
+}
+
 export function getAudioContextConstructor(): typeof AudioContext | null {
   if (typeof window === "undefined") return null
   return (
@@ -41,6 +49,7 @@ export function unlockIosAudio(): AudioContext | null {
     if (!sharedPrimerAudio) {
       const el = document.createElement("audio")
       el.setAttribute("playsinline", "")
+      el.setAttribute("webkit-playsinline", "")
       el.preload = "auto"
       el.src = SILENT_WAV_DATA_URI
       el.volume = 0.01
@@ -75,6 +84,47 @@ export function unlockIosAudio(): AudioContext | null {
   } catch {
     return null
   }
+}
+
+/**
+ * Decode an audio Blob using the shared unlocked AudioContext when available
+ * (avoiding WebKit's concurrent AudioContext limit), falling back to a temporary
+ * AudioContext if needed.
+ */
+export async function decodeAudioBlob(blob: Blob): Promise<AudioBuffer> {
+  const arrayBuffer = await blob.arrayBuffer()
+  if (sharedUnlockCtx && sharedUnlockCtx.state !== "closed") {
+    try {
+      return await sharedUnlockCtx.decodeAudioData(arrayBuffer.slice(0))
+    } catch {
+      // Fall through to fresh AudioContext if shared context fails
+    }
+  }
+
+  const AudioCtx = getAudioContextConstructor()
+  if (!AudioCtx) {
+    throw new Error("Web Audio API is not supported in this browser.")
+  }
+
+  const ctx = new AudioCtx()
+  try {
+    return await ctx.decodeAudioData(arrayBuffer.slice(0))
+  } finally {
+    await ctx.close().catch(() => {})
+  }
+}
+
+/**
+ * On iOS Safari / MP4 MediaRecorder, calling start(timeslice) produces fragmented
+ * MP4 chunks that can fail decoding or lose headers. Returning undefined lets
+ * iOS emit a single complete MP4/AAC blob on stop(), while Android/Desktop WebM
+ * continues streaming 250ms chunks.
+ */
+export function getRecorderTimesliceMs(mimeType: string): number | undefined {
+  if (isAppleTouchDevice() || mimeType.toLowerCase().includes("mp4")) {
+    return undefined
+  }
+  return 250
 }
 
 /**
@@ -144,9 +194,5 @@ export function resolveRecordedAudioMime(
   const resolved = recorderMimeType || firstChunkMime || requestedMime
   if (resolved) return resolved
 
-  const isAppleTouch =
-    typeof navigator !== "undefined" &&
-    (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1))
-  return isAppleTouch ? "audio/mp4" : "audio/webm"
+  return isAppleTouchDevice() ? "audio/mp4" : "audio/webm"
 }

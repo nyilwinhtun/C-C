@@ -24,6 +24,7 @@ import {
   MIN_VALID_RECORDING_BYTES,
   createSafeAudioMediaRecorder,
   getAudioContextConstructor,
+  getRecorderTimesliceMs,
   resolveRecordedAudioMime,
   unlockIosAudio,
 } from "@/lib/iosAudio"
@@ -94,6 +95,7 @@ export function TranscriberPage() {
   const rafRef = useRef<number>(0)
   const chunksRef = useRef<BlobPart[]>([])
   const previewUrlRef = useRef<string | null>(null)
+  const recordingSecondsRef = useRef(0)
 
   const stopMediaResources = () => {
     if (timerRef.current !== null) {
@@ -192,6 +194,21 @@ export function TranscriberPage() {
       return
     }
 
+    // Create & resume analyser AudioContext synchronously inside user gesture before await getUserMedia
+    let analyserCtx: AudioContext | null = null
+    const AudioCtx = getAudioContextConstructor()
+    if (AudioCtx) {
+      try {
+        analyserCtx = new AudioCtx()
+        audioCtxRef.current = analyserCtx
+        if (analyserCtx.state === "suspended") {
+          analyserCtx.resume().catch(() => {})
+        }
+      } catch {
+        analyserCtx = null
+      }
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
@@ -213,6 +230,7 @@ export function TranscriberPage() {
           mimeType
         )
         const blob = new Blob(chunksRef.current, { type: finalMime })
+        const elapsed = recordingSecondsRef.current
         stopMediaResources()
         setIsRecording(false)
         if (blob.size <= MIN_VALID_RECORDING_BYTES) {
@@ -225,21 +243,18 @@ export function TranscriberPage() {
         }
         setPreviewFromBlob(
           blob,
-          isMy ? `အသံသွင်းချက် (${formatTimer(recordingSeconds)})` : "Voice Recording"
+          isMy ? `အသံသွင်းချက် (${formatTimer(elapsed)})` : "Voice Recording"
         )
         void runTranscription(blob, finalMime)
       }
 
       // Live waveform analyser
-      const AudioCtx = getAudioContextConstructor()
-      if (AudioCtx) {
-        const ctx = new AudioCtx()
-        audioCtxRef.current = ctx
-        if (ctx.state === "suspended") {
-          ctx.resume().catch(() => {})
+      if (analyserCtx) {
+        if (analyserCtx.state === "suspended") {
+          analyserCtx.resume().catch(() => {})
         }
-        const source = ctx.createMediaStreamSource(stream)
-        const analyser = ctx.createAnalyser()
+        const source = analyserCtx.createMediaStreamSource(stream)
+        const analyser = analyserCtx.createAnalyser()
         analyser.fftSize = 64
         source.connect(analyser)
         const data = new Uint8Array(analyser.frequencyBinCount)
@@ -257,11 +272,18 @@ export function TranscriberPage() {
         rafRef.current = requestAnimationFrame(updateBars)
       }
 
+      recordingSecondsRef.current = 0
       setRecordingSeconds(0)
       setIsRecording(true)
-      recorder.start(250)
+      const timesliceMs = getRecorderTimesliceMs(mimeType)
+      if (timesliceMs !== undefined) {
+        recorder.start(timesliceMs)
+      } else {
+        recorder.start()
+      }
       timerRef.current = window.setInterval(() => {
-        setRecordingSeconds((prev) => prev + 1)
+        recordingSecondsRef.current += 1
+        setRecordingSeconds(recordingSecondsRef.current)
       }, 1000)
     } catch (err) {
       stopMediaResources()
@@ -406,6 +428,7 @@ export function TranscriberPage() {
               {!isRecording ? (
                 <Button
                   type="button"
+                  onTouchStart={() => unlockIosAudio()}
                   onClick={startRecording}
                   disabled={isTranscribing}
                   className="gap-2 rounded-full px-5 bg-gradient-to-r from-rose-500 to-red-600 text-white hover:from-rose-600 hover:to-red-700"

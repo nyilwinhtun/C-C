@@ -1,3 +1,9 @@
+import {
+  decodeAudioBlob,
+  getRecorderTimesliceMs,
+  isAppleTouchDevice,
+} from "@/lib/iosAudio"
+
 export type OriginalAudioVolume = 0 | 0.15 | 0.5
 export type VideoDurationSyncMode = "loop_video" | "fit_video"
 export type VideoAspectRatio = "original" | "9:16" | "1:1" | "16:9"
@@ -94,11 +100,7 @@ function resolveRecordedVideoMime(
   const resolved = recorderMimeType || firstChunkMime || requestedMime
   if (resolved) return resolved
 
-  const isAppleTouch =
-    typeof navigator !== "undefined" &&
-    (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1))
-  return isAppleTouch ? "video/mp4" : "video/webm"
+  return isAppleTouchDevice() ? "video/mp4" : "video/webm"
 }
 
 function getEvenDimension(value: number): number {
@@ -784,6 +786,7 @@ export async function mergeVideoWithVoiceover({
   let rafId = 0
   let combinedStream: MediaStream | null = null
   let recorder: MediaRecorder | null = null
+  let originalAudioSource: AudioBufferSourceNode | null = null
   let voiceoverSource: AudioBufferSourceNode | null = null
   let musicSource: AudioBufferSourceNode | null = null
   let videoObjectUrl: string | null = null
@@ -794,6 +797,11 @@ export async function mergeVideoWithVoiceover({
     if (rafId) {
       cancelAnimationFrame(rafId)
       rafId = 0
+    }
+    try {
+      originalAudioSource?.stop()
+    } catch {
+      // Ignore
     }
     try {
       voiceoverSource?.stop()
@@ -863,6 +871,7 @@ export async function mergeVideoWithVoiceover({
       videoObjectUrl = URL.createObjectURL(videoFile)
       video = document.createElement("video")
       video.src = videoObjectUrl
+      video.muted = true
       video.playsInline = true
       video.preload = "auto"
       video.crossOrigin = "anonymous"
@@ -936,13 +945,32 @@ export async function mergeVideoWithVoiceover({
 
     const streamDestination = audioCtx.createMediaStreamDestination()
 
-    // Route original video audio (do not mute video element)
-    if (video) {
-      const videoAudioSource = audioCtx.createMediaElementSource(video)
-      const originalGain = audioCtx.createGain()
-      originalGain.gain.value = originalVolume
-      videoAudioSource.connect(originalGain)
-      originalGain.connect(streamDestination)
+    // Route original video audio: prefer decoding via Web Audio so video.muted=true
+    // stays intact (iOS Safari blocks unmuted video.play() after async awaits).
+    if (video && videoFile && originalVolume > 0) {
+      let decodedOriginal: AudioBuffer | null = null
+      try {
+        decodedOriginal = await decodeAudioBlob(videoFile)
+      } catch {
+        decodedOriginal = null
+      }
+
+      if (decodedOriginal) {
+        originalAudioSource = audioCtx.createBufferSource()
+        originalAudioSource.buffer = decodedOriginal
+        originalAudioSource.loop = video.loop
+        const originalGain = audioCtx.createGain()
+        originalGain.gain.value = originalVolume
+        originalAudioSource.connect(originalGain)
+        originalGain.connect(streamDestination)
+      } else {
+        video.muted = false
+        const videoAudioSource = audioCtx.createMediaElementSource(video)
+        const originalGain = audioCtx.createGain()
+        originalGain.gain.value = originalVolume
+        videoAudioSource.connect(originalGain)
+        originalGain.connect(streamDestination)
+      }
     }
 
     // Route AI voiceover audio
@@ -1072,6 +1100,11 @@ export async function mergeVideoWithVoiceover({
           rafId = 0
         }
         try {
+          originalAudioSource?.stop()
+        } catch {
+          // Ignore
+        }
+        try {
           voiceoverSource?.stop()
         } catch {
           // Ignore
@@ -1175,9 +1208,15 @@ export async function mergeVideoWithVoiceover({
         rafId = requestAnimationFrame(renderFrame)
       }
 
-      recorder.start(250)
+      const timesliceMs = getRecorderTimesliceMs(mimeType)
+      if (timesliceMs !== undefined) {
+        recorder.start(timesliceMs)
+      } else {
+        recorder.start()
+      }
       startPerfMs = performance.now()
       const audioStartTime = audioCtx.currentTime
+      originalAudioSource?.start(audioStartTime)
       voiceoverSource?.start(audioStartTime)
       if (musicSource && musicGain) {
         if (enableAutoDucking) {
@@ -1601,7 +1640,12 @@ export async function exportMultiClipAutoCutVideo(
     )
     let completedKept = 0
 
-    recorder.start(250)
+    const timesliceMs = getRecorderTimesliceMs(mimeType)
+    if (timesliceMs !== undefined) {
+      recorder.start(timesliceMs)
+    } else {
+      recorder.start()
+    }
 
     for (let clipIdx = 0; clipIdx < activeClips.length; clipIdx += 1) {
       const clip = activeClips[clipIdx]
