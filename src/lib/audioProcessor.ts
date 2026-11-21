@@ -57,15 +57,16 @@ export function encodeMonoWav16Bit(samples: Float32Array, sampleRate: number): B
 }
 
 /**
- * Decode any browser-recorded or uploaded audio Blob via AudioContext,
- * resample to 16kHz mono, check RMS energy for silence, normalize/boost
- * quiet microphone gain, and encode as a clean 16kHz mono 16-bit WAV.
+ * Resample mono Float32 PCM samples to 16kHz, check RMS/peak energy for silence,
+ * normalize quiet microphone gain, and encode as a compact 16kHz mono 16-bit WAV.
  */
-export async function prepareAudioForGemini(blob: Blob): Promise<ProcessedAudioResult> {
-  const decoded = await decodeAudioBlob(blob)
-
-  const durationSeconds = decoded.duration
-  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || decoded.length === 0) {
+export function processMonoSamplesForGemini(
+  mono: Float32Array,
+  sourceSampleRate: number
+): ProcessedAudioResult {
+  const srcLength = mono.length
+  const durationSeconds = sourceSampleRate > 0 ? srcLength / sourceSampleRate : 0
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || srcLength === 0) {
     return {
       isSilent: true,
       rms: 0,
@@ -76,25 +77,13 @@ export async function prepareAudioForGemini(blob: Blob): Promise<ProcessedAudioR
     }
   }
 
-  // Mix down to mono and resample to 16kHz in JS so iOS WebKit OfflineAudioContext
-  // sample-rate restrictions (>= 44100 Hz) never throw NotSupportedError.
-  const srcLength = decoded.length
-  const srcChannels = Math.max(1, decoded.numberOfChannels)
-  const mono = new Float32Array(srcLength)
-  for (let ch = 0; ch < srcChannels; ch += 1) {
-    const channelData = decoded.getChannelData(ch)
-    for (let i = 0; i < srcLength; i += 1) {
-      mono[i] += channelData[i] / srcChannels
-    }
-  }
-
   let samples: Float32Array
-  if (decoded.sampleRate === TARGET_SAMPLE_RATE) {
+  if (sourceSampleRate === TARGET_SAMPLE_RATE) {
     samples = mono
   } else {
-    const targetLength = Math.max(1, Math.round((srcLength * TARGET_SAMPLE_RATE) / decoded.sampleRate))
+    const targetLength = Math.max(1, Math.round((srcLength * TARGET_SAMPLE_RATE) / sourceSampleRate))
     samples = new Float32Array(targetLength)
-    const ratio = decoded.sampleRate / TARGET_SAMPLE_RATE
+    const ratio = sourceSampleRate / TARGET_SAMPLE_RATE
     for (let i = 0; i < targetLength; i += 1) {
       const srcPos = i * ratio
       const idx0 = Math.min(srcLength - 1, Math.floor(srcPos))
@@ -142,5 +131,57 @@ export async function prepareAudioForGemini(blob: Blob): Promise<ProcessedAudioR
     wavBlob,
     mimeType: "audio/wav",
   }
+}
+
+/**
+ * Merge live-captured mono PCM chunks and prepare a compact 16kHz WAV if non-silent.
+ */
+export function preparePcmSegmentForGemini(
+  chunks: Float32Array[],
+  totalSamples: number,
+  sourceSampleRate: number
+): ProcessedAudioResult {
+  const merged = new Float32Array(totalSamples)
+  let offset = 0
+  for (const chunk of chunks) {
+    merged.set(chunk, offset)
+    offset += chunk.length
+  }
+  return processMonoSamplesForGemini(merged, sourceSampleRate)
+}
+
+/**
+ * Decode any browser-recorded or uploaded audio Blob via AudioContext,
+ * resample to 16kHz mono, check RMS energy for silence, normalize/boost
+ * quiet microphone gain, and encode as a clean 16kHz mono 16-bit WAV.
+ */
+export async function prepareAudioForGemini(blob: Blob): Promise<ProcessedAudioResult> {
+  const decoded = await decodeAudioBlob(blob)
+
+  const durationSeconds = decoded.duration
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || decoded.length === 0) {
+    return {
+      isSilent: true,
+      rms: 0,
+      peak: 0,
+      durationSeconds: 0,
+      wavBlob: null,
+      mimeType: "audio/wav",
+    }
+  }
+
+  // Mix down to mono and resample to 16kHz in JS so iOS WebKit OfflineAudioContext
+  // sample-rate restrictions (>= 44100 Hz) never throw NotSupportedError.
+  const srcLength = decoded.length
+  const srcChannels = Math.max(1, decoded.numberOfChannels)
+  const mono = new Float32Array(srcLength)
+  for (let ch = 0; ch < srcChannels; ch += 1) {
+    const channelData = decoded.getChannelData(ch)
+    for (let i = 0; i < srcLength; i += 1) {
+      mono[i] += channelData[i] / srcChannels
+    }
+  }
+
+  return processMonoSamplesForGemini(mono, decoded.sampleRate)
 }
 

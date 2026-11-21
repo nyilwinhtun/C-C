@@ -126,7 +126,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     language,
     setLanguage,
     theme,
-    toggleTheme,
+    setTheme,
     user,
     signOut,
     aiProvider,
@@ -141,7 +141,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       language: state.language,
       setLanguage: state.setLanguage,
       theme: state.theme,
-      toggleTheme: state.toggleTheme,
+      setTheme: state.setTheme,
       user: state.user,
       signOut: state.signOut,
       aiProvider: state.aiProvider,
@@ -719,7 +719,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     onClick={() => {
                       if (theme !== "light") {
                         triggerHaptic(8)
-                        toggleTheme()
+                        setTheme("light")
                       }
                     }}
                     className={cn(
@@ -737,7 +737,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     onClick={() => {
                       if (theme !== "dark") {
                         triggerHaptic(8)
-                        toggleTheme()
+                        setTheme("dark")
                       }
                     }}
                     className={cn(

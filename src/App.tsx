@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Toaster } from "@/components/ui/sonner"
 import { Layout } from "@/components/shared/layout"
 import { LoginPage } from "@/components/shared/login-page"
-import { useUIStore } from "@/store/useUIStore"
+import { applyThemeToDocument, useUIStore } from "@/store/useUIStore"
 import { useContentStore } from "@/store/useContentStore"
 import { isSupabaseConfigured, supabase } from "@/lib/supabase"
 import { setIosAudioSessionPlayback } from "@/lib/iosAudio"
@@ -55,13 +55,18 @@ const queryClient = new QueryClient({
 })
 
 function AppContent() {
-  const { user, setAuth } = useUIStore(
+  const { user, setAuth, theme } = useUIStore(
     useShallow((state) => ({
       user: state.user,
       setAuth: state.setAuth,
+      theme: state.theme,
     }))
   )
   const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    applyThemeToDocument(theme)
+  }, [theme])
 
   useEffect(() => {
     setIosAudioSessionPlayback()

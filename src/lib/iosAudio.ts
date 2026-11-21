@@ -4,7 +4,7 @@
  * while preventing silent/empty recordings and blocked playback on iOS Safari.
  */
 
-import { encodeMonoWav16Bit } from "@/lib/audioProcessor"
+import { encodeMonoWav16Bit, preparePcmSegmentForGemini } from "@/lib/audioProcessor"
 
 export const MIN_VALID_RECORDING_BYTES = 1000
 
@@ -267,6 +267,13 @@ export interface WavAudioRecorderHandle {
  * Works identically on iPhone (Safari + Home Screen PWA), Android, and Desktop
  * without MediaRecorder MIME/empty-blob issues.
  */
+export interface LiveWavChunk {
+  blob: Blob
+  mimeType: "audio/wav"
+  durationSeconds: number
+  rms: number
+}
+
 export function createWavAudioRecorder(
   stream: MediaStream,
   options?: {
@@ -274,6 +281,8 @@ export function createWavAudioRecorder(
     micFilterMode?: "raw" | "light"
     onBars?: (bars: number[]) => void
     barCount?: number
+    onChunk?: (chunk: LiveWavChunk) => void
+    chunkIntervalMs?: number
   }
 ): WavAudioRecorderHandle {
   const AudioCtx = getAudioContextConstructor()
@@ -309,7 +318,34 @@ export function createWavAudioRecorder(
 
   const pcmChunks: Float32Array[] = []
   let totalSamples = 0
+  const segmentChunks: Float32Array[] = []
+  let segmentSamples = 0
+  const chunkIntervalSamples = Math.round(
+    (ctx.sampleRate || 44100) * ((options?.chunkIntervalMs ?? 3500) / 1000)
+  )
   let stopped = false
+
+  const flushSegment = (minDurationSeconds: number) => {
+    if (!options?.onChunk || segmentSamples === 0) return
+    const sampleRate = ctx.sampleRate || 44100
+    if (segmentSamples < sampleRate * minDurationSeconds) {
+      segmentChunks.length = 0
+      segmentSamples = 0
+      return
+    }
+    const chunksToFlush = segmentChunks.splice(0)
+    const samplesToFlush = segmentSamples
+    segmentSamples = 0
+    const processed = preparePcmSegmentForGemini(chunksToFlush, samplesToFlush, sampleRate)
+    if (!processed.isSilent && processed.wavBlob) {
+      options.onChunk({
+        blob: processed.wavBlob,
+        mimeType: "audio/wav",
+        durationSeconds: samplesToFlush / sampleRate,
+        rms: processed.rms,
+      })
+    }
+  }
 
   processor.onaudioprocess = (event) => {
     if (stopped) return
@@ -319,6 +355,14 @@ export function createWavAudioRecorder(
     copy.set(input)
     pcmChunks.push(copy)
     totalSamples += copy.length
+
+    if (options?.onChunk) {
+      segmentChunks.push(copy)
+      segmentSamples += copy.length
+      if (segmentSamples >= chunkIntervalSamples) {
+        flushSegment(0.25)
+      }
+    }
   }
 
   captureNode.connect(processor)
@@ -379,6 +423,7 @@ export function createWavAudioRecorder(
     stop: async () => {
       const sampleRate = ctx.sampleRate || 44100
       await cleanup()
+      flushSegment(0.35)
 
       const merged = new Float32Array(totalSamples)
       let offset = 0

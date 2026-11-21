@@ -6,6 +6,15 @@ export type Language = "en" | "my"
 export type AIProvider = "gemini" | "groq" | "openrouter"
 export type ProviderMap = Record<AIProvider, string>
 
+export function applyThemeToDocument(theme: Theme): void {
+  if (typeof document === "undefined") return
+  document.documentElement.classList.toggle("dark", theme === "dark")
+  const themeColor = theme === "dark" ? "#121214" : "#FAF8F5"
+  document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => {
+    meta.setAttribute("content", themeColor)
+  })
+}
+
 export interface UIState {
   theme: Theme
   setTheme: (theme: Theme) => void
@@ -171,9 +180,16 @@ export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
       theme: "dark",
-      setTheme: (theme) => set({ theme }),
+      setTheme: (theme) => {
+        applyThemeToDocument(theme)
+        set({ theme })
+      },
       toggleTheme: () =>
-        set((state) => ({ theme: state.theme === "light" ? "dark" : "light" })),
+        set((state) => {
+          const nextTheme: Theme = state.theme === "light" ? "dark" : "light"
+          applyThemeToDocument(nextTheme)
+          return { theme: nextTheme }
+        }),
       sidebarCollapsed: false,
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
       activePageKey: "text",
@@ -327,6 +343,7 @@ export const useUIStore = create<UIState>()(
         }
       },
       onRehydrateStorage: () => (state) => {
+        applyThemeToDocument(state?.theme ?? "dark")
         if (state && DEPRECATED_GEMINI_MODELS.has(state.models?.gemini ?? "")) {
           state.setProviderModel("gemini", DEFAULT_MODELS.gemini)
         }

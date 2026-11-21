@@ -32,43 +32,8 @@ import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
 import { StudioSettingsSheet } from "./StudioSettingsSheet"
 
-interface LiveSpeechRecognitionAlternative {
-  transcript: string
-}
-
-interface LiveSpeechRecognitionResult {
-  isFinal: boolean
-  0: LiveSpeechRecognitionAlternative
-}
-
-interface LiveSpeechRecognitionEvent {
-  resultIndex: number
-  results: ArrayLike<LiveSpeechRecognitionResult>
-}
-
-interface LiveSpeechRecognitionLike {
-  continuous: boolean
-  interimResults: boolean
-  lang: string
-  onresult: ((event: LiveSpeechRecognitionEvent) => void) | null
-  onerror: ((event: { error?: string }) => void) | null
-  onend: (() => void) | null
-  start: () => void
-  stop: () => void
-}
-
-type LiveSpeechRecognitionCtor = new () => LiveSpeechRecognitionLike
-
-function getLiveSpeechRecognitionCtor(): LiveSpeechRecognitionCtor | null {
-  if (typeof window === "undefined") return null
-  const win = window as Window & {
-    SpeechRecognition?: LiveSpeechRecognitionCtor
-    webkitSpeechRecognition?: LiveSpeechRecognitionCtor
-  }
-  return win.SpeechRecognition ?? win.webkitSpeechRecognition ?? null
-}
-
 const WAVEFORM_BAR_COUNT = 28
+const LIVE_WAVEFORM_BAR_COUNT = 20
 
 function formatRecordTimer(seconds: number): string {
   const mins = Math.floor(seconds / 60)
@@ -170,102 +135,188 @@ export function VoiceoverPage() {
     }))
   )
 
-  // Live Mode Speech-to-Text state
-  const liveSpeechSupported = Boolean(getLiveSpeechRecognitionCtor())
+  // Live Mode Chunked Gemini Speech-to-Text state (iOS PWA compatible)
+  const liveSpeechSupported = Boolean(
+    typeof navigator !== "undefined" &&
+      typeof navigator.mediaDevices?.getUserMedia === "function" &&
+      getAudioContextConstructor()
+  )
   const [isLiveListening, setIsLiveListening] = useState(false)
-  const [liveInterimText, setLiveInterimText] = useState("")
+  const [livePendingChunks, setLivePendingChunks] = useState(0)
+  const [liveWaveformBars, setLiveWaveformBars] = useState<number[]>(() =>
+    Array(LIVE_WAVEFORM_BAR_COUNT).fill(14)
+  )
   const [liveSpeechLang, setLiveSpeechLang] = useState<"my-MM" | "en-US">(
     language === "my" ? "my-MM" : "en-US"
   )
-  const liveRecognitionRef = useRef<LiveSpeechRecognitionLike | null>(null)
+  const liveRecorderRef = useRef<WavAudioRecorderHandle | null>(null)
+  const liveStreamRef = useRef<MediaStream | null>(null)
+  const liveTranscribeQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const liveSessionIdRef = useRef(0)
+  const liveErrorShownRef = useRef(false)
   const voiceScriptRef = useRef(voiceScriptText)
   useEffect(() => {
     voiceScriptRef.current = voiceScriptText
   }, [voiceScriptText])
 
-  const stopLiveSpeech = useCallback(() => {
-    try {
-      liveRecognitionRef.current?.stop()
-    } catch {
-      // Ignore stop errors
+  const cleanupLiveMedia = useCallback(() => {
+    if (liveStreamRef.current) {
+      liveStreamRef.current.getTracks().forEach((track) => track.stop())
+      liveStreamRef.current = null
     }
-    liveRecognitionRef.current = null
-    setIsLiveListening(false)
-    setLiveInterimText("")
+    setLiveWaveformBars(Array(LIVE_WAVEFORM_BAR_COUNT).fill(14))
   }, [])
+
+  const stopLiveSpeech = useCallback(async () => {
+    const recorder = liveRecorderRef.current
+    liveRecorderRef.current = null
+    setIsLiveListening(false)
+    cleanupLiveMedia()
+
+    if (recorder) {
+      try {
+        await recorder.stop()
+      } catch {
+        // Ignore stop errors
+      }
+    }
+    await liveTranscribeQueueRef.current.catch(() => {})
+  }, [cleanupLiveMedia])
 
   useEffect(() => {
     if (!liveModeEnabled && isLiveListening) {
-      stopLiveSpeech()
+      void stopLiveSpeech()
     }
   }, [liveModeEnabled, isLiveListening, stopLiveSpeech])
 
   useEffect(() => {
     return () => {
-      try {
-        liveRecognitionRef.current?.stop()
-      } catch {
-        // Ignore cleanup errors
-      }
+      liveSessionIdRef.current += 1
+      liveRecorderRef.current?.cancel()
+      liveRecorderRef.current = null
+      cleanupLiveMedia()
     }
-  }, [])
+  }, [cleanupLiveMedia])
 
-  const toggleLiveSpeech = useCallback(() => {
+  const toggleLiveSpeech = useCallback(async () => {
     if (isLiveListening) {
-      stopLiveSpeech()
+      triggerHaptic(8)
+      await stopLiveSpeech()
       return
     }
-    const Ctor = getLiveSpeechRecognitionCtor()
-    if (!Ctor) {
+
+    if (!liveSpeechSupported) {
       toast.error(t(language, "booth.liveUnsupported"))
       return
     }
+
+    const geminiKey = useUIStore.getState().apiKeys.gemini?.trim()
+    if (!geminiKey) {
+      toast.error(
+        language === "my"
+          ? "Live စာသားပြောင်းရန် Settings ထဲတွင် Gemini API Key ထည့်သွင်းပေးပါ။"
+          : "Please add your Gemini API key in Settings to use Live Transcription."
+      )
+      return
+    }
+
     triggerHaptic(8)
-    const recognition = new Ctor()
-    recognition.continuous = true
-    recognition.interimResults = true
-    recognition.lang = liveSpeechLang
+    unlockIosAudio()
 
-    recognition.onresult = (event) => {
-      let finalChunk = ""
-      let interimChunk = ""
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const res = event.results[i]
-        const transcript = res?.[0]?.transcript ?? ""
-        if (res.isFinal) {
-          finalChunk += transcript
-        } else {
-          interimChunk += transcript
+    let liveCtx: AudioContext | null = null
+    const AudioCtx = getAudioContextConstructor()
+    if (AudioCtx) {
+      try {
+        liveCtx = new AudioCtx()
+        if (liveCtx.state === "suspended") {
+          liveCtx.resume().catch(() => {})
         }
+      } catch {
+        liveCtx = null
       }
-      setLiveInterimText(interimChunk.trim())
-      if (finalChunk.trim()) {
-        const current = voiceScriptRef.current.trim()
-        const next = current ? `${current} ${finalChunk.trim()}` : finalChunk.trim()
-        setVoiceScriptText(next)
-      }
-    }
-
-    recognition.onerror = () => {
-      setIsLiveListening(false)
-      setLiveInterimText("")
-    }
-
-    recognition.onend = () => {
-      setIsLiveListening(false)
-      setLiveInterimText("")
-      liveRecognitionRef.current = null
     }
 
     try {
-      recognition.start()
-      liveRecognitionRef.current = recognition
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          noiseSuppression: false,
+          autoGainControl: false,
+          echoCancellation: true,
+        },
+      })
+
+      liveStreamRef.current = stream
+      liveSessionIdRef.current += 1
+      const sessionId = liveSessionIdRef.current
+      liveErrorShownRef.current = false
+      liveTranscribeQueueRef.current = Promise.resolve()
+
+      const langHint = liveSpeechLang === "my-MM" ? "my" : "auto"
+
+      liveRecorderRef.current = createWavAudioRecorder(stream, {
+        audioContext: liveCtx,
+        micFilterMode,
+        barCount: LIVE_WAVEFORM_BAR_COUNT,
+        onBars: setLiveWaveformBars,
+        chunkIntervalMs: 3500,
+        onChunk: (chunk) => {
+          setLivePendingChunks((c) => c + 1)
+          liveTranscribeQueueRef.current = liveTranscribeQueueRef.current
+            .then(async () => {
+              if (liveSessionIdRef.current !== sessionId) return
+              const transcript = await transcribeAudioWithGemini(
+                chunk.blob,
+                chunk.mimeType,
+                langHint,
+                "live-chunk.wav",
+                false
+              )
+              if (liveSessionIdRef.current !== sessionId) return
+              const clean = transcript.trim()
+              if (clean) {
+                const current = voiceScriptRef.current.trim()
+                const next = current ? `${current} ${clean}` : clean
+                voiceScriptRef.current = next
+                setVoiceScriptText(next)
+              }
+            })
+            .catch((err) => {
+              if (!liveErrorShownRef.current) {
+                liveErrorShownRef.current = true
+                const msg =
+                  err instanceof Error ? err.message : t(language, "booth.transcribeError")
+                toast.error(msg)
+              }
+            })
+            .finally(() => {
+              setLivePendingChunks((c) => Math.max(0, c - 1))
+            })
+        },
+      })
+
       setIsLiveListening(true)
-    } catch {
+    } catch (err) {
+      liveCtx?.close().catch(() => {})
+      cleanupLiveMedia()
       setIsLiveListening(false)
-      toast.error(t(language, "booth.liveUnsupported"))
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : language === "my"
+            ? "မိုက်ခရိုဖုန်း ခွင့်ပြုချက် မရရှိပါ။"
+            : "Microphone permission was denied."
+      toast.error(msg)
     }
-  }, [isLiveListening, liveSpeechLang, language, setVoiceScriptText, stopLiveSpeech])
+  }, [
+    cleanupLiveMedia,
+    isLiveListening,
+    language,
+    liveSpeechLang,
+    liveSpeechSupported,
+    micFilterMode,
+    setVoiceScriptText,
+    stopLiveSpeech,
+  ])
 
   // Studio settings sheet visibility
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -708,35 +759,59 @@ export function VoiceoverPage() {
           </p>
 
           {liveSpeechSupported && (
-            <div className="flex flex-wrap items-center gap-2.5">
-              <Button
-                type="button"
-                size="sm"
-                onClick={toggleLiveSpeech}
-                className={cn(
-                  "h-9 rounded-xl gap-1.5 text-xs font-semibold font-myanmar",
-                  isLiveListening
-                    ? "bg-[#E11D48] hover:bg-[#BE123C] text-white"
-                    : "bg-[#1C1917] hover:bg-[#292524] dark:bg-[#F5F5F4] dark:hover:bg-[#E7E5E4] text-white dark:text-[#18181B]"
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void toggleLiveSpeech()}
+                  className={cn(
+                    "h-9 rounded-xl gap-1.5 text-xs font-semibold font-myanmar",
+                    isLiveListening
+                      ? "bg-[#E11D48] hover:bg-[#BE123C] text-white"
+                      : "bg-[#1C1917] hover:bg-[#292524] dark:bg-[#F5F5F4] dark:hover:bg-[#E7E5E4] text-white dark:text-[#18181B]"
+                  )}
+                >
+                  {isLiveListening ? (
+                    <>
+                      <Square className="h-3.5 w-3.5 fill-current" />
+                      <span>{t(language, "booth.liveStop")}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="h-3.5 w-3.5" />
+                      <span>{t(language, "booth.liveStart")}</span>
+                    </>
+                  )}
+                </Button>
+
+                {(isLiveListening || livePendingChunks > 0) && (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#E11D48] font-myanmar">
+                    {livePendingChunks > 0 && (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                    )}
+                    <span>
+                      {livePendingChunks > 0
+                        ? t(language, "booth.liveTranscribing")
+                        : t(language, "booth.liveListening")}
+                    </span>
+                  </span>
                 )}
-              >
-                {isLiveListening ? (
-                  <>
-                    <Square className="h-3.5 w-3.5 fill-current" />
-                    <span>{t(language, "booth.liveStop")}</span>
-                  </>
-                ) : (
-                  <>
-                    <Mic className="h-3.5 w-3.5" />
-                    <span>{t(language, "booth.liveStart")}</span>
-                  </>
-                )}
-              </Button>
+              </div>
 
               {isLiveListening && (
-                <span className="text-xs font-medium text-[#E11D48] font-myanmar animate-pulse">
-                  {liveInterimText || t(language, "booth.liveListening")}
-                </span>
+                <div
+                  className="flex h-7 items-center gap-1 rounded-xl bg-white/70 dark:bg-[#18181B]/70 px-3"
+                  aria-hidden="true"
+                >
+                  {liveWaveformBars.map((height, idx) => (
+                    <span
+                      key={idx}
+                      className="flex-1 rounded-full bg-[#E11D48]/80 transition-all duration-75"
+                      style={{ height: `${Math.max(14, height)}%` }}
+                    />
+                  ))}
+                </div>
               )}
             </div>
           )}

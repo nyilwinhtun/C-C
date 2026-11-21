@@ -125,6 +125,7 @@ export function GeneratorPage() {
     setVoiceoverDraftScript,
     saveToVault,
     addGeneratedItem,
+    liveModeEnabled,
   } = useContentStore(
     useShallow((state) => ({
       draftInput: state.draftInput,
@@ -146,10 +147,13 @@ export function GeneratorPage() {
       setVoiceoverDraftScript: state.setVoiceoverDraftScript,
       saveToVault: state.saveToVault,
       addGeneratedItem: state.addGeneratedItem,
+      liveModeEnabled: state.liveModeEnabled,
     }))
   )
 
   const [rawNotes, setRawNotes] = useState<string>(() => draftInput.topic ?? "")
+  const rawNotesRef = useRef(rawNotes)
+  rawNotesRef.current = rawNotes
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [polishingAction, setPolishingAction] = useState<
@@ -157,14 +161,20 @@ export function GeneratorPage() {
   >(null)
   const [copied, setCopied] = useState(false)
 
-  // Voice Idea Capture (WAV mic recorder)
+  // Voice Idea Capture (WAV mic recorder + Live chunked transcription)
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
+  const [livePendingChunks, setLivePendingChunks] = useState(0)
+  const [waveformBars, setWaveformBars] = useState<number[]>(() => Array(16).fill(14))
   const [recordingSeconds, setRecordingSeconds] = useState(0)
 
   const streamRef = useRef<MediaStream | null>(null)
   const timerRef = useRef<number | null>(null)
   const wavRecorderRef = useRef<WavAudioRecorderHandle | null>(null)
+  const liveTranscribeQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const liveSessionIdRef = useRef(0)
+  const liveErrorShownRef = useRef(false)
+  const recordingWasLiveRef = useRef(false)
   const touchStartXRef = useRef<number | null>(null)
 
   // Sync external updates to draftInput.topic (e.g., from Transcriber or Vault)
@@ -185,10 +195,12 @@ export function GeneratorPage() {
       streamRef.current.getTracks().forEach((track) => track.stop())
       streamRef.current = null
     }
+    setWaveformBars(Array(16).fill(14))
   }, [])
 
   useEffect(() => {
     return () => {
+      liveSessionIdRef.current += 1
       stopMediaResources()
       wavRecorderRef.current?.cancel()
       wavRecorderRef.current = null
@@ -202,6 +214,7 @@ export function GeneratorPage() {
   }
 
   const handleNotesChange = (value: string) => {
+    rawNotesRef.current = value
     setRawNotes(value)
     setDraftInput({ topic: value })
   }
@@ -211,6 +224,15 @@ export function GeneratorPage() {
 
     if (!navigator.mediaDevices?.getUserMedia || !getAudioContextConstructor()) {
       toast.error("ဤ Browser တွင် အသံဖမ်းစနစ်ကို မပံ့ပိုးပါ")
+      return
+    }
+
+    if (liveModeEnabled && !useUIStore.getState().apiKeys.gemini?.trim()) {
+      toast.error(
+        language === "my"
+          ? "Live စာသားပြောင်းရန် Settings ထဲတွင် Gemini API Key ထည့်သွင်းပေးပါ။"
+          : "Please add your Gemini API key in Settings to use Live Transcription."
+      )
       return
     }
 
@@ -236,9 +258,56 @@ export function GeneratorPage() {
         },
       })
       streamRef.current = stream
+      recordingWasLiveRef.current = liveModeEnabled
+      liveSessionIdRef.current += 1
+      const sessionId = liveSessionIdRef.current
+      liveErrorShownRef.current = false
+      liveTranscribeQueueRef.current = Promise.resolve()
+
       wavRecorderRef.current = createWavAudioRecorder(stream, {
         audioContext: recorderCtx,
         micFilterMode: useContentStore.getState().micFilterMode,
+        barCount: 16,
+        onBars: setWaveformBars,
+        ...(liveModeEnabled
+          ? {
+              chunkIntervalMs: 3500,
+              onChunk: (chunk) => {
+                setLivePendingChunks((c) => c + 1)
+                liveTranscribeQueueRef.current = liveTranscribeQueueRef.current
+                  .then(async () => {
+                    if (liveSessionIdRef.current !== sessionId) return
+                    const transcript = await transcribeAudioWithGemini(
+                      chunk.blob,
+                      chunk.mimeType,
+                      "auto",
+                      "live-chunk.wav",
+                      false
+                    )
+                    if (liveSessionIdRef.current !== sessionId) return
+                    const clean = transcript.trim()
+                    if (clean) {
+                      const current = rawNotesRef.current.trim()
+                      const next = current ? `${current} ${clean}` : clean
+                      handleNotesChange(next)
+                    }
+                  })
+                  .catch((err) => {
+                    if (!liveErrorShownRef.current) {
+                      liveErrorShownRef.current = true
+                      const msg =
+                        err instanceof Error
+                          ? err.message
+                          : "အသံမှ စာသားပြောင်းရာတွင် အမှားရှိနေပါသည်"
+                      toast.error(msg)
+                    }
+                  })
+                  .finally(() => {
+                    setLivePendingChunks((c) => Math.max(0, c - 1))
+                  })
+              },
+            }
+          : {}),
       })
 
       setRecordingSeconds(0)
@@ -258,6 +327,7 @@ export function GeneratorPage() {
 
   const handleStopRecording = async () => {
     const handle = wavRecorderRef.current
+    const wasLive = recordingWasLiveRef.current
     wavRecorderRef.current = null
     stopMediaResources()
     setIsRecording(false)
@@ -265,6 +335,13 @@ export function GeneratorPage() {
     if (!handle) return
     try {
       const { blob, mimeType } = await handle.stop()
+
+      if (wasLive) {
+        setIsTranscribing(true)
+        await liveTranscribeQueueRef.current.catch(() => {})
+        return
+      }
+
       if (blob.size <= MIN_VALID_RECORDING_BYTES) {
         toast.error("အသံတိုလွန်းပါသည် — ထပ်မံပြောကြည့်ပါနော်")
         return
@@ -287,8 +364,8 @@ export function GeneratorPage() {
         return
       }
 
-      const nextNotes = rawNotes.trim()
-        ? `${rawNotes.trim()}\n\n${cleanTranscript}`
+      const nextNotes = rawNotesRef.current.trim()
+        ? `${rawNotesRef.current.trim()}\n\n${cleanTranscript}`
         : cleanTranscript
       handleNotesChange(nextNotes)
       toast.success("အသံမှ စာသားသို့ ထည့်သွင်းပြီးပါပြီ")
@@ -550,12 +627,37 @@ export function GeneratorPage() {
 
         {/* Integrated Input Footer Bar with Mic Button */}
         <div className="flex items-center justify-between gap-2 border-t border-border/50 px-3.5 py-2.5 sm:px-4">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
             {isRecording ? (
-              <span className="inline-flex items-center gap-1.5 font-medium text-red-600 dark:text-red-400">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
-                {t(language, "postWriter.recordingHint")} {formatTimer(recordingSeconds)}
-              </span>
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="flex h-4 w-16 shrink-0 items-center gap-0.5" aria-hidden="true">
+                  {waveformBars.map((height, idx) => (
+                    <span
+                      key={idx}
+                      className="flex-1 rounded-full bg-red-500/80 transition-all duration-75"
+                      style={{ height: `${Math.max(18, height)}%` }}
+                    />
+                  ))}
+                </div>
+                <span className="inline-flex items-center gap-1.5 font-medium text-red-600 dark:text-red-400 truncate">
+                  {liveModeEnabled ? (
+                    <>
+                      {livePendingChunks > 0 && (
+                        <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                      )}
+                      <span className="truncate">
+                        {livePendingChunks > 0
+                          ? t(language, "booth.liveTranscribing")
+                          : t(language, "booth.liveListening")}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      {t(language, "postWriter.recordingHint")} {formatTimer(recordingSeconds)}
+                    </>
+                  )}
+                </span>
+              </div>
             ) : isTranscribing ? (
               <span className="inline-flex items-center gap-1.5 text-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
