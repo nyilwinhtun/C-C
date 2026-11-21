@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 interface SheetProps extends React.HTMLAttributes<HTMLDivElement> {
   open: boolean
   onOpenChange: (open: boolean) => void
-  side?: "left" | "right"
+  side?: "left" | "right" | "bottom"
 }
 
 const Sheet = React.forwardRef<HTMLDivElement, SheetProps>(
@@ -25,14 +25,19 @@ const Sheet = React.forwardRef<HTMLDivElement, SheetProps>(
         <div
           ref={ref}
           className={cn(
-            "fixed inset-y-0 z-50 h-full w-full max-w-[82vw] flex flex-col bg-white/85 dark:bg-[#1C1C1E]/90 ios-glass text-foreground shadow-2xl transform transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
-            side === "left"
+            "fixed z-50 flex flex-col bg-white/92 dark:bg-[#1C1C1E]/95 ios-glass text-foreground shadow-2xl transform transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+            side === "bottom"
               ? cn(
-                  "left-0 border-r-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)]",
+                  "inset-x-0 bottom-0 max-h-[88vh] w-full rounded-t-3xl border-t-[0.5px] border-[rgba(60,60,67,0.14)] dark:border-[rgba(84,84,88,0.42)]",
+                  open ? "translate-y-0" : "translate-y-full pointer-events-none"
+                )
+              : side === "left"
+              ? cn(
+                  "inset-y-0 left-0 h-full w-full max-w-[82vw] border-r-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)]",
                   open ? "translate-x-0" : "-translate-x-full pointer-events-none"
                 )
               : cn(
-                  "right-0 border-l-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)]",
+                  "inset-y-0 right-0 h-full w-full max-w-[82vw] border-l-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)]",
                   open ? "translate-x-0" : "translate-x-full pointer-events-none"
                 ),
             className

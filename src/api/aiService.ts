@@ -200,7 +200,8 @@ Rules:
 - If the language is "bilingual", blend natural spoken Myanmar and English seamlessly while keeping international brand names in English.
 - When includeHashtags is true, append relevant hashtags at the end.
 - NEVER use raw Markdown formatting symbols such as *, **, ***, # headings, or backticks. Output clean plain text ready to copy-paste directly onto Facebook or TikTok.
-- Keep formatting clean with short paragraphs, line breaks, and emoji where appropriate.
+- Keep formatting clean with short paragraphs, line breaks, and at most 1-2 subtle emojis in the entire post (never start every line or bullet with emojis like 🚀🔥✨💡).
+- NEVER use overused AI hype words or stiff English-to-Burmese translationese such as "အံ့မခန်း", "မယုံနိုင်လောက်အောင်", "တစ်မူထူးခြားတဲ့", "ယနေ့ခေတ်တွင်".
 - Output only the final content, no preamble or meta commentary.`
 
 function sanitizePlainText(text: string): string {
@@ -293,11 +294,11 @@ function mockGenerate(request: GenerateContentRequest): GeneratedContent {
   const isMyanmar = request.language === "myanmar" || request.language === "bilingual"
 
   const angleLeadMy: Record<SalesAngle, string> = {
-    viral_story: "✨ ဒီနေ့တော့ တကယ်တမ်း ရင်ဖွင့်ပြောပြချင်တဲ့ အကြောင်းအရာလေးတစ်ခု ရှိတယ်ဗျာ!",
-    quick_tips: "💡 ဒီနေ့အတွက် အသုံးဝင်မယ့် အကြံပြုချက် ၃ ချက်ကို မျှဝေပေးလိုက်တယ်နော်!",
-    honest_review: "🔍 တကယ်သုံးကြည့်ပြီးမှ ရိုးရိုးသားသား ပြန်လည်သုံးသပ်ပေးလိုက်ပါတယ်ဗျာ!",
-    promo_showcase: "⚡ အထူးမိတ်ဆက် & ပရိုမိုးရှင်း — ဒီတစ်ခုက တကယ်တမ်း တန်တယ်နော်!",
-    short_reel: "🎬 ၁၀-၁၅ စက္ကန့်အတွင်း ကြည့်လိုက် — အနှစ်ချုပ်လေးပါ!",
+    viral_story: "ဒီနေ့တော့ တကယ်တမ်း ရင်ဖွင့်ပြောပြချင်တဲ့ အကြောင်းအရာလေးတစ်ခု ရှိတယ်ဗျာ။",
+    quick_tips: "ဒီနေ့အတွက် လက်တွေ့အသုံးဝင်မယ့် အချက် ၃ ချက်ကို မျှဝေပေးလိုက်တယ်နော်။",
+    honest_review: "တကယ်သုံးကြည့်ပြီးမှ ရိုးရိုးသားသား ပြန်လည်မျှဝေပေးလိုက်ပါတယ်ဗျာ။",
+    promo_showcase: "ဒီတစ်ခုကတော့ လက်တွေ့သုံးကြည့်ရသလောက် တကယ်တန်တယ်လို့ မြင်မိတယ်နော်။",
+    short_reel: "၁၀-၁၅ စက္ကန့်အတွင်း ကြည့်လိုက် — အနှစ်ချုပ်လေးပါ။",
   }
 
   const categoryTagMy: Record<BusinessCategory, string> = {
@@ -337,9 +338,9 @@ function mockGenerate(request: GenerateContentRequest): GeneratedContent {
       : category.replace("_", " ")
 
   const body =
-    `✨ ${request.topic}\n\n` +
+    `${request.topic}\n\n` +
     `Tailored for ${nicheLabel} creators (${angle.replace("_", " ")} angle): engaging hook, authentic voice, and clear takeaways.\n\n` +
-    `This is a mock AI response. Add your API key in Settings to connect to a real AI provider.` +
+    `This is a mock response. Add your API key in Settings to connect to a real provider.` +
     (request.includeHashtags ? `\n\n#${request.platform} #CreatorStudio #ContentCreator` : "")
 
   return {
@@ -2339,5 +2340,418 @@ ${langPrompt}`
     captions: Array.isArray(parsed.captions) ? parsed.captions : [],
   }
 }
+
+// ============================================================================
+// Human-Centric Editorial Writing Studio (Anti-AI Burmese Copywriting Engine)
+// ============================================================================
+
+export type EditorialFormatOption =
+  | "fb_sales"
+  | "tiktok_script"
+  | "product_review"
+  | "personal_story"
+
+export type EditorialToneOption =
+  | "warm_friend"
+  | "calm_clear"
+  | "light_humorous"
+
+export type EditorialLengthOption = "short" | "medium" | "detailed"
+
+export interface EditorialShopProfile {
+  name: string
+  phone: string
+  address: string
+  autoAppend: boolean
+}
+
+export interface EditorialDualRequest {
+  rawNotes: string
+  format: EditorialFormatOption
+  tone: EditorialToneOption
+  length: EditorialLengthOption
+  voiceDnaSamples?: string[]
+  shopProfile?: EditorialShopProfile
+}
+
+export interface EditorialDualResponse {
+  optionA: string
+  optionB: string
+}
+
+export interface EditorialPolishRequest {
+  currentDraft: string
+  mode: "shorten" | "humanize"
+  tone: EditorialToneOption
+  voiceDnaSamples?: string[]
+}
+
+export interface EditorialHooksRequest {
+  currentDraft: string
+  rawNotes: string
+  format: EditorialFormatOption
+  tone: EditorialToneOption
+  voiceDnaSamples?: string[]
+}
+
+const EDITORIAL_FORMAT_GUIDE: Record<EditorialFormatOption, string> = {
+  fb_sales:
+    "Facebook Sales Post (Facebook အရောင်းပို့စ်): Trustworthy, helpful product/service post for Myanmar Facebook readers. Highlight real-life usefulness and clear pricing/order info if mentioned in notes, without pushy hype.",
+  tiktok_script:
+    "TikTok Video Script (TikTok ဗီဒီယိုစာသား): Natural spoken script ready to read aloud on camera. Short, punchy spoken sentences with natural pauses and Burmese labels (မြင်ကွင်း:, ပြောစကား:) only where genuinely helpful.",
+  product_review:
+    "Product Review (Product Review): Honest, grounded first-hand review like telling a close friend what actually works, what stands out, and who it suits.",
+  personal_story:
+    "Personal Story Post (ကိုယ်တွေ့မျှဝေပို့စ်): Authentic diary-like reflection or experience sharing. Warm, relatable, and conversational without sounding preachy.",
+}
+
+const EDITORIAL_TONE_GUIDE: Record<EditorialToneOption, string> = {
+  warm_friend:
+    "မိတ်ဆွေလို နွေးထွေးစွာ (Warm & Friendly): Write like a genuine friend chatting over coffee. Use natural everyday Burmese particles softly (e.g., နော်, ဗျာ/ရှင့်, တကယ်တော့).",
+  calm_clear:
+    "ရိုးရှင်းတည်ငြိမ်စွာ (Calm, Simple & Clear): Clean, understated, calm editorial tone. Minimal particles, clear sentences, zero exaggeration.",
+  light_humorous:
+    "ပေါ့ပေါ့ပါးပါး ဟာသနှော၍ (Light & Playful): Relaxed everyday humor, witty relatable observations, never forced or cringey.",
+}
+
+const EDITORIAL_LENGTH_GUIDE: Record<EditorialLengthOption, string> = {
+  short:
+    "တိုတိုကျစ်ကျစ် (Short & Tight): 2–4 crisp short paragraphs (~60–110 words / ~350–650 Burmese characters). Every sentence earns its place.",
+  medium:
+    "အနေတော် (Medium): 3–5 balanced mobile-friendly paragraphs (~110–180 words / ~650–1,050 Burmese characters) with clean breathing room.",
+  detailed:
+    "အသေးစိတ် (Detailed): 5–7 well-paced short paragraphs (~180–280 words / ~1,050–1,650 Burmese characters) preserving rich details and story flow.",
+}
+
+const ANTI_AI_BURMESE_SYSTEM_PROMPT = `You are a quiet, thoughtful Myanmar human co-writer and editor—NOT a robotic marketing AI.
+Your job is to take the user's raw thoughts, voice notes, or product details and polish them into natural, human-sounding Burmese writing.
+
+STRICT ANTI-AI BURMESE RULES (NON-NEGOTIABLE):
+1. Co-Writer Philosophy: Treat the user's input as authentic raw human experience. Preserve their core facts, prices, personal details, and real intent. Never invent fake specs or exaggerated claims.
+2. Ban Emoji Spam: STRICTLY FORBID starting every bullet or line with emojis like 🚀, 🔥, ✨, 💡, 🎯, 💥. Use AT MOST 1–2 subtle emojis in the entire post (or 0 emojis if the tone is calm/clean). Never use emoji bullet lists.
+3. Ban AI Clichés & Translationese: STRICTLY FORBID overused AI hype words and stiff English-to-Burmese translationese, including:
+   - "အံ့မခန်း"
+   - "မယုံနိုင်လောက်အောင်"
+   - "တစ်မူထူးခြားတဲ့"
+   - "ယနေ့ခေတ်တွင်"
+   - "အဆင့်မြင့်မားသော"
+   - "ပြီးပြည့်စုံသော"
+   - Stiff textbook endings: "ဖြစ်ပါသည်", "ပြုလုပ်နိုင်ပါသည်", "ဝယ်ယူရရှိနိုင်ပါသည်", "ဖော်ပြပေးလိုက်ပါတယ်", "ပါဝင်ပါသည်", "ရှိပါသည်".
+4. Natural Spoken Burmese Flow: Write in natural everyday spoken Burmese (မြန်မာစကားပြော) with clean mobile line spacing (short 1–3 sentence paragraphs separated by blank lines so it reads effortlessly on a phone screen).
+5. International Names: Keep international brand names, product models, and platforms (e.g., Apple, Sony, Zara, Laneige, TikTok, Facebook) in their original English spelling.
+6. Plain Text Only: NEVER use Markdown symbols (*, **, ***, # headings, or backticks).`
+
+function buildVoiceDnaBlock(samples?: string[]): string {
+  const valid = (samples ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 3)
+  if (valid.length === 0) return ""
+  const formatted = valid
+    .map((sample, idx) => `Sample ${idx + 1}:\n"""\n${sample}\n"""`)
+    .join("\n\n")
+  return `\n\nPERSONAL VOICE DNA (Mirror this writer's exact vocabulary, sentence rhythm, punctuation, and how they address readers):\n${formatted}`
+}
+
+export function formatShopFooter(profile?: EditorialShopProfile): string {
+  if (!profile || !profile.autoAppend) return ""
+  const lines = [
+    profile.name.trim(),
+    profile.phone.trim() ? `ဖုန်း - ${profile.phone.trim()}` : "",
+    profile.address.trim(),
+  ].filter(Boolean)
+  return lines.join("\n")
+}
+
+function appendShopFooterIfNeeded(text: string, profile?: EditorialShopProfile): string {
+  const footer = formatShopFooter(profile)
+  if (!footer) return text.trim()
+  const trimmed = text.trim()
+  if (trimmed.includes(footer)) return trimmed
+  return `${trimmed}\n\n${footer}`
+}
+
+async function runEditorialModelCall(
+  systemPrompt: string,
+  userPrompt: string,
+  expectJson: boolean
+): Promise<string> {
+  const { provider, apiKey, apiKeys, model, models } = getAiConfig()
+  const trimmedKey = apiKey.trim()
+
+  const callGemini = async (targetModel: string, key: string): Promise<string> => {
+    const body = {
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ parts: [{ text: userPrompt }] }],
+      generationConfig: {
+        temperature: 0.72,
+        topP: 0.92,
+        maxOutputTokens: 4096,
+        ...(expectJson ? { responseMimeType: "application/json" } : {}),
+      },
+    }
+    const res = await fetchGeminiGenerateContent(targetModel, key, body)
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "")
+      throw parseApiError("Gemini", res.status, errText)
+    }
+    const data = await res.json()
+    const parts: Array<{ text?: string; thought?: boolean }> =
+      data.candidates?.[0]?.content?.parts ?? []
+    const text = parts
+      .filter((p) => !p.thought && typeof p.text === "string")
+      .map((p) => p.text)
+      .join("")
+      .trim()
+    if (!text) throw new Error("No content returned from Gemini API.")
+    return text
+  }
+
+  const callOpenAICompatible = async (
+    targetProvider: AIProvider,
+    key: string,
+    targetModel: string
+  ): Promise<string> => {
+    const baseUrl =
+      targetProvider === "groq"
+        ? "https://api.groq.com/openai/v1/chat/completions"
+        : "https://openrouter.ai/api/v1/chat/completions"
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+    }
+    if (targetProvider === "openrouter") {
+      headers["HTTP-Referer"] = window.location.origin
+      headers["X-Title"] = "Content Creator SaaS"
+    }
+    const res = await fetch(baseUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: targetModel,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0.72,
+        top_p: 0.92,
+        max_tokens: 2048,
+      }),
+    })
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "")
+      throw parseApiError(targetProvider === "groq" ? "Groq" : "OpenRouter", res.status, errText)
+    }
+    const data = await res.json()
+    const text = (data.choices?.[0]?.message?.content ?? "").trim()
+    if (!text) throw new Error(`No content returned from ${targetProvider} API.`)
+    return text
+  }
+
+  if (provider === "gemini") {
+    const primaryModel = model || GEMINI_MODEL
+    try {
+      return await callGemini(primaryModel, trimmedKey)
+    } catch (err) {
+      if (isLocationUnsupportedError(err) && apiKeys.openrouter) {
+        return await callOpenRouterWithFallback(
+          models.openrouter || DEFAULT_MODELS.openrouter,
+          (candidate) => callOpenAICompatible("openrouter", apiKeys.openrouter, candidate),
+          { isTextOnly: true }
+        )
+      }
+      const isQuota = err instanceof ApiError && err.isQuotaExceeded
+      if (isQuota && primaryModel !== GEMINI_FALLBACK_MODEL) {
+        return await callGemini(GEMINI_FALLBACK_MODEL, trimmedKey)
+      }
+      throw err
+    }
+  }
+
+  if (provider === "openrouter") {
+    return await callOpenRouterWithFallback(
+      model || DEFAULT_MODELS.openrouter,
+      (candidate) => callOpenAICompatible("openrouter", trimmedKey, candidate),
+      { isTextOnly: true }
+    )
+  }
+
+  return await callOpenAICompatible(
+    provider,
+    trimmedKey,
+    model || "llama-3.3-70b-versatile"
+  )
+}
+
+function parseJsonPayload<T>(raw: string): T | null {
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim()
+  try {
+    return JSON.parse(cleaned) as T
+  } catch {
+    const firstBrace = cleaned.indexOf("{")
+    const lastBrace = cleaned.lastIndexOf("}")
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      try {
+        return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1)) as T
+      } catch {
+        return null
+      }
+    }
+    return null
+  }
+}
+
+export async function generateEditorialDualAngles(
+  request: EditorialDualRequest
+): Promise<EditorialDualResponse> {
+  const { apiKey } = getAiConfig()
+  const rawNotes = request.rawNotes.trim()
+
+  if (!apiKey.trim()) {
+    await delay(800)
+    const optionA = appendShopFooterIfNeeded(
+      `${rawNotes}\n\nလက်တွေ့သုံးကြည့်ရသလောက် ရိုးရိုးရှင်းရှင်းနဲ့ အသုံးတည့်တဲ့အတွက် မျှဝေပေးလိုက်ပါတယ်နော်။ စိတ်ဝင်စားရင် မေးမြန်းနိုင်ပါတယ်ဗျာ။`,
+      request.shopProfile
+    )
+    const optionB = appendShopFooterIfNeeded(
+      `ဒီအကြောင်းလေးကို အရင်ကတည်းက မျှဝေချင်နေတာ ကြာပါပြီ။\n\n"${rawNotes}" ဆိုတဲ့အတိုင်း တကယ်တမ်း ကိုယ်တိုင်ကြုံတွေ့ပြီးမှ ပြောပြဖြစ်တာပါ။ သေချာလေး စဉ်းစားကြည့်ရင် တကယ်အသုံးဝင်တယ်နော်။`,
+      request.shopProfile
+    )
+    return { optionA, optionB }
+  }
+
+  const voiceDna = buildVoiceDnaBlock(request.voiceDnaSamples)
+  const systemPrompt = `${ANTI_AI_BURMESE_SYSTEM_PROMPT}${voiceDna}`
+
+  const userPrompt = `Transform the user's raw draft notes into TWO distinct, natural human-written Burmese versions.
+
+Format: ${EDITORIAL_FORMAT_GUIDE[request.format]}
+Tone: ${EDITORIAL_TONE_GUIDE[request.tone]}
+Length: ${EDITORIAL_LENGTH_GUIDE[request.length]}
+
+User's Raw Notes / Thoughts:
+"""
+${rawNotes}
+"""
+
+Return ONLY valid JSON with these exact two keys:
+{
+  "optionA": "Option A — ရိုးရှင်းတိုက်ရိုက်ဟန် (Direct & Clear): Straight to the point, crisp, practical, easy to scan on mobile.",
+  "optionB": "Option B — ဇာတ်ကြောင်းပြောဟန် (Warm Storytelling): Opens with a relatable human moment or story, flows warmly like a real person sharing experience."
+}
+
+Remember:
+- NO emoji spam (max 1-2 subtle emojis total, or 0).
+- NO banned AI hype words (အံ့မခန်း, မယုံနိုင်လောက်အောင်, တစ်မူထူးခြားတဲ့, ယနေ့ခေတ်တွင်).
+- NO Markdown (*, **, # headings).`
+
+  const raw = await runEditorialModelCall(systemPrompt, userPrompt, true)
+  const parsed = parseJsonPayload<{ optionA?: string; optionB?: string }>(raw)
+
+  if (parsed?.optionA && parsed?.optionB) {
+    return {
+      optionA: appendShopFooterIfNeeded(sanitizePlainText(parsed.optionA), request.shopProfile),
+      optionB: appendShopFooterIfNeeded(sanitizePlainText(parsed.optionB), request.shopProfile),
+    }
+  }
+
+  const fallbackText = appendShopFooterIfNeeded(sanitizePlainText(raw), request.shopProfile)
+  return {
+    optionA: fallbackText,
+    optionB: fallbackText,
+  }
+}
+
+export async function polishEditorialDraft(
+  request: EditorialPolishRequest
+): Promise<string> {
+  const { apiKey } = getAiConfig()
+  const current = request.currentDraft.trim()
+
+  if (!apiKey.trim()) {
+    await delay(600)
+    return current
+  }
+
+  const voiceDna = buildVoiceDnaBlock(request.voiceDnaSamples)
+  const systemPrompt = `${ANTI_AI_BURMESE_SYSTEM_PROMPT}${voiceDna}`
+
+  const taskInstruction =
+    request.mode === "shorten"
+      ? "Tighten and condense this Burmese post so it is noticeably shorter, cleaner, and punchier while keeping its human warmth, core facts, and any contact info at the bottom."
+      : "Rewrite this Burmese post to sound 100% like a real Myanmar person wrote it casually and naturally. Remove any remaining formal, stiff, or AI-like phrasing, and remove excess emojis."
+
+  const userPrompt = `Task: ${taskInstruction}
+Tone: ${EDITORIAL_TONE_GUIDE[request.tone]}
+
+Draft to refine:
+"""
+${current}
+"""
+
+Output ONLY the refined plain text.`
+
+  const raw = await runEditorialModelCall(systemPrompt, userPrompt, false)
+  return sanitizePlainText(raw)
+}
+
+export async function generateEditorialHooks(
+  request: EditorialHooksRequest
+): Promise<string[]> {
+  const { apiKey } = getAiConfig()
+
+  if (!apiKey.trim()) {
+    await delay(600)
+    return [
+      "တကယ်သုံးကြည့်ပြီးမှ ပြောပြချင်တဲ့ အချက်လေးတစ်ခု ရှိတယ်နော်။",
+      "အရင်ကဆို ဒီလိုမျိုး သေချာမသိခဲ့ပေမယ့် အခုတော့ တော်တော်လေး အဆင်ပြေသွားပြီ။",
+      "ရိုးရိုးရှင်းရှင်းနဲ့ လက်တွေ့အသုံးတည့်တာလေးကို မျှဝေပေးချင်လို့ပါ။",
+    ]
+  }
+
+  const voiceDna = buildVoiceDnaBlock(request.voiceDnaSamples)
+  const systemPrompt = `${ANTI_AI_BURMESE_SYSTEM_PROMPT}${voiceDna}`
+
+  const userPrompt = `Write 3 fresh, natural, non-clickbaity opening hook sentences (1-2 lines each) in spoken Burmese for this post.
+Format: ${EDITORIAL_FORMAT_GUIDE[request.format]}
+Tone: ${EDITORIAL_TONE_GUIDE[request.tone]}
+
+Original Notes:
+"""
+${request.rawNotes.trim()}
+"""
+
+Current Draft:
+"""
+${request.currentDraft.trim()}
+"""
+
+Return ONLY valid JSON:
+{
+  "hooks": ["hook 1", "hook 2", "hook 3"]
+}
+
+Rules:
+- Each hook must feel natural and human, NOT clickbait or AI hype.
+- Max 0-1 subtle emoji per hook.
+- No Markdown.`
+
+  const raw = await runEditorialModelCall(systemPrompt, userPrompt, true)
+  const parsed = parseJsonPayload<{ hooks?: string[] }>(raw)
+  if (Array.isArray(parsed?.hooks) && parsed.hooks.length > 0) {
+    return parsed.hooks
+      .map((h) => sanitizePlainText(String(h)))
+      .filter(Boolean)
+      .slice(0, 3)
+  }
+
+  return sanitizePlainText(raw)
+    .split("\n")
+    .map((line) => line.replace(/^\d+[.)]\s*/, "").trim())
+    .filter(Boolean)
+    .slice(0, 3)
+}
+
 
 

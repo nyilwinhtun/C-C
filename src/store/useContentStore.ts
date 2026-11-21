@@ -68,6 +68,37 @@ export interface CustomPronunciation {
   phonetic: string
 }
 
+export type EditorialFormat =
+  | "fb_sales"
+  | "tiktok_script"
+  | "product_review"
+  | "personal_story"
+
+export type EditorialTone =
+  | "warm_friend"
+  | "calm_clear"
+  | "light_humorous"
+
+export type EditorialLength = "short" | "medium" | "detailed"
+
+export interface ShopProfile {
+  name: string
+  phone: string
+  address: string
+  autoAppend: boolean
+}
+
+export interface EditorialResult {
+  id: string
+  topic: string
+  format: EditorialFormat
+  optionA: string
+  optionB: string
+  activeOption: "A" | "B"
+  hooks?: string[]
+  createdAt: string
+}
+
 export interface UploadedPhotoItem {
   id: string
   file: File
@@ -96,6 +127,12 @@ interface ContentState {
   generatedVideoResult: VideoContentResult | null
   voiceoverDraftScript: string
   customPronunciations: CustomPronunciation[]
+  voiceDnaSamples: string[]
+  shopProfile: ShopProfile
+  editorialTone: EditorialTone
+  editorialLength: EditorialLength
+  editorialFormat: EditorialFormat
+  editorialResult: EditorialResult | null
   isSyncing: boolean
   setDraftInput: (input: Partial<GeneratorFormValues>) => void
   setTextPostResult: (result: GeneratedContent | null) => void
@@ -120,6 +157,12 @@ interface ContentState {
   setVoiceoverDraftScript: (script: string) => void
   addCustomPronunciation: (word: string, phonetic: string) => void
   removeCustomPronunciation: (id: string) => void
+  setVoiceDnaSamples: (samples: string[]) => void
+  setShopProfile: (updates: Partial<ShopProfile>) => void
+  setEditorialTone: (tone: EditorialTone) => void
+  setEditorialLength: (length: EditorialLength) => void
+  setEditorialFormat: (format: EditorialFormat) => void
+  setEditorialResult: (result: EditorialResult | null) => void
   clearUploadedVideo: () => void
   saveToVault: (
     item: Omit<SavedVaultItem, "id" | "status"> & {
@@ -169,6 +212,17 @@ export const useContentStore = create<ContentState>()(
       generatedVideoResult: null,
       voiceoverDraftScript: "",
       customPronunciations: [],
+      voiceDnaSamples: ["", "", ""],
+      shopProfile: {
+        name: "",
+        phone: "",
+        address: "",
+        autoAppend: false,
+      },
+      editorialTone: "warm_friend",
+      editorialLength: "medium",
+      editorialFormat: "fb_sales",
+      editorialResult: null,
       isSyncing: false,
 
       setDraftInput: (input) =>
@@ -252,6 +306,16 @@ export const useContentStore = create<ContentState>()(
       setGeneratedVideoResult: (generatedVideoResult) =>
         set({ generatedVideoResult }),
       setVoiceoverDraftScript: (voiceoverDraftScript) => set({ voiceoverDraftScript }),
+      setVoiceDnaSamples: (voiceDnaSamples) =>
+        set({ voiceDnaSamples: voiceDnaSamples.slice(0, 3) }),
+      setShopProfile: (updates) =>
+        set((state) => ({
+          shopProfile: { ...state.shopProfile, ...updates },
+        })),
+      setEditorialTone: (editorialTone) => set({ editorialTone }),
+      setEditorialLength: (editorialLength) => set({ editorialLength }),
+      setEditorialFormat: (editorialFormat) => set({ editorialFormat }),
+      setEditorialResult: (editorialResult) => set({ editorialResult }),
       addCustomPronunciation: (word, phonetic) =>
         set((state) => {
           const cleanWord = word.trim()
@@ -416,6 +480,17 @@ export const useContentStore = create<ContentState>()(
         videoDurationSeconds: state.videoDurationSeconds ?? null,
         generatedVideoResult: state.generatedVideoResult ?? null,
         customPronunciations: state.customPronunciations ?? [],
+        voiceDnaSamples: state.voiceDnaSamples ?? ["", "", ""],
+        shopProfile: state.shopProfile ?? {
+          name: "",
+          phone: "",
+          address: "",
+          autoAppend: false,
+        },
+        editorialTone: state.editorialTone ?? "warm_friend",
+        editorialLength: state.editorialLength ?? "medium",
+        editorialFormat: state.editorialFormat ?? "fb_sales",
+        editorialResult: state.editorialResult ?? null,
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState as Partial<ContentState> | undefined) ?? {}
