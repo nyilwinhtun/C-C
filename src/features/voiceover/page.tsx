@@ -8,13 +8,9 @@ import {
   cleanVoiceoverText,
   estimateSpokenDurationSeconds,
   formatAudioClockDuration,
-  generateBurmeseDialogueVoiceover,
-  generateBurmeseVoiceover,
   mixVoiceoverWithAutoDuckingMusic,
   toBurmeseDigits,
   type BurmeseVoiceType,
-  type VoiceoverProgress,
-  type VoiceoverSpeed,
 } from "@/api/ttsService"
 import { IosAudioPlayer } from "@/components/shared/IosAudioPlayer"
 import { Button } from "@/components/ui/button"
@@ -25,28 +21,14 @@ import {
   MIN_VALID_RECORDING_BYTES,
   createWavAudioRecorder,
   getAudioContextConstructor,
-  playBlobUrlWithPrimedAudio,
   setIosAudioSessionPlayback,
   unlockIosAudio,
   type WavAudioRecorderHandle,
 } from "@/lib/iosAudio"
 import { cn, triggerHaptic } from "@/lib/utils"
-import { getAudioBlobDurationSeconds, type BackgroundMusicPreset } from "@/lib/videoAudioMerger"
+import { getAudioBlobDurationSeconds } from "@/lib/videoAudioMerger"
 import { useContentStore } from "@/store/useContentStore"
 import { StudioSettingsSheet } from "./StudioSettingsSheet"
-
-type VoiceChoice = "my_voice" | "nilar" | "thiha"
-
-interface StudioAudioResult {
-  source: "my_voice" | "narrator"
-  audioUrl: string
-  blob: Blob
-  rawBlobForTranscribe?: Blob
-  mimeType: string
-  fileExtension: string
-  durationSeconds: number
-  title: string
-}
 
 const WAVEFORM_BAR_COUNT = 28
 
@@ -84,32 +66,69 @@ function triggerBlobDownload(url: string, filename: string) {
 
 export function VoiceoverPage() {
   const {
-    voiceoverDraftScript,
-    setVoiceoverDraftScript,
-    customPronunciations,
-    addAudioSession,
+    voiceScriptText,
+    setVoiceScriptText,
+    selectedVoice,
+    setSelectedVoice,
+    voiceSpeed,
+    setVoiceSpeed,
+    voiceDialogueMode,
+    setVoiceDialogueMode,
+    voiceMusicPreset,
+    setVoiceMusicPreset,
+    voiceCustomMusicFile,
+    setVoiceCustomMusicFile,
+    ttsStatus,
+    ttsProgress,
+    generatedAudioUrl,
+    generatedAudioBlob,
+    generatedAudioExtension,
+    generatedAudioDuration,
+    generatedAudioTitle,
+    generatedAudioSource,
+    selfRecordedBlob,
+    selfRecordedMimeType,
+    selfRecordedNeedsTranscribe,
+    setSelfRecordedNeedsTranscribe,
+    setStudioSelfAudio,
+    generateStudioVoiceover,
     micFilterMode,
     setMicFilterMode,
   } = useContentStore(
     useShallow((state) => ({
-      voiceoverDraftScript: state.voiceoverDraftScript,
-      setVoiceoverDraftScript: state.setVoiceoverDraftScript,
-      customPronunciations: state.customPronunciations,
-      addAudioSession: state.addAudioSession,
+      voiceScriptText: state.voiceScriptText,
+      setVoiceScriptText: state.setVoiceScriptText,
+      selectedVoice: state.selectedVoice,
+      setSelectedVoice: state.setSelectedVoice,
+      voiceSpeed: state.voiceSpeed,
+      setVoiceSpeed: state.setVoiceSpeed,
+      voiceDialogueMode: state.voiceDialogueMode,
+      setVoiceDialogueMode: state.setVoiceDialogueMode,
+      voiceMusicPreset: state.voiceMusicPreset,
+      setVoiceMusicPreset: state.setVoiceMusicPreset,
+      voiceCustomMusicFile: state.voiceCustomMusicFile,
+      setVoiceCustomMusicFile: state.setVoiceCustomMusicFile,
+      ttsStatus: state.ttsStatus,
+      ttsProgress: state.ttsProgress,
+      generatedAudioUrl: state.generatedAudioUrl,
+      generatedAudioBlob: state.generatedAudioBlob,
+      generatedAudioExtension: state.generatedAudioExtension,
+      generatedAudioDuration: state.generatedAudioDuration,
+      generatedAudioTitle: state.generatedAudioTitle,
+      generatedAudioSource: state.generatedAudioSource,
+      selfRecordedBlob: state.selfRecordedBlob,
+      selfRecordedMimeType: state.selfRecordedMimeType,
+      selfRecordedNeedsTranscribe: state.selfRecordedNeedsTranscribe,
+      setSelfRecordedNeedsTranscribe: state.setSelfRecordedNeedsTranscribe,
+      setStudioSelfAudio: state.setStudioSelfAudio,
+      generateStudioVoiceover: state.generateStudioVoiceover,
       micFilterMode: state.micFilterMode,
       setMicFilterMode: state.setMicFilterMode,
     }))
   )
 
-  // Core studio mode
-  const [voiceChoice, setVoiceChoice] = useState<VoiceChoice>("my_voice")
-
-  // Studio settings (tucked inside ⚙️ ညှိရန် bottom sheet)
+  // Studio settings sheet visibility
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [speed, setSpeed] = useState<VoiceoverSpeed>(1.0)
-  const [dialogueMode, setDialogueMode] = useState(false)
-  const [musicPreset, setMusicPreset] = useState<BackgroundMusicPreset>("none")
-  const [customMusicFile, setCustomMusicFile] = useState<File | null>(null)
 
   // Recording state
   const [isRecordingVoice, setIsRecordingVoice] = useState(false)
@@ -118,33 +137,21 @@ export function VoiceoverPage() {
     Array(WAVEFORM_BAR_COUNT).fill(14)
   )
 
-  // Teleprompter state (auto-activates when recording in My Voice with script)
+  // Teleprompter state (auto-activates when recording in Self Voice with script)
   const [teleprompterScrolling, setTeleprompterScrolling] = useState(true)
   const [teleprompterSpeed, setTeleprompterSpeed] = useState(1.0)
   const teleprompterRef = useRef<HTMLDivElement | null>(null)
 
-  // Generation & transcription state
-  const [isGeneratingVoice, setIsGeneratingVoice] = useState(false)
-  const [voiceProgress, setVoiceProgress] = useState<VoiceoverProgress | null>(null)
+  // Transcription state
   const [isTranscribing, setIsTranscribing] = useState(false)
 
-  // Unified Voice Memos Player state
-  const [activeAudio, setActiveAudio] = useState<StudioAudioResult | null>(null)
+  const isGeneratingVoice = ttsStatus === "preparing" || ttsStatus === "generating"
 
-  const activeUrlRef = useRef<string | null>(null)
-  const untranscribedMyVoiceRef = useRef(false)
   const wavRecorderRef = useRef<WavAudioRecorderHandle | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const recordTimerRef = useRef<number | null>(null)
   const recordingSecondsRef = useRef(0)
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
-
-  const revokeActiveUrl = useCallback(() => {
-    if (activeUrlRef.current) {
-      URL.revokeObjectURL(activeUrlRef.current)
-      activeUrlRef.current = null
-    }
-  }, [])
 
   const stopRecorderResources = useCallback(() => {
     if (recordTimerRef.current !== null) {
@@ -158,15 +165,15 @@ export function VoiceoverPage() {
     setWaveformBars(Array(WAVEFORM_BAR_COUNT).fill(14))
   }, [])
 
+  // Only stop active mic stream on unmount; never revoke generatedAudioUrl here
   useEffect(() => {
     return () => {
       stopRecorderResources()
-      revokeActiveUrl()
     }
-  }, [stopRecorderResources, revokeActiveUrl])
+  }, [stopRecorderResources])
 
   const showTeleprompter =
-    voiceChoice === "my_voice" && isRecordingVoice && voiceoverDraftScript.trim().length > 0
+    selectedVoice === "self" && isRecordingVoice && voiceScriptText.trim().length > 0
 
   // Smooth auto-scrolling Teleprompter loop
   useEffect(() => {
@@ -186,9 +193,9 @@ export function VoiceoverPage() {
     return () => cancelAnimationFrame(rafId)
   }, [showTeleprompter, teleprompterScrolling, teleprompterSpeed])
 
-  const activeNarratorType: BurmeseVoiceType = voiceChoice === "thiha" ? "male" : "female"
+  const activeNarratorType: BurmeseVoiceType = selectedVoice === "thiha" ? "male" : "female"
   const hasActiveSettings =
-    speed !== 1.0 || dialogueMode || musicPreset !== "none"
+    voiceSpeed !== 1.0 || voiceDialogueMode || voiceMusicPreset !== "none"
 
   const finalizeMyVoiceBlob = async (
     rawBlob: Blob,
@@ -203,12 +210,12 @@ export function VoiceoverPage() {
     let finalMime = mimeType
     let finalDuration = baseDuration
 
-    if (musicPreset !== "none") {
+    if (voiceMusicPreset !== "none") {
       try {
         const mixed = await mixVoiceoverWithAutoDuckingMusic({
           voiceoverBlob: rawBlob,
-          musicPreset,
-          customMusicFile,
+          musicPreset: voiceMusicPreset,
+          customMusicFile: voiceCustomMusicFile,
           musicVolume: 0.34,
         })
         finalBlob = mixed.blob
@@ -220,16 +227,11 @@ export function VoiceoverPage() {
       }
     }
 
-    revokeActiveUrl()
     const url = URL.createObjectURL(finalBlob)
-    activeUrlRef.current = url
-    untranscribedMyVoiceRef.current = true
-
-    setActiveAudio({
-      source: "my_voice",
+    setStudioSelfAudio({
       audioUrl: url,
       blob: finalBlob,
-      rawBlobForTranscribe: rawBlob,
+      rawBlob,
       mimeType: finalMime,
       fileExtension: finalExt,
       durationSeconds: finalDuration,
@@ -331,12 +333,14 @@ export function VoiceoverPage() {
     toast.success("အသံဖိုင် ထည့်သွင်းပြီးပါပြီ။")
   }
 
-  const transcribeMyVoiceBlob = async (audio: StudioAudioResult): Promise<string | null> => {
-    const sourceBlob = audio.rawBlobForTranscribe ?? audio.blob
+  const transcribeMyVoiceBlob = async (
+    sourceBlob: Blob,
+    mimeType: string
+  ): Promise<string | null> => {
     setIsTranscribing(true)
     try {
       let uploadBlob: Blob = sourceBlob
-      let uploadMime = audio.mimeType
+      let uploadMime = mimeType
       const uploadName = "recording.wav"
 
       try {
@@ -372,13 +376,14 @@ export function VoiceoverPage() {
   }
 
   const handleTranscribeRecording = async () => {
-    if (!activeAudio || activeAudio.source !== "my_voice") return
+    const sourceBlob = selfRecordedBlob ?? generatedAudioBlob
+    if (!sourceBlob || generatedAudioSource !== "my_voice") return
     try {
-      const trimmed = await transcribeMyVoiceBlob(activeAudio)
+      const trimmed = await transcribeMyVoiceBlob(sourceBlob, selfRecordedMimeType)
       if (!trimmed) return
-      untranscribedMyVoiceRef.current = false
-      const existing = voiceoverDraftScript.trim()
-      setVoiceoverDraftScript(existing ? `${existing}\n\n${trimmed}` : trimmed)
+      setSelfRecordedNeedsTranscribe(false)
+      const existing = voiceScriptText.trim()
+      setVoiceScriptText(existing ? `${existing}\n\n${trimmed}` : trimmed)
       toast.success("စာသားအဖြစ် သန့်ရှင်းစွာ ပြောင်းလဲပြီးပါပြီ။")
     } catch (err) {
       const msg = err instanceof Error ? err.message : "စာသားပြောင်းလဲ၍ မရပါ။"
@@ -391,18 +396,20 @@ export function VoiceoverPage() {
     unlockIosAudio()
     triggerHaptic(10)
 
-    let scriptForTts = voiceoverDraftScript
+    let scriptOverride: string | undefined
+    const sourceBlob = selfRecordedBlob ?? generatedAudioBlob
     const needsAutoTranscribe =
-      activeAudio?.source === "my_voice" &&
-      (untranscribedMyVoiceRef.current || !cleanVoiceoverText(scriptForTts))
+      generatedAudioSource === "my_voice" &&
+      Boolean(sourceBlob) &&
+      (selfRecordedNeedsTranscribe || !cleanVoiceoverText(voiceScriptText))
 
-    if (needsAutoTranscribe && activeAudio) {
+    if (needsAutoTranscribe && sourceBlob) {
       try {
-        const transcribed = await transcribeMyVoiceBlob(activeAudio)
+        const transcribed = await transcribeMyVoiceBlob(sourceBlob, selfRecordedMimeType)
         if (!transcribed) return
-        untranscribedMyVoiceRef.current = false
-        scriptForTts = transcribed
-        setVoiceoverDraftScript(transcribed)
+        setSelfRecordedNeedsTranscribe(false)
+        setVoiceScriptText(transcribed)
+        scriptOverride = transcribed
       } catch (err) {
         const msg = err instanceof Error ? err.message : "စာသားပြောင်းလဲ၍ မရပါ။"
         toast.error(msg)
@@ -410,92 +417,19 @@ export function VoiceoverPage() {
       }
     }
 
-    const trimmed = cleanVoiceoverText(scriptForTts)
-    if (!trimmed) {
-      toast.error("အသံဖတ်ခိုင်းရန် စာသားအရင်ထည့်ပါ။")
-      return
-    }
-
-    setIsGeneratingVoice(true)
-    setVoiceProgress(null)
-    try {
-      let result = dialogueMode
-        ? await generateBurmeseDialogueVoiceover(scriptForTts, speed, {
-            deliveryTone: "storytelling",
-            customPronunciations,
-            onProgress: setVoiceProgress,
-          })
-        : await generateBurmeseVoiceover(trimmed, activeNarratorType, speed, {
-            deliveryTone: "storytelling",
-            customPronunciations,
-            onProgress: setVoiceProgress,
-          })
-
-      if (musicPreset !== "none") {
-        const mixed = await mixVoiceoverWithAutoDuckingMusic({
-          voiceoverBlob: result.blob,
-          musicPreset,
-          customMusicFile,
-          musicVolume: 0.34,
-        })
-        URL.revokeObjectURL(result.audioUrl)
-        result = {
-          ...result,
-          audioUrl: mixed.audioUrl,
-          blob: mixed.blob,
-          audioBuffer: mixed.audioBuffer,
-          durationSeconds: mixed.durationSeconds,
-          mimeType: "audio/wav",
-          fileExtension: "wav",
-        }
-      }
-
-      revokeActiveUrl()
-      activeUrlRef.current = result.audioUrl
-
-      const title = dialogueMode
-        ? "နီလာ + သီဟ"
-        : voiceChoice === "thiha"
-          ? "သီဟ"
-          : "နီလာ"
-
-      setActiveAudio({
-        source: "narrator",
-        audioUrl: result.audioUrl,
-        blob: result.blob,
-        mimeType: result.mimeType,
-        fileExtension: result.fileExtension,
-        durationSeconds: result.durationSeconds,
-        title,
-      })
-
-      addAudioSession({
-        script: scriptForTts.trim(),
-        voiceLabel: title,
-        mode: dialogueMode ? "dialogue" : "single",
-        durationSeconds: result.durationSeconds,
-      })
-
-      void playBlobUrlWithPrimedAudio(result.audioUrl)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "အသံဖိုင် ပြင်ဆင်၍ မရပါ။"
-      toast.error(msg)
-    } finally {
-      setIsGeneratingVoice(false)
-      setVoiceProgress(null)
-    }
+    await generateStudioVoiceover(scriptOverride)
   }
 
   const handleDownloadActiveAudio = () => {
-    if (!activeAudio) return
+    if (!generatedAudioUrl) return
     const timestamp = new Date().toISOString().slice(0, 10)
-    const prefix = activeAudio.source === "my_voice" ? "my-voice" : voiceChoice
-    triggerBlobDownload(activeAudio.audioUrl, `${prefix}-${timestamp}.${activeAudio.fileExtension}`)
+    const prefix = generatedAudioSource === "my_voice" ? "my-voice" : selectedVoice
+    triggerBlobDownload(generatedAudioUrl, `${prefix}-${timestamp}.${generatedAudioExtension}`)
   }
 
-  const narratorButtonLabel = dialogueMode
+  const narratorButtonLabel = voiceDialogueMode
     ? "နီလာ + သီဟ အသံဖြင့် ဖတ်မည်"
-    : voiceChoice === "thiha"
+    : selectedVoice === "thiha"
       ? "သီဟ အသံဖြင့် ဖတ်မည်"
       : "နီလာ အသံဖြင့် ဖတ်မည်"
 
@@ -584,7 +518,7 @@ export function VoiceoverPage() {
               className="h-64 sm:h-72 overflow-y-auto px-5 py-6 sm:px-6"
             >
               <p className="font-myanmar text-lg sm:text-xl leading-[1.9] whitespace-pre-wrap text-[#1C1917] dark:text-[#F5F5F4]">
-                {voiceoverDraftScript}
+                {voiceScriptText}
               </p>
               <div className="h-44" />
             </div>
@@ -592,23 +526,23 @@ export function VoiceoverPage() {
         ) : (
           <div className="flex flex-col">
             <Textarea
-              value={voiceoverDraftScript}
+              value={voiceScriptText}
               onChange={(e) => {
-                untranscribedMyVoiceRef.current = false
-                setVoiceoverDraftScript(e.target.value)
+                setSelfRecordedNeedsTranscribe(false)
+                setVoiceScriptText(e.target.value)
               }}
               rows={7}
               placeholder={SCRIPT_PLACEHOLDER}
               className="min-h-[210px] sm:min-h-[240px] w-full resize-none border-0 bg-transparent px-4 py-4 sm:px-5 sm:py-5 text-sm sm:text-base leading-[1.8] text-[#1C1917] dark:text-[#F5F5F4] placeholder:text-[#A8A29E] dark:placeholder:text-[#71717A] focus-visible:ring-0 focus-visible:ring-offset-0 font-myanmar"
             />
-            {voiceoverDraftScript.trim() && (
+            {voiceScriptText.trim() && (
               <div className="flex items-center justify-between border-t border-[#E7E5E4]/70 dark:border-[#3F3F46]/70 px-4 py-2 text-[11px] text-[#57534E] dark:text-[#A1A1AA]">
                 <span className="tabular-nums font-myanmar">
-                  ခန့်မှန်းကြာချိန် ~{toBurmeseDigits(estimateSpokenDurationSeconds(voiceoverDraftScript, speed))} စက္ကန့်
+                  ခန့်မှန်းကြာချိန် ~{toBurmeseDigits(estimateSpokenDurationSeconds(voiceScriptText, voiceSpeed))} စက္ကန့်
                 </span>
                 <button
                   type="button"
-                  onClick={() => setVoiceoverDraftScript("")}
+                  onClick={() => setVoiceScriptText("")}
                   className="hover:text-[#1C1917] dark:hover:text-[#F5F5F4] transition-colors cursor-pointer font-myanmar"
                 >
                   ရှင်းမည်
@@ -627,12 +561,12 @@ export function VoiceoverPage() {
       >
         {(
           [
-            { id: "my_voice", icon: "🎙️", label: "ကိုယ်တိုင်" },
+            { id: "self", icon: "🎙️", label: "ကိုယ်တိုင်" },
             { id: "nilar", icon: "👩", label: "နီလာ" },
             { id: "thiha", icon: "👨", label: "သီဟ" },
           ] as const
         ).map((pill) => {
-          const active = voiceChoice === pill.id
+          const active = selectedVoice === pill.id
           return (
             <button
               key={pill.id}
@@ -642,7 +576,7 @@ export function VoiceoverPage() {
               disabled={isRecordingVoice || isGeneratingVoice}
               onClick={() => {
                 triggerHaptic(6)
-                setVoiceChoice(pill.id)
+                setSelectedVoice(pill.id)
               }}
               className={cn(
                 "flex items-center justify-center gap-1.5 rounded-xl py-2.5 px-2 text-xs sm:text-sm font-medium transition-all cursor-pointer font-myanmar disabled:opacity-60",
@@ -660,7 +594,7 @@ export function VoiceoverPage() {
 
       {/* 3. Dynamic Single Primary Action Control */}
       <div className="rounded-[20px] border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] px-5 py-6">
-        {voiceChoice === "my_voice" ? (
+        {selectedVoice === "self" ? (
           <div className="space-y-4">
             {/* Compact Side-by-Side Record Control + Live Reactive Waveform + Tabular Timer */}
             <div className="flex items-center gap-3.5 sm:gap-4">
@@ -787,7 +721,7 @@ export function VoiceoverPage() {
                 isGeneratingVoice ||
                 isTranscribing ||
                 isRecordingVoice ||
-                (!voiceoverDraftScript.trim() && activeAudio?.source !== "my_voice")
+                (!voiceScriptText.trim() && generatedAudioSource !== "my_voice")
               }
               className="w-full h-12 rounded-2xl bg-[#1C1917] hover:bg-[#292524] dark:bg-[#F5F5F4] dark:hover:bg-[#E7E5E4] text-[#FAF8F5] dark:text-[#18181B] text-sm font-semibold transition-all active:scale-[0.99] font-myanmar"
             >
@@ -800,9 +734,11 @@ export function VoiceoverPage() {
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
                   <span>
-                    {voiceProgress && voiceProgress.totalChunks > 1
-                      ? `အသံဖိုင် ပြင်ဆင်နေပါသည်... (${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
-                      : "အသံဖိုင် ပြင်ဆင်နေပါသည်..."}
+                    {ttsStatus === "preparing"
+                      ? "စာသား ပြင်ဆင်နေပါသည်..."
+                      : ttsProgress && ttsProgress.total > 1
+                        ? `အသံဖိုင် ပြင်ဆင်နေပါသည်... (${toBurmeseDigits(ttsProgress.current)}/${toBurmeseDigits(ttsProgress.total)})`
+                        : "အသံဖိုင် ပြင်ဆင်နေပါသည်..."}
                   </span>
                 </>
               ) : (
@@ -810,12 +746,12 @@ export function VoiceoverPage() {
               )}
             </Button>
 
-            {isGeneratingVoice && voiceProgress && voiceProgress.totalChunks > 1 && (
+            {isGeneratingVoice && ttsProgress && ttsProgress.total > 1 && (
               <div className="h-1 w-full rounded-full bg-[#E7E5E4] dark:bg-[#3F3F46] overflow-hidden">
                 <div
                   className="h-full bg-[#1C1917] dark:bg-[#F5F5F4] transition-all duration-200"
                   style={{
-                    width: `${Math.round((voiceProgress.currentChunk / voiceProgress.totalChunks) * 100)}%`,
+                    width: `${Math.round((ttsProgress.current / ttsProgress.total) * 100)}%`,
                   }}
                 />
               </div>
@@ -825,19 +761,19 @@ export function VoiceoverPage() {
       </div>
 
       {/* 4. Unified Voice Memos Player & 1-Tap Transcribe */}
-      {activeAudio && (
+      {generatedAudioUrl && (
         <div className="space-y-2.5">
           <IosAudioPlayer
-            src={activeAudio.audioUrl}
-            title={activeAudio.title}
-            subtitle={`ကြာချိန် ${formatAudioClockDuration(activeAudio.durationSeconds)}`}
-            initialDuration={activeAudio.durationSeconds}
-            fileExtension={activeAudio.fileExtension}
+            src={generatedAudioUrl}
+            title={generatedAudioTitle || "အသံဖိုင်"}
+            subtitle={`ကြာချိန် ${formatAudioClockDuration(generatedAudioDuration)}`}
+            initialDuration={generatedAudioDuration}
+            fileExtension={generatedAudioExtension}
             onDownload={handleDownloadActiveAudio}
-            downloadLabel="WAV"
+            downloadLabel={generatedAudioExtension.toUpperCase()}
           />
 
-          {activeAudio.source === "my_voice" && (
+          {generatedAudioSource === "my_voice" && (
             <Button
               type="button"
               variant="outline"
@@ -862,22 +798,22 @@ export function VoiceoverPage() {
       <StudioSettingsSheet
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        speed={speed}
-        onSpeedChange={setSpeed}
-        dialogueMode={dialogueMode}
-        onDialogueModeChange={setDialogueMode}
+        speed={voiceSpeed}
+        onSpeedChange={setVoiceSpeed}
+        dialogueMode={voiceDialogueMode}
+        onDialogueModeChange={setVoiceDialogueMode}
         onLoadDialogueSample={() =>
-          setVoiceoverDraftScript(
+          setVoiceScriptText(
             "Nilar: မင်္ဂလာပါရှင်! ဒီနေ့တော့ အရမ်းမိုက်တဲ့ အကြောင်းအရာလေးကို မျှဝေပေးမယ်နော်။\nThiha: ဟုတ်ပါတယ်! နားထောင်ရတာလည်း ရှင်းလင်းပြီး အသုံးဝင်မှာ သေချာပါတယ်။"
           )
         }
-        musicPreset={musicPreset}
-        onMusicPresetChange={setMusicPreset}
-        customMusicFile={customMusicFile}
-        onCustomMusicFileChange={setCustomMusicFile}
+        musicPreset={voiceMusicPreset}
+        onMusicPresetChange={setVoiceMusicPreset}
+        customMusicFile={voiceCustomMusicFile}
+        onCustomMusicFileChange={setVoiceCustomMusicFile}
         activeVoiceType={activeNarratorType}
         onLoadStoryToCanvas={(text) => {
-          setVoiceoverDraftScript(text)
+          setVoiceScriptText(text)
           toast.success("စာသားကွက်ထဲသို့ ထည့်သွင်းပြီးပါပြီ။")
         }}
       />

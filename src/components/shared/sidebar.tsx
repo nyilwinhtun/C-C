@@ -18,6 +18,7 @@ import { QuickIdeaDialog } from "@/components/shared/quick-idea-dialog"
 import { SquircleIcon } from "@/components/shared/squircle-icon"
 import { getRoomForPageKey, WORKSPACE_ROOMS, type WorkspaceRoom } from "@/components/shared/rooms"
 import { useUIStore, type UIState } from "@/store/useUIStore"
+import { useContentStore } from "@/store/useContentStore"
 import { useShallow } from "zustand/react/shallow"
 import { supabase } from "@/lib/supabase"
 import { toast } from "@/components/ui/sonner"
@@ -28,9 +29,17 @@ interface RoomNavButtonProps {
   active: boolean
   onSelect: (defaultPageKey: string) => void
   collapsed: boolean
+  bgIndicator?: { current: number; total: number } | boolean
 }
 
-function RoomNavButton({ room, language, active, onSelect, collapsed }: RoomNavButtonProps) {
+function RoomNavButton({
+  room,
+  language,
+  active,
+  onSelect,
+  collapsed,
+  bgIndicator,
+}: RoomNavButtonProps) {
   const label = language === "my" ? room.titleMy : room.titleEn
 
   return (
@@ -41,7 +50,7 @@ function RoomNavButton({ room, language, active, onSelect, collapsed }: RoomNavB
         onSelect(room.defaultPageKey)
       }}
       className={cn(
-        "flex w-full items-center gap-3 rounded-[14px] px-2.5 py-2 text-sm font-medium transition-all duration-150 active:scale-[0.98] leading-relaxed font-myanmar cursor-pointer",
+        "relative flex w-full items-center gap-3 rounded-[14px] px-2.5 py-2 text-sm font-medium transition-all duration-150 active:scale-[0.98] leading-relaxed font-myanmar cursor-pointer",
         active
           ? "bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B]"
           : "text-foreground/80 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
@@ -50,13 +59,32 @@ function RoomNavButton({ room, language, active, onSelect, collapsed }: RoomNavB
       title={collapsed ? label : undefined}
     >
       {collapsed ? (
-        <span className="mx-auto">
+        <span className="relative mx-auto">
           <SquircleIcon icon={room.icon} tone={room.tone} size="sm" active={active} />
+          {bgIndicator && (
+            <span
+              className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-[#FAF8F5] dark:ring-[#18181B] animate-pulse"
+              aria-label="Voiceover generating in background"
+            />
+          )}
         </span>
       ) : (
         <>
           <SquircleIcon icon={room.icon} tone={room.tone} size="sm" active={active} />
           <span className="flex-1 text-left truncate text-[13px] font-medium">{label}</span>
+          {bgIndicator && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-amber-700 dark:text-amber-300 shrink-0"
+              aria-label="Voiceover generating in background"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+              {typeof bgIndicator === "object" && bgIndicator.total > 1 && (
+                <span>
+                  {bgIndicator.current}/{bgIndicator.total}
+                </span>
+              )}
+            </span>
+          )}
         </>
       )}
     </button>
@@ -95,6 +123,15 @@ export function Sidebar() {
 
   const collapsed = sidebarCollapsed && !hovered
   const activeRoom = getRoomForPageKey(activePageKey)
+
+  const { ttsStatus, ttsProgress } = useContentStore(
+    useShallow((state) => ({
+      ttsStatus: state.ttsStatus,
+      ttsProgress: state.ttsProgress,
+    }))
+  )
+  const isBgTtsActive =
+    (ttsStatus === "preparing" || ttsStatus === "generating") && activePageKey !== "voiceover"
 
   const handleSignOut = async () => {
     setLoggingOut(true)
@@ -158,6 +195,11 @@ export function Sidebar() {
                   setActivePageKey(key)
                 }}
                 collapsed={collapsed}
+                bgIndicator={
+                  room.id === "audio" && isBgTtsActive
+                    ? ttsProgress ?? true
+                    : undefined
+                }
               />
             ))}
           </nav>

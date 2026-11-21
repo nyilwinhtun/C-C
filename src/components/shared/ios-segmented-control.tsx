@@ -8,6 +8,7 @@ export interface SegmentedOption<T extends string = string> {
   value: T
   label: string
   icon?: LucideIcon
+  badge?: React.ReactNode
 }
 
 interface IosSegmentedControlProps<T extends string = string> {
@@ -117,6 +118,7 @@ export function IosSegmentedControl<T extends string = string>({
               />
             )}
             <span>{opt.label}</span>
+            {opt.badge}
           </button>
         )
       })}

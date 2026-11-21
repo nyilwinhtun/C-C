@@ -207,7 +207,7 @@ function integerToBurmeseWords(n: number): string {
     largeParts.push(smallPart)
   }
 
-  return largeParts.join(" ")
+  return largeParts.join("")
 }
 
 function numericStringToBurmeseWords(rawNum: string): string {
@@ -268,6 +268,24 @@ const ENGLISH_TO_BURMESE_PHONETICS: ReadonlyArray<[RegExp, string]> = [
   [/\breels?\b/gi, "ရီးလ်စ်"],
   [/\blive\b/gi, "လိုက်ဖ်"],
   [/\bcod\b/gi, "စီအိုဒီ"],
+  [/\b(?:kbzpay|kpay)\b/gi, "ကေပေး"],
+  [/\bwavepay\b/gi, "ဝေ့ဖ်ပေး"],
+  [/\bvip\b/gi, "ဗီအိုင်ပီ"],
+  [/\bdm\b/gi, "ဒီအမ်"],
+  [/\bygn\b/gi, "ရန်ကုန်"],
+  [/\bmdy\b/gi, "မန္တလေး"],
+  [/\bnpt\b/gi, "နေပြည်တော်"],
+  [/\b(?:ph|tel)\s*[:.]\s*/gi, "ဖုန်းနံပါတ် "],
+  [/\bno\.\s*/gi, "နံပါတ် "],
+  [/\bqty\b/gi, "အရေအတွက်"],
+  [/\bpcs\b/gi, "ခု"],
+  [/\bkg\b/gi, "ကီလိုဂရမ်"],
+  [/\bml\b/gi, "မီလီလီတာ"],
+  [/\bhrs?\b/gi, "နာရီ"],
+  [/\bmins?\b/gi, "မိနစ်"],
+  [/\bsecs?\b/gi, "စက္ကန့်"],
+  [/\betc\.?/gi, "စသည်ဖြင့်"],
+  [/\bvs\.?/gi, "နှင့်"],
 ]
 
 export interface PronunciationRule {
@@ -351,6 +369,13 @@ export function normalizeBurmeseForTTS(
   // Convert Myanmar digits (၀-၉) to Arabic digits (0-9) so unified number parsing handles both
   text = myanmarDigitsToArabic(text)
 
+  // Expand shorthand k/K thousands (e.g. 15k -> 15000, 1.5k -> 1500)
+  text = text.replace(/(?<![\d.])(\d+(?:\.\d+)?)\s*[kK]\b/g, (_match, num: string) => {
+    const parsed = Number.parseFloat(num)
+    if (!Number.isFinite(parsed)) return _match
+    return String(Math.round(parsed * 1000))
+  })
+
   // Convert percentages (special case 100% -> ရာနှုန်းပြည့်)
   text = text.replace(/(?<![\d.])(\d[\d,]*(?:\.\d+)?)\s*%/g, (_match, num: string) => {
     if (num.replace(/,/g, "") === "100") {
@@ -391,12 +416,13 @@ export function normalizeBurmeseForTTS(
     numericStringToBurmeseWords(num)
   )
 
-  // Convert slashes, pipes, commas, and hyphens into natural Burmese pauses
+  // Convert slashes, pipes, commas, semicolons, and hyphens into natural Burmese breath pauses
   text = text
+    .replace(/\.{2,}|…/g, "။ ")
     .replace(/\s*\|\s*/g, "။ ")
     .replace(/\s*\/\s*/g, "၊ ")
     .replace(/\s*[-–—]+\s*/g, "၊ ")
-    .replace(/,\s*/g, "၊ ")
+    .replace(/[;,]\s*/g, "၊ ")
     .replace(/\s*([၊။])\s*/g, "$1 ")
     .replace(/([၊။])(?:\s*[၊။])+/g, "$1 ")
 
@@ -716,6 +742,88 @@ function getSpeedPromptInstruction(speed: VoiceoverSpeed): string {
 }
 
 export const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
+export const GEMINI_SPEECH_PREP_MODEL = "gemini-2.5-flash"
+
+/**
+ * Fast speech-normalization pass using Gemini 2.5 Flash (when an API key is configured)
+ * to convert numbers, years, currency, abbreviations, and symbols into natural spoken
+ * Burmese words and place natural breath pauses (`၊` and `။`) at clause boundaries.
+ * Always falls back cleanly to deterministic `normalizeBurmeseForTTS`.
+ */
+export async function prepareBurmeseSpeechText(
+  rawText: string,
+  customRules?: ReadonlyArray<PronunciationRule>,
+  useAiSpeechPrep = true
+): Promise<string> {
+  const deterministic = normalizeBurmeseForTTS(rawText, customRules)
+  if (!deterministic || !useAiSpeechPrep) return deterministic
+
+  const apiKey = getSavedGeminiApiKey()
+  if (!apiKey) return deterministic
+
+  // Apply custom rules & strip formatting first, but pass the pre-number-normalized
+  // text to Flash only if rawText has digits/abbreviations/long unpunctuated clauses,
+  // or pass deterministic text so Flash can refine breath pauses (`၊`, `။`) and phrasing.
+  const controller = new AbortController()
+  const timeoutId =
+    typeof window !== "undefined"
+      ? window.setTimeout(() => controller.abort(), 5500)
+      : undefined
+
+  try {
+    const cleanKey = apiKey.trim()
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_SPEECH_PREP_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
+    const prepPrompt = [
+      "You are a Burmese (Myanmar) speech-normalization preprocessor for Text-to-Speech.",
+      "Rewrite the input text ONLY for natural spoken Burmese TTS delivery:",
+      "1. Convert any remaining numbers, years, prices, currencies, percentages, and symbols into natural spoken Burmese words (e.g., 2026 -> နှစ်ထောင့်နှစ်ဆယ့်ခြောက်, 100% -> ရာနှုန်းပြည့်, 15,000 -> တစ်သောင်းငါးထောင်).",
+      "2. Expand common abbreviations into spoken Burmese.",
+      "3. Ensure natural Burmese breath pauses using `၊` (comma pause) and `။` (sentence end pause) at natural clause boundaries so sentences are never rushed or slurred.",
+      "4. Keep the exact meaning and words—do NOT summarize, translate, or add intro/commentary. Return ONLY the normalized Burmese speech text.",
+      "",
+      deterministic,
+    ].join("\n")
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": cleanKey,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prepPrompt }] }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 2048,
+        },
+      }),
+    })
+
+    if (!response.ok) return deterministic
+
+    const data = (await response.json()) as {
+      candidates?: Array<{
+        content?: { parts?: Array<{ text?: string }> }
+      }>
+    }
+    const output = data.candidates?.[0]?.content?.parts
+      ?.map((p) => p.text ?? "")
+      .join("")
+      .trim()
+
+    if (!output) return deterministic
+    // Run deterministic pass once more to guarantee no stray digits/markdown remain
+    const finalClean = normalizeBurmeseForTTS(output, customRules)
+    return finalClean || deterministic
+  } catch {
+    return deterministic
+  } finally {
+    if (timeoutId !== undefined && typeof window !== "undefined") {
+      window.clearTimeout(timeoutId)
+    }
+  }
+}
 
 /**
  * Split long scripts cleanly at sentence boundaries (`။` / `.` / newlines / punctuation)
@@ -942,11 +1050,13 @@ async function synthesizeGeminiChunk(
   const cleanKey = apiKey.trim()
   const standardUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TTS_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
   const tonePreset = VOICE_DELIVERY_PRESETS[deliveryTone]
+  const narratorName = preset.id === "male" ? "သီဟ (Thiha)" : "နီလာ (Nilar)"
 
   const prompt = [
-    "You are a professional Burmese (Myanmar) commercial voiceover artist.",
+    `You are ${narratorName}, a native Yangon Myanmar (Burmese) professional voiceover narrator.`,
     tonePreset.styleInstruction,
-    `Read aloud in clear, natural spoken Myanmar with smooth pacing and brief pauses at commas and periods. ${getSpeedPromptInstruction(speed)}`,
+    "Pronunciation & Prosody Direction: Speak in clear, articulate, warm native Yangon Myanmar pronunciation with crisp consonant endings (အသတ်သံများ ပီသကြည်လင်စွာ) and accurate Burmese tonal contours. Use natural Yangon spoken intonation—never stiff, robotic, or English-accented cadence.",
+    `Pacing & Breath Pauses: Pause briefly and naturally after every \`၊\` and take a full, calm breath pause after every \`။\` so sentences are never rushed or slurred. ${getSpeedPromptInstruction(speed)}`,
     "Read ONLY the following Burmese script aloud. Do not add any intro, commentary, or extra words.",
     "",
     chunkText,
@@ -1310,6 +1420,8 @@ export interface GenerateVoiceoverOptions {
   deliveryTone?: VoiceDeliveryTone
   customPronunciations?: ReadonlyArray<PronunciationRule>
   introSfx?: SoundEffectType
+  useAiSpeechPrep?: boolean
+  onStageChange?: (stage: "preparing" | "generating") => void
   onProgress?: (progress: VoiceoverProgress) => void
 }
 
@@ -1645,7 +1757,10 @@ export async function generateBurmeseVoiceover(
 ): Promise<VoiceoverResult> {
   const deliveryTone = options.deliveryTone ?? "storytelling"
   const introSfx = options.introSfx ?? "none"
+  const useAiSpeechPrep = options.useAiSpeechPrep ?? true
   const preset = BURMESE_VOICE_PRESETS[voiceType]
+
+  options.onStageChange?.("preparing")
 
   const rawSegments = parseScriptWithPauses(scriptText)
   const normalizedTimeline: Array<
@@ -1659,12 +1774,18 @@ export async function generateBurmeseVoiceover(
         normalizedTimeline.push(seg)
       }
     } else {
-      const normalized = normalizeBurmeseForTTS(seg.text, options.customPronunciations)
+      const normalized = await prepareBurmeseSpeechText(
+        seg.text,
+        options.customPronunciations,
+        useAiSpeechPrep
+      )
       if (normalized) {
         normalizedTimeline.push({ kind: "speech", text: normalized })
       }
     }
   }
+
+  options.onStageChange?.("generating")
 
   // Trim trailing pauses
   while (
@@ -1829,7 +1950,10 @@ export async function generateBurmeseDialogueVoiceover(
 
   const deliveryTone = options.deliveryTone ?? "storytelling"
   const introSfx = options.introSfx ?? "none"
+  const useAiSpeechPrep = options.useAiSpeechPrep ?? true
   const onProgress = options.onProgress
+
+  options.onStageChange?.("preparing")
 
   const timeline: Array<
     | { kind: "speech"; blob: Blob }
@@ -1839,6 +1963,7 @@ export async function generateBurmeseDialogueVoiceover(
   const cleanedParts: string[] = []
   let lastProvider: VoiceoverResult["provider"] = "neural-tts"
 
+  options.onStageChange?.("generating")
   for (let i = 0; i < turns.length; i += 1) {
     const turn = turns[i]
     onProgress?.({ currentChunk: i + 1, totalChunks: turns.length })
@@ -1846,6 +1971,7 @@ export async function generateBurmeseDialogueVoiceover(
       deliveryTone,
       introSfx: "none",
       customPronunciations: options.customPronunciations,
+      useAiSpeechPrep,
     })
     lastProvider = res.provider
     cleanedParts.push(`${turn.speaker === "female" ? "Nilar" : "Thiha"}: ${res.cleanedText}`)

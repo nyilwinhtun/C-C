@@ -13,6 +13,24 @@ import {
 } from "@/types"
 import { supabase } from "@/lib/supabase"
 import { useUIStore } from "./useUIStore"
+import {
+  cleanVoiceoverText,
+  generateBurmeseDialogueVoiceover,
+  generateBurmeseVoiceover,
+  mixVoiceoverWithAutoDuckingMusic,
+  type BurmeseVoiceType,
+  type VoiceoverSpeed,
+} from "@/api/ttsService"
+import { playBlobUrlWithPrimedAudio } from "@/lib/iosAudio"
+import type { BackgroundMusicPreset } from "@/lib/videoAudioMerger"
+import { toast } from "@/components/ui/sonner"
+
+export type StudioVoiceChoice = "self" | "nilar" | "thiha"
+export type TtsStatus = "idle" | "preparing" | "generating" | "done" | "error"
+export interface TtsProgress {
+  current: number
+  total: number
+}
 
 export interface GeneratedItem {
   id: string
@@ -127,7 +145,25 @@ interface ContentState {
   videoOutputLanguage: "en" | "my"
   videoDurationSeconds: number | null
   generatedVideoResult: VideoContentResult | null
-  voiceoverDraftScript: string
+  voiceScriptText: string
+  selectedVoice: StudioVoiceChoice
+  voiceSpeed: VoiceoverSpeed
+  voiceDialogueMode: boolean
+  voiceMusicPreset: BackgroundMusicPreset
+  voiceCustomMusicFile: File | null
+  ttsStatus: TtsStatus
+  ttsProgress: TtsProgress | null
+  ttsError: string | null
+  generatedAudioUrl: string | null
+  generatedAudioBlob: Blob | null
+  generatedAudioMimeType: string
+  generatedAudioExtension: string
+  generatedAudioDuration: number
+  generatedAudioTitle: string
+  generatedAudioSource: "my_voice" | "narrator" | null
+  selfRecordedBlob: Blob | null
+  selfRecordedMimeType: string
+  selfRecordedNeedsTranscribe: boolean
   customPronunciations: CustomPronunciation[]
   voiceDnaSamples: string[]
   shopProfile: ShopProfile
@@ -157,7 +193,24 @@ interface ContentState {
   setVideoOutputLanguage: (lang: "en" | "my") => void
   setVideoDurationSeconds: (duration: number | null) => void
   setGeneratedVideoResult: (result: VideoContentResult | null) => void
+  setVoiceScriptText: (script: string) => void
   setVoiceoverDraftScript: (script: string) => void
+  setSelectedVoice: (voice: StudioVoiceChoice) => void
+  setVoiceSpeed: (speed: VoiceoverSpeed) => void
+  setVoiceDialogueMode: (enabled: boolean) => void
+  setVoiceMusicPreset: (preset: BackgroundMusicPreset) => void
+  setVoiceCustomMusicFile: (file: File | null) => void
+  setSelfRecordedNeedsTranscribe: (needs: boolean) => void
+  setStudioSelfAudio: (params: {
+    audioUrl: string
+    blob: Blob
+    rawBlob: Blob
+    mimeType: string
+    fileExtension: string
+    durationSeconds: number
+    title: string
+  }) => void
+  generateStudioVoiceover: (scriptOverride?: string) => Promise<void>
   addCustomPronunciation: (word: string, phonetic: string) => void
   removeCustomPronunciation: (id: string) => void
   setVoiceDnaSamples: (samples: string[]) => void
@@ -195,7 +248,7 @@ const defaultDraft: GeneratorFormValues = {
 
 export const useContentStore = create<ContentState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       draftInput: defaultDraft,
       textPostResult: null,
       generatedHistory: [],
@@ -215,7 +268,25 @@ export const useContentStore = create<ContentState>()(
       videoOutputLanguage: "my",
       videoDurationSeconds: null,
       generatedVideoResult: null,
-      voiceoverDraftScript: "",
+      voiceScriptText: "",
+      selectedVoice: "self",
+      voiceSpeed: 1.0,
+      voiceDialogueMode: false,
+      voiceMusicPreset: "none",
+      voiceCustomMusicFile: null,
+      ttsStatus: "idle",
+      ttsProgress: null,
+      ttsError: null,
+      generatedAudioUrl: null,
+      generatedAudioBlob: null,
+      generatedAudioMimeType: "audio/wav",
+      generatedAudioExtension: "wav",
+      generatedAudioDuration: 0,
+      generatedAudioTitle: "",
+      generatedAudioSource: null,
+      selfRecordedBlob: null,
+      selfRecordedMimeType: "audio/wav",
+      selfRecordedNeedsTranscribe: false,
       customPronunciations: [],
       voiceDnaSamples: ["", "", ""],
       shopProfile: {
@@ -311,7 +382,156 @@ export const useContentStore = create<ContentState>()(
       setVideoDurationSeconds: (videoDurationSeconds) => set({ videoDurationSeconds }),
       setGeneratedVideoResult: (generatedVideoResult) =>
         set({ generatedVideoResult }),
-      setVoiceoverDraftScript: (voiceoverDraftScript) => set({ voiceoverDraftScript }),
+      setVoiceScriptText: (voiceScriptText) => set({ voiceScriptText }),
+      setVoiceoverDraftScript: (voiceScriptText) => set({ voiceScriptText }),
+      setSelectedVoice: (selectedVoice) => set({ selectedVoice }),
+      setVoiceSpeed: (voiceSpeed) => set({ voiceSpeed }),
+      setVoiceDialogueMode: (voiceDialogueMode) => set({ voiceDialogueMode }),
+      setVoiceMusicPreset: (voiceMusicPreset) => set({ voiceMusicPreset }),
+      setVoiceCustomMusicFile: (voiceCustomMusicFile) => set({ voiceCustomMusicFile }),
+      setSelfRecordedNeedsTranscribe: (selfRecordedNeedsTranscribe) =>
+        set({ selfRecordedNeedsTranscribe }),
+      setStudioSelfAudio: (params) =>
+        set((state) => {
+          if (state.generatedAudioUrl && state.generatedAudioUrl !== params.audioUrl) {
+            URL.revokeObjectURL(state.generatedAudioUrl)
+          }
+          return {
+            generatedAudioUrl: params.audioUrl,
+            generatedAudioBlob: params.blob,
+            generatedAudioMimeType: params.mimeType,
+            generatedAudioExtension: params.fileExtension,
+            generatedAudioDuration: params.durationSeconds,
+            generatedAudioTitle: params.title,
+            generatedAudioSource: "my_voice",
+            selfRecordedBlob: params.rawBlob,
+            selfRecordedMimeType: params.mimeType,
+            selfRecordedNeedsTranscribe: true,
+            ttsStatus: "done",
+            ttsProgress: null,
+            ttsError: null,
+          }
+        }),
+      generateStudioVoiceover: async (scriptOverride) => {
+        const state = get()
+        if (state.ttsStatus === "preparing" || state.ttsStatus === "generating") {
+          return
+        }
+
+        const rawScript = scriptOverride ?? state.voiceScriptText
+        const cleaned = cleanVoiceoverText(rawScript)
+        if (!cleaned) {
+          const msg = "အသံဖတ်ခိုင်းရန် စာသားအရင်ထည့်ပါ။"
+          set({ ttsStatus: "error", ttsError: msg, ttsProgress: null })
+          toast.error(msg)
+          return
+        }
+
+        const voiceType: BurmeseVoiceType = state.selectedVoice === "thiha" ? "male" : "female"
+        const speed = state.voiceSpeed
+        const dialogueMode = state.voiceDialogueMode
+        const musicPreset = state.voiceMusicPreset
+        const customMusicFile = state.voiceCustomMusicFile
+        const customPronunciations = state.customPronunciations
+
+        set({
+          ttsStatus: "preparing",
+          ttsProgress: null,
+          ttsError: null,
+        })
+
+        try {
+          let result = dialogueMode
+            ? await generateBurmeseDialogueVoiceover(rawScript, speed, {
+                deliveryTone: "storytelling",
+                customPronunciations,
+                onStageChange: (stage) => {
+                  set({ ttsStatus: stage })
+                },
+                onProgress: (p) => {
+                  set({
+                    ttsStatus: "generating",
+                    ttsProgress: { current: p.currentChunk, total: p.totalChunks },
+                  })
+                },
+              })
+            : await generateBurmeseVoiceover(cleaned, voiceType, speed, {
+                deliveryTone: "storytelling",
+                customPronunciations,
+                onStageChange: (stage) => {
+                  set({ ttsStatus: stage })
+                },
+                onProgress: (p) => {
+                  set({
+                    ttsStatus: "generating",
+                    ttsProgress: { current: p.currentChunk, total: p.totalChunks },
+                  })
+                },
+              })
+
+          if (musicPreset !== "none") {
+            const mixed = await mixVoiceoverWithAutoDuckingMusic({
+              voiceoverBlob: result.blob,
+              musicPreset,
+              customMusicFile,
+              musicVolume: 0.34,
+            })
+            URL.revokeObjectURL(result.audioUrl)
+            result = {
+              ...result,
+              audioUrl: mixed.audioUrl,
+              blob: mixed.blob,
+              audioBuffer: mixed.audioBuffer,
+              durationSeconds: mixed.durationSeconds,
+              mimeType: "audio/wav",
+              fileExtension: "wav",
+            }
+          }
+
+          const prevUrl = get().generatedAudioUrl
+          if (prevUrl && prevUrl !== result.audioUrl) {
+            URL.revokeObjectURL(prevUrl)
+          }
+
+          const title = dialogueMode
+            ? "နီလာ + သီဟ"
+            : state.selectedVoice === "thiha"
+              ? "သီဟ"
+              : "နီလာ"
+
+          set({
+            ttsStatus: "done",
+            ttsProgress: null,
+            ttsError: null,
+            generatedAudioUrl: result.audioUrl,
+            generatedAudioBlob: result.blob,
+            generatedAudioMimeType: result.mimeType,
+            generatedAudioExtension: result.fileExtension,
+            generatedAudioDuration: result.durationSeconds,
+            generatedAudioTitle: title,
+            generatedAudioSource: "narrator",
+          })
+
+          get().addAudioSession({
+            script: rawScript.trim(),
+            voiceLabel: title,
+            mode: dialogueMode ? "dialogue" : "single",
+            durationSeconds: result.durationSeconds,
+          })
+
+          if (typeof window !== "undefined") {
+            void playBlobUrlWithPrimedAudio(result.audioUrl)
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "အသံဖိုင် ပြင်ဆင်၍ မရပါ။"
+          set({
+            ttsStatus: "error",
+            ttsProgress: null,
+            ttsError: msg,
+          })
+          toast.error(msg)
+        }
+      },
       setVoiceDnaSamples: (voiceDnaSamples) =>
         set({ voiceDnaSamples: voiceDnaSamples.slice(0, 3) }),
       setShopProfile: (updates) =>

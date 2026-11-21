@@ -16,6 +16,7 @@ import { PWAInstallBanner } from "@/components/shared/pwa-install-banner"
 import { IosSegmentedControl } from "@/components/shared/ios-segmented-control"
 import { WORKSPACE_ROOMS, getRoomForPageKey, getRoomTitle } from "@/components/shared/rooms"
 import { useUIStore } from "@/store/useUIStore"
+import { useContentStore } from "@/store/useContentStore"
 import { useShallow } from "zustand/react/shallow"
 import { cn, triggerHaptic } from "@/lib/utils"
 
@@ -44,6 +45,15 @@ export function Layout() {
       sidebarCollapsed: state.sidebarCollapsed,
     }))
   )
+
+  const { ttsStatus, ttsProgress } = useContentStore(
+    useShallow((state) => ({
+      ttsStatus: state.ttsStatus,
+      ttsProgress: state.ttsProgress,
+    }))
+  )
+  const isBgTtsActive =
+    (ttsStatus === "preparing" || ttsStatus === "generating") && activePageKey !== "voiceover"
 
   useEffect(() => {
     document.documentElement.lang = language
@@ -105,6 +115,20 @@ export function Layout() {
                   value: tab.key,
                   label: language === "my" ? tab.labelMy : tab.labelEn,
                   icon: tab.icon,
+                  badge:
+                    tab.key === "voiceover" && isBgTtsActive ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-amber-700 dark:text-amber-300"
+                        aria-label="Voiceover generating in background"
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                        {ttsProgress && ttsProgress.total > 1 && (
+                          <span>
+                            {ttsProgress.current}/{ttsProgress.total}
+                          </span>
+                        )}
+                      </span>
+                    ) : undefined,
                 }))}
               />
             )}
@@ -147,7 +171,7 @@ export function Layout() {
                 <span
                   key={`${room.id}-${isActive ? "active" : "idle"}`}
                   className={cn(
-                    "inline-flex items-center justify-center px-3 py-1 rounded-full transition-transform duration-300 ease-out",
+                    "relative inline-flex items-center justify-center px-3 py-1 rounded-full transition-transform duration-300 ease-out",
                     isActive
                       ? cn(room.activePillClass, "animate-ios-tab-pop scale-110 -translate-y-0.5")
                       : "bg-transparent scale-100 translate-y-0"
@@ -158,6 +182,12 @@ export function Layout() {
                     strokeWidth={isActive ? 2.2 : 1.75}
                     aria-hidden="true"
                   />
+                  {room.id === "audio" && isBgTtsActive && (
+                    <span
+                      className="absolute top-0.5 right-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-[#FAF8F5] dark:ring-[#18181B] animate-pulse"
+                      aria-label="Voiceover generating in background"
+                    />
+                  )}
                 </span>
                 <span
                   className={cn(
