@@ -40,12 +40,12 @@ export interface MergeVideoAudioResult {
 }
 
 const MIME_CANDIDATES = [
-  "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
-  "video/mp4;codecs=avc1,mp4a",
-  "video/mp4",
   "video/webm;codecs=vp9,opus",
   "video/webm;codecs=vp8,opus",
   "video/webm",
+  "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+  "video/mp4;codecs=avc1,mp4a",
+  "video/mp4",
 ] as const
 
 function pickSupportedVideoMimeType(): string {
@@ -53,11 +53,52 @@ function pickSupportedVideoMimeType(): string {
     throw new Error("MediaRecorder is not supported in this browser.")
   }
   for (const candidate of MIME_CANDIDATES) {
-    if (MediaRecorder.isTypeSupported(candidate)) {
-      return candidate
+    try {
+      if (MediaRecorder.isTypeSupported(candidate)) {
+        return candidate
+      }
+    } catch {
+      // Some WebKit builds throw on unknown codec strings
     }
   }
   return ""
+}
+
+function createSafeVideoMediaRecorder(stream: MediaStream, mimeType: string): MediaRecorder {
+  const attempts: MediaRecorderOptions[] = []
+  if (mimeType) {
+    attempts.push({ mimeType, videoBitsPerSecond: 4_000_000, audioBitsPerSecond: 128_000 })
+    attempts.push({ mimeType, videoBitsPerSecond: 4_000_000 })
+    attempts.push({ mimeType })
+  } else {
+    attempts.push({ videoBitsPerSecond: 4_000_000, audioBitsPerSecond: 128_000 })
+  }
+
+  for (const opts of attempts) {
+    try {
+      return new MediaRecorder(stream, opts)
+    } catch {
+      // Fallback if WebKit rejects bitrate or mimeType options
+    }
+  }
+  return new MediaRecorder(stream)
+}
+
+function resolveRecordedVideoMime(
+  recorderMimeType: string | undefined,
+  chunks: BlobPart[],
+  requestedMime: string
+): string {
+  const firstChunkMime =
+    chunks.length > 0 && chunks[0] instanceof Blob ? chunks[0].type : ""
+  const resolved = recorderMimeType || firstChunkMime || requestedMime
+  if (resolved) return resolved
+
+  const isAppleTouch =
+    typeof navigator !== "undefined" &&
+    (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1))
+  return isAppleTouch ? "video/mp4" : "video/webm"
 }
 
 function getEvenDimension(value: number): number {
@@ -939,15 +980,7 @@ export async function mergeVideoWithVoiceover({
       ...streamDestination.stream.getAudioTracks(),
     ])
 
-    const recorderOptions: MediaRecorderOptions = {
-      videoBitsPerSecond: 4_000_000,
-      audioBitsPerSecond: 128_000,
-    }
-    if (mimeType) {
-      recorderOptions.mimeType = mimeType
-    }
-
-    recorder = new MediaRecorder(combinedStream, recorderOptions)
+    recorder = createSafeVideoMediaRecorder(combinedStream, mimeType)
     const recordedChunks: BlobPart[] = []
 
     recorder.ondataavailable = (event) => {
@@ -1075,7 +1108,11 @@ export async function mergeVideoWithVoiceover({
       recorder.onstop = () => {
         signal?.removeEventListener("abort", handleAbort)
         if (signal?.aborted) return
-        const resolvedMime = recorder?.mimeType || mimeType || "video/webm"
+        const resolvedMime = resolveRecordedVideoMime(
+          recorder?.mimeType,
+          recordedChunks,
+          mimeType
+        )
         resolve(new Blob(recordedChunks, { type: resolvedMime }))
       }
 
@@ -1481,9 +1518,6 @@ export async function exportMultiClipAutoCutVideo(
   }
 
   const mimeType = pickSupportedVideoMimeType()
-  if (!mimeType) {
-    throw new Error("Your browser does not support video recording export.")
-  }
 
   const AudioCtx =
     window.AudioContext ||
@@ -1543,10 +1577,7 @@ export async function exportMultiClipAutoCutVideo(
     ])
 
     const chunks: BlobPart[] = []
-    recorder = new MediaRecorder(combinedStream, {
-      mimeType,
-      videoBitsPerSecond: 4_000_000,
-    })
+    recorder = createSafeVideoMediaRecorder(combinedStream, mimeType)
     recorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) {
         chunks.push(e.data)
@@ -1556,7 +1587,8 @@ export async function exportMultiClipAutoCutVideo(
     const stoppedPromise = new Promise<Blob>((resolve, reject) => {
       if (!recorder) return
       recorder.onstop = () => {
-        resolve(new Blob(chunks, { type: mimeType }))
+        const resolvedMime = resolveRecordedVideoMime(recorder?.mimeType, chunks, mimeType)
+        resolve(new Blob(chunks, { type: resolvedMime }))
       }
       recorder.onerror = () => {
         reject(new Error("MediaRecorder failed during Auto-Cut export."))

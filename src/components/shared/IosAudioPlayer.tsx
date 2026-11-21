@@ -77,7 +77,7 @@ export function IosAudioPlayer({
     const audio = audioRef.current
     if (!audio) return
 
-    const onLoadedMetadata = () => {
+    const syncDuration = () => {
       if (Number.isFinite(audio.duration) && audio.duration > 0) {
         setDuration(audio.duration)
       }
@@ -92,14 +92,22 @@ export function IosAudioPlayer({
     const onPause = () => setIsPlaying(false)
     const onPlay = () => setIsPlaying(true)
 
-    audio.addEventListener("loadedmetadata", onLoadedMetadata)
+    audio.addEventListener("loadedmetadata", syncDuration)
+    audio.addEventListener("loadeddata", syncDuration)
+    audio.addEventListener("canplay", syncDuration)
+    audio.addEventListener("durationchange", syncDuration)
     audio.addEventListener("timeupdate", onTimeUpdate)
     audio.addEventListener("ended", onEnded)
     audio.addEventListener("pause", onPause)
     audio.addEventListener("play", onPlay)
 
+    audio.load()
+
     return () => {
-      audio.removeEventListener("loadedmetadata", onLoadedMetadata)
+      audio.removeEventListener("loadedmetadata", syncDuration)
+      audio.removeEventListener("loadeddata", syncDuration)
+      audio.removeEventListener("canplay", syncDuration)
+      audio.removeEventListener("durationchange", syncDuration)
       audio.removeEventListener("timeupdate", onTimeUpdate)
       audio.removeEventListener("ended", onEnded)
       audio.removeEventListener("pause", onPause)
@@ -172,7 +180,7 @@ export function IosAudioPlayer({
         className
       )}
     >
-      <audio ref={audioRef} src={src} preload="metadata" className="hidden" />
+      <audio ref={audioRef} src={src} playsInline preload="auto" className="hidden" />
 
       {/* Top Metadata Row */}
       {(title || subtitle) && (

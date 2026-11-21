@@ -20,6 +20,13 @@ import {
   type AudioTranscriptionLanguage,
 } from "@/api/aiService"
 import { prepareAudioForGemini } from "@/lib/audioProcessor"
+import {
+  MIN_VALID_RECORDING_BYTES,
+  createSafeAudioMediaRecorder,
+  getAudioContextConstructor,
+  resolveRecordedAudioMime,
+  unlockIosAudio,
+} from "@/lib/iosAudio"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -35,20 +42,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
 import { IosAudioPlayer } from "@/components/shared/IosAudioPlayer"
-
-function pickSupportedRecorderMime(): string {
-  if (typeof MediaRecorder === "undefined") return ""
-  const candidates = [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/mp4",
-    "audio/ogg;codecs=opus",
-  ]
-  for (const c of candidates) {
-    if (MediaRecorder.isTypeSupported(c)) return c
-  }
-  return ""
-}
 
 function formatTimer(seconds: number): string {
   const mins = Math.floor(seconds / 60)
@@ -188,6 +181,8 @@ export function TranscriberPage() {
   }
 
   const startRecording = async () => {
+    unlockIosAudio()
+
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       toast.error(
         isMy
@@ -201,10 +196,7 @@ export function TranscriberPage() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
 
-      const mimeType = pickSupportedRecorderMime()
-      const recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream)
+      const { recorder, mimeType } = createSafeAudioMediaRecorder(stream)
       recorderRef.current = recorder
       chunksRef.current = []
 
@@ -215,26 +207,37 @@ export function TranscriberPage() {
       }
 
       recorder.onstop = () => {
-        const finalMime = recorder.mimeType || mimeType || "audio/webm"
+        const finalMime = resolveRecordedAudioMime(
+          recorder.mimeType,
+          chunksRef.current,
+          mimeType
+        )
         const blob = new Blob(chunksRef.current, { type: finalMime })
         stopMediaResources()
         setIsRecording(false)
-        if (blob.size > 0) {
-          setPreviewFromBlob(
-            blob,
-            isMy ? `အသံသွင်းချက် (${formatTimer(recordingSeconds)})` : "Voice Recording"
+        if (blob.size <= MIN_VALID_RECORDING_BYTES) {
+          toast.error(
+            isMy
+              ? "အသံဖမ်းယူမှု မအောင်မြင်ပါ သို့မဟုတ် အသံတိုလွန်းပါသည် — မိုက်ခရိုဖုန်း ခွင့်ပြုချက်ကို စစ်ဆေးပါ။"
+              : "Recording was empty or too short. Please check microphone permissions and try again."
           )
-          void runTranscription(blob, finalMime)
+          return
         }
+        setPreviewFromBlob(
+          blob,
+          isMy ? `အသံသွင်းချက် (${formatTimer(recordingSeconds)})` : "Voice Recording"
+        )
+        void runTranscription(blob, finalMime)
       }
 
       // Live waveform analyser
-      const AudioCtx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      const AudioCtx = getAudioContextConstructor()
       if (AudioCtx) {
         const ctx = new AudioCtx()
         audioCtxRef.current = ctx
+        if (ctx.state === "suspended") {
+          ctx.resume().catch(() => {})
+        }
         const source = ctx.createMediaStreamSource(stream)
         const analyser = ctx.createAnalyser()
         analyser.fftSize = 64

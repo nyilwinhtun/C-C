@@ -32,6 +32,12 @@ import { useShallow } from "zustand/react/shallow"
 import { isSupportedVideoFile, transcribeAudioWithGemini } from "@/api/aiService"
 import { prepareAudioForGemini } from "@/lib/audioProcessor"
 import {
+  MIN_VALID_RECORDING_BYTES,
+  createSafeAudioMediaRecorder,
+  resolveRecordedAudioMime,
+  unlockIosAudio,
+} from "@/lib/iosAudio"
+import {
   BURMESE_VOICE_PRESETS,
   SOUND_EFFECT_PRESETS,
   VOICE_DELIVERY_PRESETS,
@@ -168,21 +174,6 @@ interface RecordedVoiceResult {
   fileExtension: string
   durationSeconds: number
   label: string
-}
-
-const RECORDER_MIME_CANDIDATES = [
-  "audio/webm;codecs=opus",
-  "audio/webm",
-  "audio/mp4",
-  "audio/ogg;codecs=opus",
-] as const
-
-function pickSupportedAudioRecorderMime(): string {
-  if (typeof MediaRecorder === "undefined") return ""
-  for (const candidate of RECORDER_MIME_CANDIDATES) {
-    if (MediaRecorder.isTypeSupported(candidate)) return candidate
-  }
-  return ""
 }
 
 function formatRecordTimer(seconds: number): string {
@@ -424,6 +415,8 @@ export function VoiceoverPage() {
   }
 
   const startVoiceRecording = async () => {
+    unlockIosAudio()
+
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       toast.error(
         isMy
@@ -437,10 +430,7 @@ export function VoiceoverPage() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
 
-      const mimeType = pickSupportedAudioRecorderMime()
-      const recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream)
+      const { recorder, mimeType } = createSafeAudioMediaRecorder(stream)
       recorderRef.current = recorder
       recordChunksRef.current = []
 
@@ -451,17 +441,27 @@ export function VoiceoverPage() {
       }
 
       recorder.onstop = () => {
-        const finalMime = recorder.mimeType || mimeType || "audio/webm"
+        const finalMime = resolveRecordedAudioMime(
+          recorder.mimeType,
+          recordChunksRef.current,
+          mimeType
+        )
         const blob = new Blob(recordChunksRef.current, { type: finalMime })
         const elapsed = recordingSecondsRef.current
         stopRecorderResources()
         setIsRecordingVoice(false)
-        if (blob.size > 0) {
-          const label = isMy
-            ? `ကိုယ်ပိုင်အသံသွင်းချက် (${formatRecordTimer(elapsed)})`
-            : `My Recording (${formatRecordTimer(elapsed)})`
-          void processRecordedOrUploadedAudio(blob, finalMime, label, undefined, elapsed)
+        if (blob.size <= MIN_VALID_RECORDING_BYTES) {
+          toast.error(
+            isMy
+              ? "အသံဖမ်းယူမှု မအောင်မြင်ပါ သို့မဟုတ် အသံတိုလွန်းပါသည် — မိုက်ခရိုဖုန်း ခွင့်ပြုချက်ကို စစ်ဆေးပါ။"
+              : "Recording was empty or too short. Please check microphone permissions and try again."
+          )
+          return
         }
+        const label = isMy
+          ? `ကိုယ်ပိုင်အသံသွင်းချက် (${formatRecordTimer(elapsed)})`
+          : `My Recording (${formatRecordTimer(elapsed)})`
+        void processRecordedOrUploadedAudio(blob, finalMime, label, undefined, elapsed)
       }
 
       recordingSecondsRef.current = 0
@@ -664,6 +664,7 @@ export function VoiceoverPage() {
   }
 
   const handleGenerateVoice = async () => {
+    unlockIosAudio()
     const trimmed = cleanVoiceoverText(voiceoverDraftScript)
     if (!trimmed) {
       toast.error(
@@ -771,6 +772,7 @@ export function VoiceoverPage() {
     mediaMode === "video" ? Boolean(videoFile) : uploadedPhotos.length >= 2
 
   const handleMergeVideo = async () => {
+    unlockIosAudio()
     if (!hasReadyMedia) {
       toast.error(
         mediaMode === "photos"
@@ -1925,6 +1927,7 @@ export function VoiceoverPage() {
             <div className="pt-1 space-y-2">
               <Button
                 type="button"
+                onTouchStart={() => unlockIosAudio()}
                 onClick={handleGenerateVoice}
                 disabled={isGeneratingVoice || isMergingVideo || !voiceoverDraftScript.trim()}
                 className="w-full min-h-[44px] sm:h-10 text-sm font-semibold bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white border-0 font-myanmar"

@@ -72,7 +72,7 @@ export async function prepareAudioForGemini(blob: Blob): Promise<ProcessedAudioR
   let decoded: AudioBuffer
   try {
     const arrayBuffer = await blob.arrayBuffer()
-    decoded = await decodeCtx.decodeAudioData(arrayBuffer)
+    decoded = await decodeCtx.decodeAudioData(arrayBuffer.slice(0))
   } finally {
     await decodeCtx.close().catch(() => {})
   }
@@ -90,8 +90,15 @@ export async function prepareAudioForGemini(blob: Blob): Promise<ProcessedAudioR
   }
 
   // Mix down to mono and resample to 16kHz
+  const OfflineCtx =
+    window.OfflineAudioContext ||
+    (window as unknown as { webkitOfflineAudioContext?: typeof OfflineAudioContext })
+      .webkitOfflineAudioContext
+  if (!OfflineCtx) {
+    throw new Error("OfflineAudioContext is not supported in this browser.")
+  }
   const targetLength = Math.max(1, Math.ceil(durationSeconds * TARGET_SAMPLE_RATE))
-  const offlineCtx = new OfflineAudioContext(1, targetLength, TARGET_SAMPLE_RATE)
+  const offlineCtx = new OfflineCtx(1, targetLength, TARGET_SAMPLE_RATE)
   const source = offlineCtx.createBufferSource()
   source.buffer = decoded
   source.connect(offlineCtx.destination)
