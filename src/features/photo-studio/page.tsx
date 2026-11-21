@@ -653,7 +653,7 @@ export function PhotoStudioPage() {
       {/* Compact Header Bar: Aspect Ratio Switcher + 1-Tap PNG Download */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2 shadow-sm">
         <div className="flex items-center gap-1.5">
-          {(["1:1", "4:5"] as AspectRatioId[]).map((ratio) => {
+          {(["1:1", "4:5", "9:16"] as AspectRatioId[]).map((ratio) => {
             const active = poster.aspectRatio === ratio
             return (
               <button
@@ -661,13 +661,17 @@ export function PhotoStudioPage() {
                 type="button"
                 onClick={() => updatePoster("aspectRatio", ratio)}
                 className={cn(
-                  "rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors",
+                  "rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap",
                   active
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
               >
-                {ratio === "1:1" ? t(language, "photoStudio.ratioSquare") : t(language, "photoStudio.ratioPortrait")}
+                {ratio === "1:1"
+                  ? t(language, "photoStudio.ratioSquare")
+                  : ratio === "4:5"
+                    ? t(language, "photoStudio.ratioPortrait")
+                    : "9:16 Story / TikTok"}
               </button>
             )
           })}
@@ -696,16 +700,18 @@ export function PhotoStudioPage() {
 
       {/* Main Responsive Studio Grid */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:items-start">
-        {/* Live Canvas Preview (Compact & visible near top on mobile) */}
-        <div className="lg:col-span-5 lg:sticky lg:top-4 space-y-2.5">
-          <div className="flex items-center justify-center rounded-2xl border border-border bg-muted/30 p-2.5 sm:p-3">
+        {/* Live Canvas Preview (Compactly sticky at top on mobile while editing inputs) */}
+        <div className="lg:col-span-5 sticky top-0 z-20 bg-background/95 backdrop-blur-md pb-2 pt-0.5 lg:top-4 lg:bg-transparent lg:backdrop-blur-none lg:pb-0 lg:pt-0 space-y-2.5">
+          <div className="flex items-center justify-center rounded-2xl border border-border bg-muted/30 p-2 sm:p-3">
             <canvas
               ref={canvasRef}
               className={cn(
                 "block rounded-xl shadow-md transition-all duration-200",
                 poster.aspectRatio === "1:1"
-                  ? "aspect-square max-h-[290px] sm:max-h-[360px] lg:max-h-[440px] w-auto max-w-full"
-                  : "aspect-[4/5] max-h-[320px] sm:max-h-[400px] lg:max-h-[480px] w-auto max-w-full"
+                  ? "aspect-square max-h-[210px] sm:max-h-[340px] lg:max-h-[440px] w-auto max-w-full"
+                  : poster.aspectRatio === "4:5"
+                    ? "aspect-[4/5] max-h-[220px] sm:max-h-[380px] lg:max-h-[480px] w-auto max-w-full"
+                    : "aspect-[9/16] max-h-[230px] sm:max-h-[380px] lg:max-h-[480px] w-auto max-w-full"
               )}
             />
           </div>
@@ -1539,6 +1545,34 @@ export function PhotoStudioPage() {
                       aria-label="COD Badge Text"
                     />
                   )}
+
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {[
+                      "💳 KPay / WavePay ရသည်",
+                      "🚚 အိမ်အရောက်ငွေချေ (COD)",
+                      "✨ 100% Authentic",
+                    ].map((badgeLabel) => {
+                      const active = poster.showCodBadge && poster.codBadgeText === badgeLabel
+                      return (
+                        <button
+                          key={badgeLabel}
+                          type="button"
+                          onClick={() => {
+                            updatePoster("showCodBadge", true)
+                            updatePoster("codBadgeText", badgeLabel)
+                          }}
+                          className={cn(
+                            "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer font-myanmar",
+                            active
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border/70 bg-background text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          {badgeLabel}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
 
                 <div className="border-t border-border pt-2.5 space-y-2">

@@ -3,9 +3,10 @@
 import { useCallback, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { Calendar, Copy, FolderKanban, PenLine, Pencil, Plus, Trash2 } from "lucide-react"
+import { Calendar, Copy, FolderKanban, Image, Mic, PenLine, Pencil, Plus, Trash2 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
+import { cleanVoiceoverText } from "@/api/ttsService"
 import type { SavedVaultItem } from "@/store/useContentStore"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
@@ -93,7 +94,7 @@ export function VaultPage() {
     scheduled: t(language, "vault.statusScheduled"),
     posted: t(language, "vault.statusPosted"),
   }
-  const { savedVault, saveToVault, updateVaultItem, deleteVaultItem, setDraftInput } =
+  const { savedVault, saveToVault, updateVaultItem, deleteVaultItem, setDraftInput, setVoiceoverDraftScript, setPosterDraft } =
     useContentStore(
       useShallow((state) => ({
         savedVault: state.savedVault,
@@ -101,6 +102,8 @@ export function VaultPage() {
         updateVaultItem: state.updateVaultItem,
         deleteVaultItem: state.deleteVaultItem,
         setDraftInput: state.setDraftInput,
+        setVoiceoverDraftScript: state.setVoiceoverDraftScript,
+        setPosterDraft: state.setPosterDraft,
       }))
     )
 
@@ -250,6 +253,46 @@ export function VaultPage() {
       )
     },
     [language, setActivePageKey, setDraftInput]
+  )
+
+  const handleSendToVoiceBooth = useCallback(
+    (item: SavedVaultItem) => {
+      const sourceText = item.content.trim() || item.title.trim()
+      if (!sourceText) return
+      setVoiceoverDraftScript(cleanVoiceoverText(sourceText))
+      setActivePageKey("voiceover")
+      toast.success(
+        language === "my"
+          ? "အသံသွင်းခန်းသို့ ပို့ပြီးပါပြီ"
+          : "Sent to Recording Booth"
+      )
+    },
+    [language, setActivePageKey, setVoiceoverDraftScript]
+  )
+
+  const handleSendToPhotoStudio = useCallback(
+    (item: SavedVaultItem) => {
+      const sourceText = item.content.trim() || item.title.trim()
+      if (!sourceText) return
+      const lines = sourceText
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+      setPosterDraft({
+        headline: (item.title.trim() || lines[0] || "").slice(0, 60),
+        spec1: (lines[0] ?? "").slice(0, 40),
+        spec2: (lines[1] ?? "").slice(0, 40),
+        spec3: "",
+        caption: sourceText,
+      })
+      setActivePageKey("photo-studio")
+      toast.success(
+        language === "my"
+          ? "ဓာတ်ပုံစတူဒီယိုသို့ ပို့ပြီးပါပြီ"
+          : "Sent to Photo Studio"
+      )
+    },
+    [language, setActivePageKey, setPosterDraft]
   )
 
 
@@ -555,6 +598,22 @@ export function VaultPage() {
                 >
                   <PenLine className="h-3 w-3 mr-1.5" aria-hidden="true" />
                   {language === "my" ? "စာရေးစက်တွင်သုံးမည်" : "Use in Post Writer"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleSendToVoiceBooth(item)}
+                >
+                  <Mic className="h-3 w-3 mr-1.5" aria-hidden="true" />
+                  {language === "my" ? "🎙️ အသံသွင်းမည်" : "🎙️ Record"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleSendToPhotoStudio(item)}
+                >
+                  <Image className="h-3 w-3 mr-1.5" aria-hidden="true" />
+                  {language === "my" ? "🖼️ ပိုစတာဆွဲမည်" : "🖼️ Poster"}
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => handleCopy(item.content)}>
                   <Copy className="h-3 w-3 mr-1.5" aria-hidden="true" />

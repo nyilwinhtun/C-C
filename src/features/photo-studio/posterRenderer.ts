@@ -798,7 +798,8 @@ export function renderPosterCanvas(
   logoImg: HTMLImageElement | null = null
 ) {
   const width = 1080
-  const height = state.aspectRatio === "4:5" ? 1350 : 1080
+  const height =
+    state.aspectRatio === "9:16" ? 1920 : state.aspectRatio === "4:5" ? 1350 : 1080
 
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width

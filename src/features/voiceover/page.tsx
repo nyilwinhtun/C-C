@@ -5,6 +5,7 @@ import { Loader2, Mic, Pause, Play, Radio, Settings2, Square, Upload } from "luc
 import { useShallow } from "zustand/react/shallow"
 import { transcribeAudioWithGemini } from "@/api/aiService"
 import {
+  VOICE_DELIVERY_PRESETS,
   cleanVoiceoverText,
   estimateSpokenDurationSeconds,
   formatAudioClockDuration,
@@ -79,6 +80,7 @@ export function VoiceoverPage() {
     setVoiceDialogueMode,
     voiceMusicPreset,
     setVoiceMusicPreset,
+    voiceDeliveryTone,
     voiceCustomMusicFile,
     setVoiceCustomMusicFile,
     ttsStatus,
@@ -112,6 +114,7 @@ export function VoiceoverPage() {
       setVoiceDialogueMode: state.setVoiceDialogueMode,
       voiceMusicPreset: state.voiceMusicPreset,
       setVoiceMusicPreset: state.setVoiceMusicPreset,
+      voiceDeliveryTone: state.voiceDeliveryTone,
       voiceCustomMusicFile: state.voiceCustomMusicFile,
       setVoiceCustomMusicFile: state.setVoiceCustomMusicFile,
       ttsStatus: state.ttsStatus,
@@ -346,6 +349,8 @@ export function VoiceoverPage() {
   const wakeLockRef = useRef<WakeLockSentinel | null>(null)
   const recordTimerRef = useRef<number | null>(null)
   const recordingSecondsRef = useRef(0)
+  const isRecordingPausedRef = useRef(false)
+  const [isRecordingPaused, setIsRecordingPaused] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
 
   const acquireWakeLock = useCallback(async () => {
@@ -495,6 +500,8 @@ export function VoiceoverPage() {
       })
 
       recordingSecondsRef.current = 0
+      isRecordingPausedRef.current = false
+      setIsRecordingPaused(false)
       setRecordingSeconds(0)
       setTeleprompterScrolling(true)
       if (teleprompterRef.current) {
@@ -504,6 +511,7 @@ export function VoiceoverPage() {
       void acquireWakeLock()
 
       recordTimerRef.current = window.setInterval(() => {
+        if (isRecordingPausedRef.current) return
         recordingSecondsRef.current += 1
         setRecordingSeconds(recordingSecondsRef.current)
       }, 1000)
@@ -516,11 +524,30 @@ export function VoiceoverPage() {
     }
   }
 
+  const togglePauseRecording = () => {
+    const handle = wavRecorderRef.current
+    if (!handle || !isRecordingVoice) return
+    triggerHaptic(8)
+    if (isRecordingPausedRef.current) {
+      handle.resume()
+      isRecordingPausedRef.current = false
+      setIsRecordingPaused(false)
+      setTeleprompterScrolling(true)
+    } else {
+      handle.pause()
+      isRecordingPausedRef.current = true
+      setIsRecordingPaused(true)
+      setTeleprompterScrolling(false)
+    }
+  }
+
   const stopRecording = async () => {
     triggerHaptic(10)
     const handle = wavRecorderRef.current
     wavRecorderRef.current = null
     const elapsed = recordingSecondsRef.current
+    isRecordingPausedRef.current = false
+    setIsRecordingPaused(false)
     stopRecorderResources()
     setIsRecordingVoice(false)
 
@@ -956,35 +983,89 @@ export function VoiceoverPage() {
         })}
       </div>
 
+      {/* 2.5 Active Settings Summary Pill Bar */}
+      {(() => {
+        const deliveryPreset = VOICE_DELIVERY_PRESETS[voiceDeliveryTone]
+        const deliveryLabel = deliveryPreset
+          ? language === "my"
+            ? deliveryPreset.labelMy
+            : deliveryPreset.label
+          : language === "my"
+            ? "ပုံမှန်"
+            : "Normal"
+        const musicLabel =
+          voiceMusicPreset === "none"
+            ? language === "my"
+              ? "တီးလုံးမပါ"
+              : "No Music"
+            : language === "my"
+              ? "တီးလုံး"
+              : "Music On"
+        return (
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic(6)
+              setSettingsOpen(true)
+            }}
+            className="w-full flex items-center justify-between gap-2 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#27272A]/80 px-3.5 py-2 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] transition-all hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] active:scale-[0.99] cursor-pointer font-myanmar"
+          >
+            <span className="truncate">
+              {`🎭 ${deliveryLabel} · ⚡ ${voiceSpeed.toFixed(1)}x · 🎵 ${musicLabel}`}
+            </span>
+            <span className="shrink-0 text-[11px] font-semibold text-[#57534E] dark:text-[#A1A1AA]">
+              ⚙️ ညှိရန်
+            </span>
+          </button>
+        )
+      })()}
+
       {/* 3. Dynamic Single Primary Action Control */}
       <div className="rounded-[20px] border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] px-5 py-6">
         {selectedVoice === "self" ? (
           <div className="space-y-4">
             {/* Compact Side-by-Side Record Control + Live Reactive Waveform + Tabular Timer */}
             <div className="flex items-center gap-3.5 sm:gap-4">
-              {/* Tactile iPhone Voice Memos-Style Compact Record/Stop Button */}
-              <button
-                type="button"
-                onTouchStart={() => unlockIosAudio()}
-                onClick={isRecordingVoice ? stopRecording : startRecording}
-                disabled={isTranscribing || isGeneratingVoice}
-                aria-label={isRecordingVoice ? "Stop recording" : "Start recording"}
-                className={cn(
-                  "relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 transition-all active:scale-95 cursor-pointer disabled:opacity-50",
-                  isRecordingVoice
-                    ? "border-[#E11D48]/45 bg-[#E11D48]/5"
-                    : "border-[#D6D3D1] dark:border-[#52525B]"
-                )}
-              >
-                <span
+              {/* Tactile iPhone Voice Memos-Style Compact Record/Stop + Pause/Resume Buttons */}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onTouchStart={() => unlockIosAudio()}
+                  onClick={isRecordingVoice ? stopRecording : startRecording}
+                  disabled={isTranscribing || isGeneratingVoice}
+                  aria-label={isRecordingVoice ? "Stop recording" : "Start recording"}
                   className={cn(
-                    "transition-all duration-200 bg-[#E11D48]",
+                    "relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 transition-all active:scale-95 cursor-pointer disabled:opacity-50",
                     isRecordingVoice
-                      ? "h-5 w-5 rounded-[5px]"
-                      : "h-10 w-10 rounded-full hover:bg-[#BE123C]"
+                      ? "border-[#E11D48]/45 bg-[#E11D48]/5"
+                      : "border-[#D6D3D1] dark:border-[#52525B]"
                   )}
-                />
-              </button>
+                >
+                  <span
+                    className={cn(
+                      "transition-all duration-200 bg-[#E11D48]",
+                      isRecordingVoice
+                        ? "h-5 w-5 rounded-[5px]"
+                        : "h-10 w-10 rounded-full hover:bg-[#BE123C]"
+                    )}
+                  />
+                </button>
+
+                {isRecordingVoice && (
+                  <button
+                    type="button"
+                    onClick={togglePauseRecording}
+                    aria-label={isRecordingPaused ? "Resume recording" : "Pause recording"}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4] shadow-2xs transition-all hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] active:scale-95 cursor-pointer"
+                  >
+                    {isRecordingPaused ? (
+                      <Play className="h-4 w-4 fill-current" />
+                    ) : (
+                      <Pause className="h-4 w-4" />
+                    )}
+                  </button>
+                )}
+              </div>
 
               {/* Real-Time 28-Bar Hairline Audio Waveform */}
               <div

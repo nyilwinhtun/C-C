@@ -4,9 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Check,
   Copy,
+  Lightbulb,
   Loader2,
   Mic,
   Plus,
+  RotateCcw,
   SlidersHorizontal,
   Square,
   Trash2,
@@ -48,7 +50,83 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
-import { cn } from "@/lib/utils"
+import { cn, triggerHaptic } from "@/lib/utils"
+
+const HOOK_STARTER_GROUPS: Array<{
+  category: string
+  categoryMy: string
+  hooks: Array<{ labelMy: string; labelEn: string }>
+}> = [
+  {
+    category: "Sales",
+    categoryMy: "အရောင်း",
+    hooks: [
+      {
+        labelMy: "⚡ ဒီနေ့တစ်ရက်တည်း Stock အကန့်အသတ်နဲ့ အထူးလျှော့ဈေး...",
+        labelEn: "⚡ Today only — limited stock special offer...",
+      },
+      {
+        labelMy: "🔥 မေးနေကြတဲ့ ပစ္စည်းလေး Restock ပြန်ဝင်ပါပြီနော်!",
+        labelEn: "🔥 Back in stock — the item everyone's been asking for!",
+      },
+      {
+        labelMy: "💬 ဈေးတန်ပြီး အရည်အသွေးကောင်းတာလေး ရှာနေရင် ဒါလေးကြည့်ပါ...",
+        labelEn: "💬 Looking for great value without compromising quality? Look here...",
+      },
+    ],
+  },
+  {
+    category: "Story",
+    categoryMy: "ဇာတ်လမ်း",
+    hooks: [
+      {
+        labelMy: "🌿 အစတုန်းက ကျွန်တော်/ကျွန်မလည်း ဒီလိုပဲ အခက်အခဲရှိခဲ့ဖူးတယ်...",
+        labelEn: "🌿 Honestly, I used to struggle with this exact same problem...",
+      },
+      {
+        labelMy: "✨ တစ်နေ့ကို ၅ မိနစ်လေးပဲ အချိန်ပေးလိုက်တာနဲ့ ပြောင်းလဲသွားတဲ့ အရာ...",
+        labelEn: "✨ The one 5-minute habit that changed everything for me...",
+      },
+    ],
+  },
+  {
+    category: "Review",
+    categoryMy: "သုံးသပ်ချက်",
+    hooks: [
+      {
+        labelMy: "⭐ ၂ ပတ်တိတိ ကိုယ်တိုင်သုံးကြည့်ပြီးမှ ပြန်ပြောပြချင်တဲ့ အမှန်တရား...",
+        labelEn: "⭐ My honest review after using this daily for 2 weeks...",
+      },
+      {
+        labelMy: "👍 ဝယ်ပြီးသား Customer တွေအကုန် ထပ်မှာနေကြရတဲ့ အကြောင်းအရင်း ၃ ချက်...",
+        labelEn: "👍 3 reasons why customers keep coming back for this...",
+      },
+    ],
+  },
+]
+
+function countGraphemes(text: string, locale: string): number {
+  if (!text) return 0
+  if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+    const SegmenterCtor = (
+      Intl as unknown as {
+        Segmenter: new (
+          locale?: string,
+          options?: { granularity: "grapheme" | "word" | "sentence" }
+        ) => { segment: (input: string) => Iterable<unknown> }
+      }
+    ).Segmenter
+    const segmenter = new SegmenterCtor(locale === "my" ? "my" : "en", {
+      granularity: "grapheme",
+    })
+    let count = 0
+    for (const _ of segmenter.segment(text)) {
+      count += 1
+    }
+    return count
+  }
+  return Array.from(text).length
+}
 
 const FORMAT_CHIPS: Array<{
   id: EditorialFormatOption
@@ -161,6 +239,11 @@ export function GeneratorPage() {
   rawNotesRef.current = rawNotes
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [hookStartersOpen, setHookStartersOpen] = useState(false)
+  const [undoDraftSnapshot, setUndoDraftSnapshot] = useState<{
+    option: "A" | "B"
+    text: string
+  } | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [polishingAction, setPolishingAction] = useState<
     "hooks" | "shorten" | "humanize" | null
@@ -215,6 +298,7 @@ export function GeneratorPage() {
 
   const handleClearCanvas = () => {
     setRawNotes("")
+    setUndoDraftSnapshot(null)
     clearTextPostDraft()
     clearEditorialResult()
   }
@@ -410,6 +494,7 @@ export function GeneratorPage() {
         hooks: [],
         createdAt: new Date().toISOString(),
       })
+      setUndoDraftSnapshot(null)
 
       addGeneratedItem({
         topic: trimmed,
@@ -490,16 +575,18 @@ export function GeneratorPage() {
   const handlePolish = async (mode: "shorten" | "humanize") => {
     if (!editorialResult || !activeText.trim()) return
     const targetOption = editorialResult.activeOption
+    const previousText = activeText
     setPolishingAction(mode)
     try {
       const refined = await polishEditorialDraft({
-        currentDraft: activeText,
+        currentDraft: previousText,
         mode,
         tone: editorialTone,
         voiceDnaSamples,
       })
       const latest = useContentStore.getState().editorialResult
       if (!latest) return
+      setUndoDraftSnapshot({ option: targetOption, text: previousText })
       setEditorialResult(
         targetOption === "A"
           ? { ...latest, optionA: refined, hooks: [] }
@@ -582,12 +669,40 @@ export function GeneratorPage() {
     toast.success(t(language, "postWriter.toast.savedVault"))
   }
 
-  const hookPreviewText = (() => {
+  const handleUndoPolish = () => {
+    if (!editorialResult || !undoDraftSnapshot) return
+    triggerHaptic(8)
+    setEditorialResult(
+      undoDraftSnapshot.option === "A"
+        ? { ...editorialResult, optionA: undoDraftSnapshot.text }
+        : { ...editorialResult, optionB: undoDraftSnapshot.text }
+    )
+    setUndoDraftSnapshot(null)
+    toast.success(
+      language === "my" ? "မူလစာသားသို့ ပြန်ယူပြီးပါပြီ" : "Restored original draft"
+    )
+  }
+
+  const handleInsertHookStarter = (hookText: string) => {
+    triggerHaptic(6)
+    const current = rawNotesRef.current.trim()
+    const next = current ? `${hookText}\n\n${current}` : `${hookText}\n`
+    handleNotesChange(next)
+    setHookStartersOpen(false)
+    toast.success(
+      language === "my"
+        ? "အဖွင့်စာကြောင်း ထည့်သွင်းပြီးပါပြီ"
+        : "Hook starter inserted"
+    )
+  }
+
+  const openingLineText = (() => {
     const trimmed = activeText.trim()
     if (!trimmed) return ""
-    const lines = trimmed.split("\n").slice(0, 3).join("\n")
-    return lines.length > 135 ? `${lines.slice(0, 135).trimEnd()}...` : lines
+    return trimmed.split("\n").slice(0, 3).join("\n")
   })()
+  const openingGraphemes = countGraphemes(openingLineText, language)
+  const FB_SEE_MORE_LIMIT = 125
 
   const handleVoiceSampleChange = (index: number, value: string) => {
     const next = [...voiceDnaSamples]
@@ -708,48 +823,67 @@ export function GeneratorPage() {
             )}
           </div>
 
-          <button
-            type="button"
-            disabled={isTranscribing}
-            onClick={isRecording ? handleStopRecording : handleStartRecording}
-            aria-label={isRecording ? t(language, "postWriter.micStop") : t(language, "postWriter.micStart")}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all active:scale-95 disabled:opacity-50",
-              isRecording
-                ? "bg-red-500/12 text-red-600 ring-1 ring-red-500/30 dark:bg-red-500/20 dark:text-red-400"
-                : "bg-secondary/80 text-foreground hover:bg-secondary"
-            )}
-          >
-            {isRecording ? (
-              <>
-                <Square className="h-3.5 w-3.5 fill-current" />
-                <span>{t(language, "postWriter.micStop")}</span>
-              </>
-            ) : (
-              <>
-                <Mic className="h-3.5 w-3.5" />
-                <span>{t(language, "postWriter.micStart")}</span>
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic(6)
+                setHookStartersOpen(true)
+              }}
+              className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-all hover:bg-muted active:scale-95 cursor-pointer font-myanmar"
+            >
+              <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
+              <span className="hidden sm:inline">
+                {language === "my" ? "💡 အဖွင့်စာကြောင်း နမူနာများ" : "💡 Hook Starters"}
+              </span>
+              <span className="sm:hidden">
+                {language === "my" ? "💡 နမူနာ" : "💡 Hooks"}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              disabled={isTranscribing}
+              onClick={isRecording ? handleStopRecording : handleStartRecording}
+              aria-label={isRecording ? t(language, "postWriter.micStop") : t(language, "postWriter.micStart")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all active:scale-95 disabled:opacity-50",
+                isRecording
+                  ? "bg-red-500/12 text-red-600 ring-1 ring-red-500/30 dark:bg-red-500/20 dark:text-red-400"
+                  : "bg-secondary/80 text-foreground hover:bg-secondary"
+              )}
+            >
+              {isRecording ? (
+                <>
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                  <span>{t(language, "postWriter.micStop")}</span>
+                </>
+              ) : (
+                <>
+                  <Mic className="h-3.5 w-3.5" />
+                  <span>{t(language, "postWriter.micStart")}</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Primary Action Row + Settings Trigger */}
-      <div className="mt-3.5 flex items-center gap-2.5">
+      <div className="mt-3.5 flex items-center gap-2">
         <Button
           type="button"
           onClick={handleGenerate}
           disabled={isGenerating || isRecording || isTranscribing}
-          className="h-11 flex-1 rounded-xl bg-neutral-900 text-[15px] font-medium text-white shadow-xs transition-all hover:bg-neutral-800 active:scale-[0.99] dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+          className="h-11 min-w-0 flex-1 rounded-xl bg-neutral-900 px-3 text-[14px] sm:text-[15px] font-medium text-white shadow-xs transition-all hover:bg-neutral-800 active:scale-[0.99] dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200 whitespace-nowrap"
         >
           {isGenerating ? (
             <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              {t(language, "postWriter.writing")}
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin shrink-0" />
+              <span className="truncate">{t(language, "postWriter.writing")}</span>
             </>
           ) : (
-            t(language, "postWriter.writeBtn")
+            <span className="truncate">{t(language, "postWriter.writeBtn")}</span>
           )}
         </Button>
 
@@ -757,7 +891,7 @@ export function GeneratorPage() {
           type="button"
           variant="outline"
           onClick={() => setHistoryOpen(true)}
-          className="h-11 shrink-0 rounded-xl border-border/80 bg-card px-3.5 text-[14px] font-medium text-foreground shadow-xs hover:bg-muted/70"
+          className="h-11 shrink-0 rounded-xl border-border/80 bg-card px-2.5 sm:px-3.5 text-[13px] sm:text-[14px] font-medium text-foreground shadow-xs hover:bg-muted/70 whitespace-nowrap"
         >
           <span>{t(language, "postWriter.historyBtn")}</span>
         </Button>
@@ -766,7 +900,7 @@ export function GeneratorPage() {
           type="button"
           variant="outline"
           onClick={() => setSettingsOpen(true)}
-          className="h-11 shrink-0 rounded-xl border-border/80 bg-card px-3.5 text-[14px] font-medium text-foreground shadow-xs hover:bg-muted/70"
+          className="h-11 shrink-0 rounded-xl border-border/80 bg-card px-2.5 sm:px-3.5 text-[13px] sm:text-[14px] font-medium text-foreground shadow-xs hover:bg-muted/70 whitespace-nowrap"
         >
           <span>{t(language, "postWriter.settingsBtn")}</span>
         </Button>
@@ -833,18 +967,37 @@ export function GeneratorPage() {
               </div>
             </div>
 
-            {hookPreviewText && (
-              <div className="border-b border-border/40 bg-[#FAF8F5]/75 dark:bg-[#18181B]/45 px-4 pt-3 pb-2.5 sm:px-5">
-                <p className="text-[13px] leading-[1.65] text-foreground/85 whitespace-pre-wrap line-clamp-3 font-myanmar">
-                  {hookPreviewText}
-                </p>
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="h-px flex-1 border-t border-dashed border-[#D6D3D1] dark:border-[#3F3F46]" />
-                  <span className="shrink-0 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-2.5 py-0.5 text-[10px] font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
-                    {t(language, "postWriter.seeMoreLine")}
+            {activeText.trim() && (
+              <div className="flex items-center justify-between gap-2 border-b border-border/40 bg-[#FAF8F5]/75 dark:bg-[#18181B]/45 px-4 py-1.5 sm:px-5">
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium truncate font-myanmar",
+                    openingGraphemes <= FB_SEE_MORE_LIMIT
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                      : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full shrink-0",
+                      openingGraphemes <= FB_SEE_MORE_LIMIT ? "bg-emerald-500" : "bg-amber-500"
+                    )}
+                  />
+                  <span className="truncate">
+                    {language === "my"
+                      ? `FB "See More..." အဖွင့်: ${openingGraphemes}/${FB_SEE_MORE_LIMIT}`
+                      : `FB "See More..." Hook: ${openingGraphemes}/${FB_SEE_MORE_LIMIT}`}
                   </span>
-                  <span className="h-px flex-1 border-t border-dashed border-[#D6D3D1] dark:border-[#3F3F46]" />
-                </div>
+                </span>
+                <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+                  {openingGraphemes <= FB_SEE_MORE_LIMIT
+                    ? language === "my"
+                      ? "✓ ကွက်တိ"
+                      : "Fits"
+                    : language === "my"
+                      ? "✂️ ရှည်နေသည်"
+                      : "Over"}
+                </span>
               </div>
             )}
 
@@ -968,9 +1121,72 @@ export function GeneratorPage() {
               <span>🎙️</span>
               <span>{t(language, "postWriter.sendToBooth")}</span>
             </button>
+
+            {undoDraftSnapshot &&
+              undoDraftSnapshot.option === editorialResult.activeOption && (
+                <button
+                  type="button"
+                  onClick={handleUndoPolish}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-500/20 active:scale-95 cursor-pointer font-myanmar"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  <span>
+                    {language === "my"
+                      ? "↩️ မူလစာသားပြန်ယူမည်"
+                      : "↩️ Undo Polish"}
+                  </span>
+                </button>
+              )}
           </div>
         </div>
       )}
+
+      {/* 1-Tap Hook Starters Bottom Sheet */}
+      <Sheet open={hookStartersOpen} onOpenChange={setHookStartersOpen} side="bottom">
+        <div className="mx-auto mt-2.5 h-1.5 w-10 rounded-full bg-muted-foreground/30" />
+        <SheetHeader className="border-b border-border/50 px-5 py-3.5">
+          <div>
+            <SheetTitle className="flex items-center gap-2 text-base font-semibold font-myanmar">
+              <Lightbulb className="h-4 w-4 text-amber-500" />
+              <span>
+                {language === "my"
+                  ? "💡 အဖွင့်စာကြောင်း နမူနာများ"
+                  : "💡 1-Tap Hook Starters"}
+              </span>
+            </SheetTitle>
+            <SheetDescription className="text-xs font-myanmar">
+              {language === "my"
+                ? "နှိပ်လိုက်ရုံဖြင့် စာရေးစက်ထဲသို့ တိုက်ရိုက်ထည့်သွင်းပေးပါမည်"
+                : "Tap any proven hook to insert it at the top of your draft notes"}
+            </SheetDescription>
+          </div>
+          <SheetClose onClick={() => setHookStartersOpen(false)} />
+        </SheetHeader>
+        <SheetContent className="max-h-[70vh] space-y-4 overflow-y-auto border-b-0 px-5 py-4 pb-8">
+          {HOOK_STARTER_GROUPS.map((group) => (
+            <div key={group.category} className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground font-myanmar">
+                {language === "my" ? group.categoryMy : group.category}
+              </p>
+              <div className="space-y-1.5">
+                {group.hooks.map((hook, idx) => {
+                  const label = language === "my" ? hook.labelMy : hook.labelEn
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleInsertHookStarter(label)}
+                      className="block w-full rounded-xl border border-border/70 bg-background/80 px-3.5 py-2.5 text-left text-[13px] leading-relaxed text-foreground transition-all hover:border-foreground/30 hover:bg-muted/60 active:scale-[0.99] cursor-pointer font-myanmar"
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </SheetContent>
+      </Sheet>
 
       <RecentHistorySheet
         open={historyOpen}

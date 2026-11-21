@@ -254,6 +254,9 @@ export async function playBlobUrlWithPrimedAudio(blobUrl: string): Promise<HTMLA
 }
 
 export interface WavAudioRecorderHandle {
+  pause: () => void
+  resume: () => void
+  isPaused: () => boolean
   stop: () => Promise<{
     blob: Blob
     mimeType: "audio/wav"
@@ -324,6 +327,7 @@ export function createWavAudioRecorder(
     (ctx.sampleRate || 44100) * ((options?.chunkIntervalMs ?? 3500) / 1000)
   )
   let stopped = false
+  let paused = false
 
   const flushSegment = (minDurationSeconds: number) => {
     if (!options?.onChunk || segmentSamples === 0) return
@@ -348,7 +352,7 @@ export function createWavAudioRecorder(
   }
 
   processor.onaudioprocess = (event) => {
-    if (stopped) return
+    if (stopped || paused) return
     const input = event.inputBuffer.getChannelData(0)
     if (input.length === 0) return
     const copy = new Float32Array(input.length)
@@ -383,6 +387,11 @@ export function createWavAudioRecorder(
 
     const tick = () => {
       if (stopped || !analyser) return
+      if (paused) {
+        options.onBars?.(Array(barCount).fill(10))
+        rafId = requestAnimationFrame(tick)
+        return
+      }
       analyser.getByteFrequencyData(freqData)
       const bars: number[] = []
       for (let i = 0; i < barCount; i += 1) {
@@ -420,6 +429,16 @@ export function createWavAudioRecorder(
   }
 
   return {
+    pause: () => {
+      paused = true
+    },
+    resume: () => {
+      paused = false
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {})
+      }
+    },
+    isPaused: () => paused,
     stop: async () => {
       const sampleRate = ctx.sampleRate || 44100
       await cleanup()

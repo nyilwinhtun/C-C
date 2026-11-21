@@ -64,7 +64,7 @@ export function IosSegmentedControl<T extends string = string>({
       role="tablist"
       aria-label={ariaLabel}
       className={cn(
-        "relative inline-flex flex-wrap sm:flex-nowrap items-center gap-0.5 rounded-[14px] bg-[#F0EDE8] dark:bg-[#27272A] p-1 border border-[#E7E5E4] dark:border-[#3F3F46]",
+        "relative inline-flex flex-nowrap items-center gap-0.5 overflow-x-auto no-scrollbar rounded-[14px] bg-[#F0EDE8] dark:bg-[#27272A] p-1 border border-[#E7E5E4] dark:border-[#3F3F46]",
         fullWidthOnMobile ? "w-full sm:w-auto" : "w-auto",
         className
       )}
@@ -101,7 +101,7 @@ export function IosSegmentedControl<T extends string = string>({
               }
             }}
             className={cn(
-              "relative z-10 flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-[11px] px-3 py-1.5 text-xs sm:text-[13px] font-medium transition-colors duration-150 cursor-pointer font-myanmar whitespace-nowrap select-none active:scale-[0.98]",
+              "relative z-10 flex-1 sm:flex-none inline-flex items-center justify-center gap-1 sm:gap-1.5 rounded-[11px] px-2 sm:px-3 py-1.5 text-[11px] sm:text-[13px] font-medium transition-colors duration-150 cursor-pointer font-myanmar whitespace-nowrap select-none active:scale-[0.98]",
               isActive
                 ? "text-foreground font-semibold"
                 : "text-muted-foreground hover:text-foreground"

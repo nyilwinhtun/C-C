@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { X } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn, triggerHaptic } from "@/lib/utils"
 
 interface SheetProps extends React.HTMLAttributes<HTMLDivElement> {
   open: boolean
@@ -11,8 +11,68 @@ interface SheetProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 const Sheet = React.forwardRef<HTMLDivElement, SheetProps>(
-  ({ open, onOpenChange, side = "left", className, ...props }, ref) => {
+  ({ open, onOpenChange, side = "left", className, style, onTouchStart, onTouchMove, onTouchEnd, ...props }, ref) => {
     const handleClose = () => onOpenChange(false)
+    const [dragY, setDragY] = React.useState(0)
+    const [isDragging, setIsDragging] = React.useState(false)
+    const touchStartYRef = React.useRef<number | null>(null)
+    const canDragRef = React.useRef(false)
+
+    React.useEffect(() => {
+      if (!open) {
+        setDragY(0)
+        setIsDragging(false)
+        touchStartYRef.current = null
+        canDragRef.current = false
+      }
+    }, [open])
+
+    const handleSheetTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+      onTouchStart?.(e)
+      if (side !== "bottom" || !open) return
+      const target = e.target as HTMLElement | null
+      const scrollable = target?.closest("[data-sheet-scroll], .overflow-y-auto") as HTMLElement | null
+      const atTop = !scrollable || scrollable.scrollTop <= 0
+      canDragRef.current = atTop
+      touchStartYRef.current = e.touches[0]?.clientY ?? null
+    }
+
+    const handleSheetTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+      onTouchMove?.(e)
+      if (side !== "bottom" || !open || !canDragRef.current || touchStartYRef.current === null) return
+      const currentY = e.touches[0]?.clientY ?? touchStartYRef.current
+      const deltaY = currentY - touchStartYRef.current
+      if (deltaY > 6) {
+        setIsDragging(true)
+        setDragY(deltaY)
+      } else if (deltaY <= 0 && isDragging) {
+        setDragY(0)
+      }
+    }
+
+    const handleSheetTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+      onTouchEnd?.(e)
+      if (side !== "bottom" || !open) return
+      if (isDragging && dragY > 85) {
+        triggerHaptic(8)
+        setDragY(0)
+        setIsDragging(false)
+        touchStartYRef.current = null
+        canDragRef.current = false
+        handleClose()
+        return
+      }
+      setDragY(0)
+      setIsDragging(false)
+      touchStartYRef.current = null
+      canDragRef.current = false
+    }
+
+    const dragStyle: React.CSSProperties | undefined =
+      side === "bottom" && open && dragY > 0
+        ? { ...style, transform: `translateY(${dragY}px)` }
+        : style
+
     return (
       <>
         {open && (
@@ -24,8 +84,15 @@ const Sheet = React.forwardRef<HTMLDivElement, SheetProps>(
         )}
         <div
           ref={ref}
+          onTouchStart={handleSheetTouchStart}
+          onTouchMove={handleSheetTouchMove}
+          onTouchEnd={handleSheetTouchEnd}
+          style={dragStyle}
           className={cn(
-            "fixed z-50 flex flex-col bg-white/92 dark:bg-[#1C1C1E]/95 ios-glass text-foreground shadow-2xl transform transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+            "fixed z-50 flex flex-col bg-white/92 dark:bg-[#1C1C1E]/95 ios-glass text-foreground shadow-2xl transform",
+            isDragging
+              ? "transition-none"
+              : "transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
             side === "bottom"
               ? cn(
                   "inset-x-0 bottom-0 max-h-[88vh] w-full rounded-t-3xl border-t-[0.5px] border-[rgba(60,60,67,0.14)] dark:border-[rgba(84,84,88,0.42)] pb-[max(1rem,env(safe-area-inset-bottom))]",

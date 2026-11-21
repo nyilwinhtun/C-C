@@ -4,7 +4,7 @@ export type PosterTemplateId =
   | "before_after"
   | "review"
 
-export type AspectRatioId = "1:1" | "4:5"
+export type AspectRatioId = "1:1" | "4:5" | "9:16"
 
 export type BrandThemeId =
   | "clean_white"
