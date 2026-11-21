@@ -2355,15 +2355,17 @@ export async function analyzeVideoClipsAndCaptions(
     throw new ApiError(401, "Gemini API key is required in Settings for video clip & caption analysis.")
   }
 
-  let mediaPart: { inlineData: { mimeType: string; data: string } }
+  let mediaParts: Array<{ inlineData: { mimeType: string; data: string } }>
   if (file.size <= VIDEO_DIRECT_MAX_BYTES) {
     const base64 = await fileToBase64(file)
-    mediaPart = {
-      inlineData: {
-        mimeType: inferVideoMimeType(file),
-        data: base64,
+    mediaParts = [
+      {
+        inlineData: {
+          mimeType: inferVideoMimeType(file),
+          data: base64,
+        },
       },
-    }
+    ]
   } else {
     const extracted = await extractKeyframeMedia({
       file,
@@ -2373,7 +2375,7 @@ export async function analyzeVideoClipsAndCaptions(
     if (extracted.mediaParts.length === 0) {
       throw new Error("Could not extract frames from video.")
     }
-    mediaPart = extracted.mediaParts[0]
+    mediaParts = extracted.mediaParts
   }
 
   const langPrompt =
@@ -2389,7 +2391,7 @@ ${langPrompt}`
   const res = await fetchGeminiGenerateContent(GEMINI_VISION_MODEL, geminiKey, {
     contents: [
       {
-        parts: [mediaPart, { text: prompt }],
+        parts: [...mediaParts, { text: prompt }],
       },
     ],
     generationConfig: {
@@ -2925,11 +2927,10 @@ CRITICAL INSTRUCTIONS:
 export async function generateProductScene(
   request: GenerateProductSceneRequest
 ): Promise<GenerateProductSceneResult> {
-  const { provider, apiKey } = getAiConfig()
+  const { apiKeys } = getAiConfig()
   const envGeminiKey =
     (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ?? ""
-  const geminiKey =
-    provider === "gemini" ? apiKey.trim() || envGeminiKey : envGeminiKey
+  const geminiKey = apiKeys.gemini.trim() || envGeminiKey
 
   if (!geminiKey) {
     throw new ApiError(

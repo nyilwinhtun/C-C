@@ -76,6 +76,13 @@ export interface ContentBackupData {
   autoAppendShopCta?: boolean
   savedVault?: SavedVaultItem[]
   generatedHistory?: GeneratedItem[]
+  voiceDnaSamples?: string[]
+  shopProfile?: ShopProfile
+  customPronunciations?: CustomPronunciation[]
+  editorialTone?: EditorialTone
+  editorialLength?: EditorialLength
+  editorialFormat?: EditorialFormat
+  shopLogoDataUrl?: string | null
 }
 
 export interface PosterDraft {
@@ -731,6 +738,67 @@ export const useContentStore = create<ContentState>()(
             typeof data.autoAppendShopCta === "boolean"
               ? data.autoAppendShopCta
               : state.autoAppendShopCta,
+          shopLogoDataUrl:
+            data.shopLogoDataUrl === null || typeof data.shopLogoDataUrl === "string"
+              ? data.shopLogoDataUrl
+              : state.shopLogoDataUrl,
+          voiceDnaSamples: Array.isArray(data.voiceDnaSamples)
+            ? data.voiceDnaSamples.map(String).slice(0, 3)
+            : state.voiceDnaSamples,
+          shopProfile:
+            data.shopProfile && typeof data.shopProfile === "object"
+              ? {
+                  name:
+                    typeof data.shopProfile.name === "string"
+                      ? data.shopProfile.name
+                      : state.shopProfile.name,
+                  phone:
+                    typeof data.shopProfile.phone === "string"
+                      ? data.shopProfile.phone
+                      : state.shopProfile.phone,
+                  address:
+                    typeof data.shopProfile.address === "string"
+                      ? data.shopProfile.address
+                      : state.shopProfile.address,
+                  autoAppend:
+                    typeof data.shopProfile.autoAppend === "boolean"
+                      ? data.shopProfile.autoAppend
+                      : state.shopProfile.autoAppend,
+                }
+              : state.shopProfile,
+          customPronunciations: Array.isArray(data.customPronunciations)
+            ? data.customPronunciations
+                .filter(
+                  (item) =>
+                    item &&
+                    typeof item.word === "string" &&
+                    typeof item.phonetic === "string"
+                )
+                .map((item) => ({
+                  id: item.id || crypto.randomUUID(),
+                  word: item.word.trim(),
+                  phonetic: item.phonetic.trim(),
+                }))
+            : state.customPronunciations,
+          editorialTone:
+            data.editorialTone === "warm_friend" ||
+            data.editorialTone === "calm_clear" ||
+            data.editorialTone === "light_humorous"
+              ? data.editorialTone
+              : state.editorialTone,
+          editorialLength:
+            data.editorialLength === "short" ||
+            data.editorialLength === "medium" ||
+            data.editorialLength === "detailed"
+              ? data.editorialLength
+              : state.editorialLength,
+          editorialFormat:
+            data.editorialFormat === "fb_sales" ||
+            data.editorialFormat === "tiktok_script" ||
+            data.editorialFormat === "product_review" ||
+            data.editorialFormat === "personal_story"
+              ? data.editorialFormat
+              : state.editorialFormat,
           savedVault: Array.isArray(data.savedVault)
             ? data.savedVault.map((item) => ({
                 id: item.id || crypto.randomUUID(),

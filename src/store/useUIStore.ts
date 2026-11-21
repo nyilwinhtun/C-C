@@ -9,7 +9,7 @@ export type ProviderMap = Record<AIProvider, string>
 export function applyThemeToDocument(theme: Theme): void {
   if (typeof document === "undefined") return
   document.documentElement.classList.toggle("dark", theme === "dark")
-  const themeColor = theme === "dark" ? "#121214" : "#FAF8F5"
+  const themeColor = theme === "dark" ? "#18181B" : "#FAF8F5"
   document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => {
     meta.setAttribute("content", themeColor)
   })

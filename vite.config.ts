@@ -24,14 +24,31 @@ export default defineConfig({
     workbox: {
       skipWaiting: true,
       clientsClaim: true,
-      maximumFileSizeToCacheInBytes: 30 * 1024 * 1024,
+      globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+      maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+      runtimeCaching: [
+        {
+          urlPattern: /\.wasm$/i,
+          handler: 'CacheFirst',
+          options: {
+            cacheName: 'wasm-runtime-cache',
+            expiration: {
+              maxEntries: 10,
+              maxAgeSeconds: 60 * 60 * 24 * 90,
+            },
+            cacheableResponse: {
+              statuses: [0, 200],
+            },
+          },
+        },
+      ],
     },
     manifest: {
       name: 'Content Creator Studio',
       short_name: 'Creator Studio',
       description: 'Content Creator Studio Web App',
-      start_url: '/C-C/',
-      scope: '/C-C/',
+      start_url: './',
+      scope: './',
       theme_color: '#FAF8F5',
       background_color: '#FAF8F5',
       display: 'standalone',

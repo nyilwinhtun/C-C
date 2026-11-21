@@ -1,10 +1,19 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Lightbulb, Mic, MicOff, Plus } from "lucide-react"
+import { Lightbulb, Loader2, Mic, MicOff, Plus } from "lucide-react"
 import { SquircleIcon } from "@/components/shared/squircle-icon"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
+import { transcribeAudioWithGemini } from "@/api/aiService"
+import { prepareAudioForGemini } from "@/lib/audioProcessor"
+import {
+  MIN_VALID_RECORDING_BYTES,
+  createWavAudioRecorder,
+  getAudioContextConstructor,
+  unlockIosAudio,
+  type WavAudioRecorderHandle,
+} from "@/lib/iosAudio"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
 import { t } from "@/locales/translations"
@@ -69,18 +78,39 @@ export function QuickIdeaDialog({ open, onOpenChange }: QuickIdeaDialogProps) {
   const [content, setContent] = useState("")
   const [platform, setPlatform] = useState("facebook")
   const [isListening, setIsListening] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const wavRecorderRef = useRef<WavAudioRecorderHandle | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
 
-  const speechSupported = Boolean(getSpeechRecognitionCtor())
+  const canRecordWav =
+    typeof navigator !== "undefined" &&
+    Boolean(navigator.mediaDevices?.getUserMedia) &&
+    Boolean(getAudioContextConstructor())
+  const speechSupported = canRecordWav || Boolean(getSpeechRecognitionCtor())
+
+  const stopMediaResources = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+    }
+  }
 
   useEffect(() => {
-    if (!open && recognitionRef.current) {
-      try {
-        recognitionRef.current.stop()
-      } catch {
-        // Ignore stop errors
+    if (!open) {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop()
+        } catch {
+          // Ignore stop errors
+        }
+        recognitionRef.current = null
       }
-      recognitionRef.current = null
+      if (wavRecorderRef.current) {
+        wavRecorderRef.current.cancel()
+        wavRecorderRef.current = null
+      }
+      stopMediaResources()
       setIsListening(false)
     }
   }, [open])
@@ -95,16 +125,15 @@ export function QuickIdeaDialog({ open, onOpenChange }: QuickIdeaDialogProps) {
         }
         recognitionRef.current = null
       }
+      if (wavRecorderRef.current) {
+        wavRecorderRef.current.cancel()
+        wavRecorderRef.current = null
+      }
+      stopMediaResources()
     }
   }, [])
 
-  const toggleDictation = () => {
-    if (isListening && recognitionRef.current) {
-      recognitionRef.current.stop()
-      setIsListening(false)
-      return
-    }
-
+  const startSpeechFallback = () => {
     const Ctor = getSpeechRecognitionCtor()
     if (!Ctor) {
       toast.error("Voice dictation is not supported in this browser.")
@@ -145,6 +174,103 @@ export function QuickIdeaDialog({ open, onOpenChange }: QuickIdeaDialogProps) {
       setIsListening(false)
       toast.error("Could not start voice dictation.")
     }
+  }
+
+  const toggleDictation = async () => {
+    if (isTranscribing) return
+
+    if (isListening) {
+      if (wavRecorderRef.current) {
+        const handle = wavRecorderRef.current
+        wavRecorderRef.current = null
+        stopMediaResources()
+        setIsListening(false)
+
+        try {
+          const { blob } = await handle.stop()
+          if (blob.size <= MIN_VALID_RECORDING_BYTES) {
+            toast.error(t(language, "postWriter.micEmpty"))
+            return
+          }
+          setIsTranscribing(true)
+          const processed = await prepareAudioForGemini(blob)
+          if (processed.isSilent || !processed.wavBlob) {
+            toast.error(t(language, "postWriter.micNoSpeech"))
+            return
+          }
+          const transcript = await transcribeAudioWithGemini(
+            processed.wavBlob,
+            processed.mimeType,
+            "auto",
+            "quick-idea.wav"
+          )
+          const cleaned = transcript.trim()
+          if (!cleaned) {
+            toast.error(t(language, "postWriter.micNoSpeech"))
+            return
+          }
+          setContent((prev) => (prev.trim() ? `${prev.trim()} ${cleaned}` : cleaned))
+          toast.success(t(language, "postWriter.transcribeSuccess"))
+        } catch (err) {
+          const msg =
+            err instanceof Error ? err.message : t(language, "postWriter.transcribeError")
+          toast.error(msg)
+        } finally {
+          setIsTranscribing(false)
+        }
+        return
+      }
+
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
+        recognitionRef.current = null
+      }
+      setIsListening(false)
+      return
+    }
+
+    const hasGeminiKey = Boolean(
+      useUIStore.getState().apiKeys.gemini?.trim() ||
+        (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim()
+    )
+
+    if (canRecordWav && hasGeminiKey) {
+      unlockIosAudio()
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            noiseSuppression: false,
+            autoGainControl: false,
+            echoCancellation: true,
+          },
+        })
+        streamRef.current = stream
+        wavRecorderRef.current = createWavAudioRecorder(stream, {
+          micFilterMode: useContentStore.getState().micFilterMode,
+        })
+        setIsListening(true)
+        return
+      } catch {
+        stopMediaResources()
+        if (getSpeechRecognitionCtor()) {
+          startSpeechFallback()
+          return
+        }
+        toast.error(t(language, "postWriter.micPermError"))
+        return
+      }
+    }
+
+    if (getSpeechRecognitionCtor()) {
+      startSpeechFallback()
+      return
+    }
+
+    toast.error(
+      language === "my"
+        ? "အသံဖြင့် မှတ်သားရန် Settings တွင် Gemini API Key ထည့်သွင်းပေးပါ။"
+        : "Please save a Gemini API key in Settings to use voice dictation."
+    )
   }
 
   const handleSave = (e: React.FormEvent) => {
@@ -239,10 +365,16 @@ export function QuickIdeaDialog({ open, onOpenChange }: QuickIdeaDialogProps) {
                 type="button"
                 variant={isListening ? "destructive" : "outline"}
                 size="sm"
-                onClick={toggleDictation}
+                disabled={isTranscribing}
+                onClick={() => void toggleDictation()}
                 className="h-9 px-3 text-xs border-border/60 font-myanmar"
               >
-                {isListening ? (
+                {isTranscribing ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" aria-hidden="true" />
+                    {t(language, "postWriter.transcribing")}
+                  </>
+                ) : isListening ? (
                   <>
                     <MicOff className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
                     {t(language, "quickIdea.listening")}

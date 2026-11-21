@@ -40,7 +40,7 @@ export function sanitizeSpeechText(raw: string): string {
     // Remove exact section-only tags like [Hook], [Body], [CTA], [Intro], [Outro], [Scene 1]
     .replace(/\[(hook|body|cta|intro|outro|scene\s*\d*)\]/gi, " ")
     // Remove emojis, pictographs, variation selectors, and ZWJ sequences
-    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D\u20E3]/gu, "")
+    .replace(/(?:\p{Extended_Pictographic}|\uFE0F|\u200D|\u20E3)/gu, "")
     // Remove markdown headings, bold/italic markers, and backticks
     .replace(/[*#`_~]/g, "")
     // Remove leading bullet dashes/symbols at start of lines

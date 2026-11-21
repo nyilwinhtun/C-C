@@ -100,6 +100,7 @@ async function verifyOfflineCredential(
 export function LoginPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [isSignUp, setIsSignUp] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -111,12 +112,44 @@ export function LoginPage() {
     }))
   )
 
-  const handleSignIn = async (e: React.FormEvent) => {
+  const handleContinueOffline = () => {
+    setAuth({ id: "offline-local-user", email: "local@offline.studio" }, "offline-session")
+    toast.success(
+      language === "my"
+        ? "Offline Mode ဖြင့် ဆက်လက်အသုံးပြုနိုင်ပါပြီ"
+        : "Continuing in Offline Mode"
+    )
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     setLoading(true)
 
     try {
+      if (isSignUp) {
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email,
+          password,
+        })
+        if (signUpError) throw signUpError
+
+        await saveOfflineCredential(email, password, data.user?.id)
+        if (data?.session) {
+          setAuth(
+            data.session.user
+              ? { id: data.session.user.id, email: data.session.user.email ?? "" }
+              : null,
+            data.session.access_token
+          )
+          toast.success(t(language, "auth.signInSuccess"))
+        } else {
+          toast.success(t(language, "auth.signUpSuccess"))
+          setIsSignUp(false)
+        }
+        return
+      }
+
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -185,10 +218,10 @@ export function LoginPage() {
           <div className="flex flex-col items-center text-center mb-6">
             <CCLogo size={56} className="h-14 w-14 mb-3 rounded-[16px] shadow-md ring-1 ring-black/5 dark:ring-white/10" />
             <h1 className="text-2xl font-bold tracking-tight text-foreground leading-relaxed">
-              {t(language, "auth.title")}
+              {isSignUp ? t(language, "auth.signUpTitle") : t(language, "auth.title")}
             </h1>
             <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-              {t(language, "auth.signInDesc")}
+              {isSignUp ? t(language, "auth.signUpDesc") : t(language, "auth.signInDesc")}
             </p>
           </div>
 
@@ -198,7 +231,7 @@ export function LoginPage() {
             </div>
           )}
 
-          <form onSubmit={handleSignIn} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="auth-email">{t(language, "auth.email")}</Label>
               <Input
@@ -221,7 +254,7 @@ export function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                autoComplete="current-password"
+                autoComplete={isSignUp ? "new-password" : "current-password"}
                 disabled={loading}
               />
             </div>
@@ -236,11 +269,37 @@ export function LoginPage() {
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                   <span>{t(language, "auth.signingIn")}</span>
                 </span>
+              ) : isSignUp ? (
+                t(language, "auth.createAccount")
               ) : (
                 t(language, "auth.signIn")
               )}
             </Button>
           </form>
+
+          <div className="mt-4 space-y-3 pt-3 border-t border-[#E7E5E4] dark:border-[#3F3F46]">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => {
+                setError(null)
+                setIsSignUp((prev) => !prev)
+              }}
+              className="w-full text-center text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer font-myanmar"
+            >
+              {isSignUp ? t(language, "auth.signIn") : t(language, "auth.createAccount")}
+            </button>
+
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loading}
+              onClick={handleContinueOffline}
+              className="w-full text-xs font-semibold font-myanmar"
+            >
+              ဆက်လက်အသုံးပြုမည် (Offline Mode)
+            </Button>
+          </div>
         </div>
       </div>
     </div>

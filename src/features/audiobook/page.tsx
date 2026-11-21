@@ -121,10 +121,25 @@ export function AudiobookPage() {
     activeUrlsRef.current = []
   }
 
+  const stopAutoQueue = () => {
+    queueRunIdRef.current += 1
+    const audio = queueAudioRef.current
+    if (audio) {
+      audio.pause()
+      audio.removeAttribute("src")
+    }
+    queueCacheRef.current.clear()
+    setQueueActive(false)
+    setQueuePlaying(false)
+    setQueueLoadingChunk(false)
+  }
+
   useEffect(() => {
     return () => {
+      stopAutoQueue()
       revokeAllAudioUrls()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const smartChunks = useMemo(() => {
@@ -143,19 +158,6 @@ export function AudiobookPage() {
   const totalEstimatedSeconds = useMemo(() => {
     return estimateSpokenDurationSeconds(rawText, speed)
   }, [rawText, speed])
-
-  const stopAutoQueue = () => {
-    queueRunIdRef.current += 1
-    const audio = queueAudioRef.current
-    if (audio) {
-      audio.pause()
-      audio.removeAttribute("src")
-    }
-    queueCacheRef.current.clear()
-    setQueueActive(false)
-    setQueuePlaying(false)
-    setQueueLoadingChunk(false)
-  }
 
   const clearGeneratedAudio = () => {
     stopAutoQueue()

@@ -163,7 +163,7 @@ export function Toaster(_props: Record<string, unknown>) {
         setTimeout(() => dismissIslandToast(active.id), 150)
       }}
       className={cn(
-        "fixed top-3 left-1/2 z-[100] flex max-w-[min(92vw,420px)] items-center gap-2.5 rounded-full bg-black px-3.5 py-2 text-white shadow-[0_10px_32px_rgba(0,0,0,0.42)] ring-1 ring-white/15 cursor-pointer select-none animate-dynamic-island transition-all duration-150",
+        "fixed top-[max(0.75rem,env(safe-area-inset-top))] left-1/2 z-[100] flex max-w-[min(92vw,420px)] items-center gap-2.5 rounded-full bg-black px-3.5 py-2 text-white shadow-[0_10px_32px_rgba(0,0,0,0.42)] ring-1 ring-white/15 cursor-pointer select-none animate-dynamic-island transition-all duration-150",
         exiting && "opacity-0 scale-90"
       )}
     >

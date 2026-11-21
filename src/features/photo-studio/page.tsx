@@ -166,11 +166,23 @@ async function compressLogoToDataUrl(file: File, maxDim = 240): Promise<string> 
   }
 }
 
+function formatShopProfileLine(profile?: {
+  name?: string
+  phone?: string
+  address?: string
+}): string {
+  if (!profile) return ""
+  return [profile.name?.trim(), profile.phone?.trim(), profile.address?.trim()]
+    .filter(Boolean)
+    .join(" • ")
+}
+
 export function PhotoStudioPage() {
   const language = useUIStore(useShallow((state) => state.language))
   const isMy = language === "my"
 
   const {
+    shopProfile,
     brandSignature,
     businessCategory,
     posterDraft,
@@ -179,6 +191,7 @@ export function PhotoStudioPage() {
     setShopLogoDataUrl,
   } = useContentStore(
     useShallow((state) => ({
+      shopProfile: state.shopProfile,
       brandSignature: state.brandSignature,
       businessCategory: state.businessCategory,
       posterDraft: state.posterDraft,
@@ -191,6 +204,9 @@ export function PhotoStudioPage() {
   const isShop = isShoppingCategory(businessCategory)
   const [activeTab, setActiveTab] = useState<ControlTabId>("template")
   const [hasCustomFooter, setHasCustomFooter] = useState(false)
+
+  const savedFooterLine =
+    formatShopProfileLine(shopProfile) || brandSignature.trim()
 
   const [poster, setPoster] = useState<PosterState>(() => ({
     template: "spotlight",
@@ -234,7 +250,7 @@ export function PhotoStudioPage() {
     showStarRating: isShop,
     showShopFooter: true,
     shopFooterText:
-      brandSignature.trim() ||
+      savedFooterLine ||
       (isShop ? "My Online Shop • Inbox to Order" : "Creator Studio • Follow for More"),
     showShopLogo: true,
     fontStyle: "modern_clean",
@@ -260,14 +276,14 @@ export function PhotoStudioPage() {
   const secondaryInputRef = useRef<HTMLInputElement | null>(null)
   const logoInputRef = useRef<HTMLInputElement | null>(null)
 
-  // Auto-sync saved brandSignature from Settings unless manually overridden
+  // Auto-sync saved shopProfile from Settings unless manually overridden
   useEffect(() => {
     if (hasCustomFooter) return
-    const trimmed = brandSignature.trim()
+    const trimmed = savedFooterLine.trim()
     if (trimmed) {
       setPoster((prev) => ({ ...prev, shopFooterText: trimmed }))
     }
-  }, [brandSignature, hasCustomFooter])
+  }, [savedFooterLine, hasCustomFooter])
 
   // Consume shared posterDraft from Text Generator
   useEffect(() => {
@@ -568,10 +584,10 @@ export function PhotoStudioPage() {
       }
       handleDownloadPng()
     }
-  }, [poster, primaryImg, secondaryImg, handleDownloadPng])
+  }, [poster, primaryImg, secondaryImg, logoImg, handleDownloadPng])
 
   const handleSyncBrandSignature = () => {
-    const trimmed = brandSignature.trim()
+    const trimmed = savedFooterLine.trim()
     setHasCustomFooter(false)
     updatePoster(
       "shopFooterText",
@@ -583,8 +599,8 @@ export function PhotoStudioPage() {
           ? "Settings မှ ဆိုင်အမည်ကို ထည့်သွင်းပြီးပါပြီ"
           : "Synced from Settings"
         : isMy
-          ? "Settings တွင် Brand Signature မထည့်ရသေးပါ"
-          : "No brand signature saved in Settings yet"
+          ? "Settings တွင် ဆိုင်အချက်အလက် မထည့်ရသေးပါ"
+          : "No shop contact info saved in Settings yet"
     )
   }
 

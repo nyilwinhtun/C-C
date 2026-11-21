@@ -340,7 +340,7 @@ export function normalizeBurmeseForTTS(
     .replace(/\[pause\s+\d+(?:\.\d+)?\s*s?\]/gi, " ")
     // Remove bracketed timestamps like [0-3s], [0-3s Hook], [0:00 - 0:05] without deleting spoken text
     .replace(
-      /\[\s*\d+(?::\d+)?\s*(?:s\b|:\d+|\s*[-–—]\s*\d+(?::\d+)?\s*s?)(?:\s+[a-zA-Z0-9\s,&/\-]{1,40})?\s*\]/gi,
+      /\[\s*\d+(?::\d+)?\s*(?:s\b|:\d+|\s*[-–—]\s*\d+(?::\d+)?\s*s?)(?:\s+[a-zA-Z0-9\s,&/-]{1,40})?\s*\]/gi,
       " "
     )
     // Remove standalone unbracketed timestamp ranges like 0:00 - 0:05
@@ -348,7 +348,7 @@ export function normalizeBurmeseForTTS(
     // Remove exact section-only tags like [Hook], [Body], [CTA], [Intro], [Outro], [Scene 1]
     .replace(/\[(hook|body|cta|intro|outro|scene\s*\d*)\]/gi, " ")
     // Remove emojis, pictographs, variation selectors, and ZWJ sequences
-    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D\u20E3]/gu, "")
+    .replace(/(?:\p{Extended_Pictographic}|\uFE0F|\u200D|\u20E3)/gu, "")
     // Remove markdown headings, bold/italic markers, backticks, underscores, tildes
     .replace(/[*#`_~]/g, "")
     // Remove bullet symbols and leading list dashes

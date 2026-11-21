@@ -165,6 +165,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     liveModeEnabled,
     voiceDnaSamples,
     shopProfile,
+    customPronunciations,
+    editorialTone,
+    editorialLength,
+    editorialFormat,
+    shopLogoDataUrl,
     setMicFilterMode,
     setLiveModeEnabled,
     setVoiceDnaSamples,
@@ -182,6 +187,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       liveModeEnabled: state.liveModeEnabled,
       voiceDnaSamples: state.voiceDnaSamples,
       shopProfile: state.shopProfile,
+      customPronunciations: state.customPronunciations,
+      editorialTone: state.editorialTone,
+      editorialLength: state.editorialLength,
+      editorialFormat: state.editorialFormat,
+      shopLogoDataUrl: state.shopLogoDataUrl,
       setMicFilterMode: state.setMicFilterMode,
       setLiveModeEnabled: state.setLiveModeEnabled,
       setVoiceDnaSamples: state.setVoiceDnaSamples,
@@ -295,7 +305,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   const handleExportBackup = () => {
     const payload: ContentBackupData = {
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       brandSignature,
       businessCategory,
@@ -303,6 +313,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       autoAppendShopCta,
       savedVault,
       generatedHistory,
+      voiceDnaSamples,
+      shopProfile,
+      customPronunciations,
+      editorialTone,
+      editorialLength,
+      editorialFormat,
+      shopLogoDataUrl,
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json",
@@ -330,7 +347,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         parsed !== null &&
         (typeof parsed.brandSignature === "string" ||
           Array.isArray(parsed.savedVault) ||
-          Array.isArray(parsed.generatedHistory))
+          Array.isArray(parsed.generatedHistory) ||
+          Array.isArray(parsed.voiceDnaSamples) ||
+          (typeof parsed.shopProfile === "object" && parsed.shopProfile !== null) ||
+          Array.isArray(parsed.customPronunciations))
 
       if (!hasValidField) {
         toast.error(t(language, "settings.restoreError"))
@@ -343,6 +363,29 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           ? normalizeBusinessCategory(parsed.businessCategory)
           : undefined,
       })
+      if (Array.isArray(parsed.voiceDnaSamples)) {
+        setDnaSamplesInput(parsed.voiceDnaSamples.map(String).slice(0, 3))
+      }
+      if (parsed.shopProfile && typeof parsed.shopProfile === "object") {
+        setShopProfileInput((prev) => ({
+          name:
+            typeof parsed.shopProfile?.name === "string"
+              ? parsed.shopProfile.name
+              : prev.name,
+          phone:
+            typeof parsed.shopProfile?.phone === "string"
+              ? parsed.shopProfile.phone
+              : prev.phone,
+          address:
+            typeof parsed.shopProfile?.address === "string"
+              ? parsed.shopProfile.address
+              : prev.address,
+          autoAppend:
+            typeof parsed.shopProfile?.autoAppend === "boolean"
+              ? parsed.shopProfile.autoAppend
+              : prev.autoAppend,
+        }))
+      }
       toast.success(t(language, "settings.restoreSuccess"))
     } catch {
       toast.error(t(language, "settings.restoreError"))

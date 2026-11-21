@@ -31,6 +31,7 @@ import {
 import { toast } from "@/components/ui/sonner"
 import {
   analyzeVideoClipsAndCaptions,
+  formatShopFooter,
   generateContent,
   generateVideoContent,
   isSupportedVideoFile,
@@ -112,6 +113,7 @@ export function VideoToContentSection() {
   const setActivePageKey = useUIStore((state) => state.setActivePageKey)
   const saveToVault = useContentStore((state) => state.saveToVault)
   const setVoiceoverDraftScript = useContentStore((state) => state.setVoiceoverDraftScript)
+  const shopProfile = useContentStore((state) => state.shopProfile)
   const brandSignature = useContentStore((state) => state.brandSignature)
   const businessCategory = useContentStore((state) => state.businessCategory)
   const customNiche = useContentStore((state) => state.customNiche)
@@ -259,12 +261,14 @@ export function VideoToContentSection() {
 
         if (!videoFile) return
 
+        const shopFooterText = formatShopFooter(shopProfile) || brandSignature.trim()
+
         const generated = await generateVideoContent({
           file: videoFile,
           productNote: productNote.trim() || undefined,
           platform,
           language: outputLanguage,
-          brandSignature,
+          brandSignature: shopProfile.autoAppend ? shopFooterText : undefined,
           businessCategory,
           customNiche,
           targetDurationSeconds,
@@ -278,12 +282,14 @@ export function VideoToContentSection() {
               : undefined,
           onProgress: (stage) => setProgressStage(stage),
         })
-        const ctaText =
+        const defaultCtaText =
           outputLanguage === "en"
             ? DEFAULT_ONLINE_SHOP_CTA_EN
             : DEFAULT_ONLINE_SHOP_CTA_MY
+        const ctaText = shopFooterText || defaultCtaText
+        const shouldAppendCta = shopProfile.autoAppend || autoAppendShopCta
         const finalCaption =
-          autoAppendShopCta &&
+          shouldAppendCta &&
           generated.caption &&
           !generated.caption.includes(ctaText)
             ? `${generated.caption.trimEnd()}\n\n${ctaText}`
@@ -330,6 +336,7 @@ export function VideoToContentSection() {
       productNote,
       platform,
       outputLanguage,
+      shopProfile,
       brandSignature,
       businessCategory,
       customNiche,

@@ -28,7 +28,7 @@ const Sheet = React.forwardRef<HTMLDivElement, SheetProps>(
             "fixed z-50 flex flex-col bg-white/92 dark:bg-[#1C1C1E]/95 ios-glass text-foreground shadow-2xl transform transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
             side === "bottom"
               ? cn(
-                  "inset-x-0 bottom-0 max-h-[88vh] w-full rounded-t-3xl border-t-[0.5px] border-[rgba(60,60,67,0.14)] dark:border-[rgba(84,84,88,0.42)]",
+                  "inset-x-0 bottom-0 max-h-[88vh] w-full rounded-t-3xl border-t-[0.5px] border-[rgba(60,60,67,0.14)] dark:border-[rgba(84,84,88,0.42)] pb-[max(1rem,env(safe-area-inset-bottom))]",
                   open ? "translate-y-0" : "translate-y-full pointer-events-none"
                 )
               : side === "left"
