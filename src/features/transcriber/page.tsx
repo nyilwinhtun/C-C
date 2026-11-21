@@ -4,15 +4,15 @@ import { useEffect, useRef, useState } from "react"
 import {
   Check,
   Copy,
+  FileText,
   Loader2,
   Mic,
+  PenLine,
   Send,
-  Sparkles,
   Square,
   Upload,
   Video,
   Volume2,
-  Wand2,
 } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
 import {
@@ -461,7 +461,7 @@ export function TranscriberPage() {
                   key={idx}
                   className={`w-1.5 rounded-full transition-all duration-75 ${
                     isRecording
-                      ? "bg-gradient-to-t from-rose-500 to-orange-400"
+                      ? "bg-amber-700 dark:bg-amber-500"
                       : "bg-muted-foreground/25"
                   }`}
                   style={{ height: `${heightPct}%` }}
@@ -480,7 +480,7 @@ export function TranscriberPage() {
                   onTouchStart={() => unlockIosAudio()}
                   onClick={startRecording}
                   disabled={isTranscribing}
-                  className="gap-2 rounded-full px-5 bg-gradient-to-r from-rose-500 to-red-600 text-white hover:from-rose-600 hover:to-red-700"
+                  className="gap-2 rounded-full px-5"
                 >
                   <Mic className="h-4 w-4" />
                   <span>{isMy ? "အသံစတင်သွင်းမည်" : "Start Recording"}</span>
@@ -517,12 +517,12 @@ export function TranscriberPage() {
             </div>
 
             {isTranscribing && (
-              <div className="flex items-center gap-2 text-xs text-blue-500 font-medium pt-1">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium pt-1">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 <span>
                   {isMy
-                    ? "Gemini 2.5 Flash ဖြင့် စာသားပြောင်းနေသည်..."
-                    : "Transcribing with Gemini 2.5 Flash..."}
+                    ? "စာသားများ စီစဉ်နေပါသည်..."
+                    : "Organizing voice notes..."}
                 </span>
               </div>
             )}
@@ -579,7 +579,7 @@ export function TranscriberPage() {
                 {isPolishing === "post" ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <Wand2 className="h-3.5 w-3.5 text-blue-500" />
+                  <PenLine className="h-3.5 w-3.5 text-muted-foreground" />
                 )}
                 <span>
                   {isMy ? "Facebook/TikTok ပို့စ်အဖြစ် ပြင်မည်" : "Polish into Facebook/TikTok Post"}
@@ -597,7 +597,7 @@ export function TranscriberPage() {
                 {isPolishing === "script" ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <Video className="h-3.5 w-3.5 text-indigo-500" />
+                  <Video className="h-3.5 w-3.5 text-muted-foreground" />
                 )}
                 <span>{isMy ? "ဗီဒီယို Script ပြောင်းမည်" : "Turn into Video Script"}</span>
               </Button>
@@ -607,7 +607,7 @@ export function TranscriberPage() {
                 size="sm"
                 disabled={!transcript.trim() || isPolishing !== null}
                 onClick={handleVoiceToPolishedContent}
-                className="gap-1.5 text-xs rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:from-emerald-700 hover:to-teal-700"
+                className="gap-1.5 text-xs rounded-full"
               >
                 {isPolishing === "voice_content" ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -616,8 +616,8 @@ export function TranscriberPage() {
                 )}
                 <span>
                   {isMy
-                    ? "Script ပြင် + AI အသံတန်းထုတ်မည်"
-                    : "Polish & Generate AI Voiceover"}
+                    ? "Script ပြင် + အသံသွင်းမည်"
+                    : "Polish & Record Voice"}
                 </span>
               </Button>
             </div>
@@ -627,11 +627,11 @@ export function TranscriberPage() {
 
       {/* Polished Output Card */}
       {polishedResult && (
-        <Card className="border-blue-500/30 bg-blue-500/5 shadow-sm">
+        <Card className="border-[#E7E5E4] dark:border-[#3F3F46] bg-card">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between gap-2">
               <CardTitle className="flex items-center gap-2 text-sm sm:text-base">
-                <Sparkles className="h-4 w-4 text-blue-500" />
+                <FileText className="h-4 w-4 text-muted-foreground" />
                 <span>
                   {polishedResult.kind === "post"
                     ? isMy
@@ -643,7 +643,7 @@ export function TranscriberPage() {
                 </span>
               </CardTitle>
               <Badge variant="outline" className="text-xs">
-                AI Ready
+                Ready
               </Badge>
             </div>
           </CardHeader>
@@ -658,7 +658,7 @@ export function TranscriberPage() {
             {polishedAudio && (
               <IosAudioPlayer
                 src={polishedAudio.audioUrl}
-                title={isMy ? "AI Voiceover (Nilar)" : "AI Voiceover (Nilar)"}
+                title={isMy ? "စာဖတ်သူ - နီလာ" : "Narrator - Nilar"}
                 initialDuration={polishedAudio.durationSeconds}
                 fileExtension={polishedAudio.fileExtension}
                 compact
@@ -703,10 +703,10 @@ export function TranscriberPage() {
                     setVoiceoverDraftScript(polishedResult.text)
                     setActivePageKey("voiceover")
                   }}
-                  className="gap-1.5 text-xs bg-gradient-to-r from-blue-600 to-indigo-600 text-white"
+                  className="gap-1.5 text-xs"
                 >
                   <Send className="h-3.5 w-3.5" />
-                  <span>{isMy ? "AI Voiceover သို့ ပို့မည်" : "Send to AI Voiceover"}</span>
+                  <span>{isMy ? "အသံသွင်းခန်းသို့ ပို့မည်" : "Send to Recording Booth"}</span>
                 </Button>
               ) : (
                 <Button

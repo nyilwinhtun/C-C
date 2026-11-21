@@ -15,15 +15,15 @@ export type SquircleTone =
   | "slate"
 
 const TONE_CLASSES: Record<SquircleTone, string> = {
-  blue: "bg-[#007AFF]/12 text-[#007AFF] dark:bg-[#0A84FF]/18 dark:text-[#0A84FF]",
-  indigo: "bg-indigo-500/12 text-indigo-600 dark:bg-indigo-400/18 dark:text-indigo-400",
-  emerald: "bg-[#34C759]/12 text-[#34C759] dark:bg-[#30D158]/18 dark:text-[#30D158]",
-  amber: "bg-amber-500/12 text-amber-600 dark:bg-amber-400/18 dark:text-amber-400",
-  orange: "bg-[#FF9500]/12 text-[#FF9500] dark:bg-[#FF9F0A]/18 dark:text-[#FF9F0A]",
-  rose: "bg-rose-500/12 text-rose-600 dark:bg-rose-400/18 dark:text-rose-400",
-  purple: "bg-[#AF52DE]/12 text-[#AF52DE] dark:bg-[#BF5AF2]/18 dark:text-[#BF5AF2]",
-  cyan: "bg-cyan-500/12 text-cyan-600 dark:bg-cyan-400/18 dark:text-cyan-400",
-  slate: "bg-neutral-500/12 text-neutral-600 dark:bg-neutral-400/18 dark:text-neutral-300",
+  blue: "bg-[#1C1917]/[0.06] text-[#1C1917] dark:bg-[#F5F5F4]/[0.08] dark:text-[#F5F5F4]",
+  indigo: "bg-[#1C1917]/[0.06] text-[#1C1917] dark:bg-[#F5F5F4]/[0.08] dark:text-[#F5F5F4]",
+  emerald: "bg-[#1C1917]/[0.06] text-[#1C1917] dark:bg-[#F5F5F4]/[0.08] dark:text-[#F5F5F4]",
+  amber: "bg-amber-700/10 text-amber-800 dark:bg-amber-400/12 dark:text-amber-300",
+  orange: "bg-[#1C1917]/[0.06] text-[#1C1917] dark:bg-[#F5F5F4]/[0.08] dark:text-[#F5F5F4]",
+  rose: "bg-[#1C1917]/[0.06] text-[#1C1917] dark:bg-[#F5F5F4]/[0.08] dark:text-[#F5F5F4]",
+  purple: "bg-[#1C1917]/[0.06] text-[#1C1917] dark:bg-[#F5F5F4]/[0.08] dark:text-[#F5F5F4]",
+  cyan: "bg-[#1C1917]/[0.06] text-[#1C1917] dark:bg-[#F5F5F4]/[0.08] dark:text-[#F5F5F4]",
+  slate: "bg-[#1C1917]/[0.06] text-[#57534E] dark:bg-[#F5F5F4]/[0.08] dark:text-[#A1A1AA]",
 }
 
 interface SquircleIconProps {
@@ -59,7 +59,7 @@ export function SquircleIcon({
         "inline-flex shrink-0 items-center justify-center transition-colors",
         sizeClass,
         active
-          ? "bg-white/20 text-white"
+          ? "bg-[#FAF8F5]/15 text-[#FAF8F5] dark:bg-[#18181B]/15 dark:text-[#18181B]"
           : TONE_CLASSES[tone],
         className
       )}

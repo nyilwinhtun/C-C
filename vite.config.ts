@@ -32,8 +32,8 @@ export default defineConfig({
       description: 'Content Creator Studio Web App',
       start_url: '/C-C/',
       scope: '/C-C/',
-      theme_color: '#0f172a',
-      background_color: '#0f172a',
+      theme_color: '#FAF8F5',
+      background_color: '#FAF8F5',
       display: 'standalone',
       orientation: 'portrait',
       icons: [

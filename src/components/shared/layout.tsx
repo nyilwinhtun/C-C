@@ -117,7 +117,7 @@ export function Layout() {
       <nav
         aria-label="Primary sections"
         className={cn(
-          "md:hidden fixed bottom-0 inset-x-0 z-40 border-t-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-white/80 dark:bg-black/80 ios-glass pb-safe transition-all duration-300 ease-out",
+          "md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5]/90 dark:bg-[#18181B]/90 ios-glass pb-safe transition-all duration-300 ease-out",
           tabBarVisible
             ? "translate-y-0 opacity-100"
             : "translate-y-full opacity-0 pointer-events-none"

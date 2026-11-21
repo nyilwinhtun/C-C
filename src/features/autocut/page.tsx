@@ -11,7 +11,6 @@ import {
   Plus,
   Scissors,
   Share2,
-  Sparkles,
   Square,
   Trash2,
   Upload,
@@ -954,12 +953,12 @@ export function AutoCutPage() {
                   type="button"
                   disabled={!allReady || isAnalyzingQueue || isExporting || !hasAnySpeech}
                   onClick={handleExport}
-                  className="flex-1 gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:from-violet-700 hover:to-indigo-700"
+                  className="flex-1 gap-2"
                 >
                   {isExporting ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Sparkles className="h-4 w-4" />
+                    <Scissors className="h-4 w-4" />
                   )}
                   <span>
                     {isExporting

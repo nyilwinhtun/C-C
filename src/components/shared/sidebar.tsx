@@ -43,7 +43,7 @@ function RoomNavButton({ room, language, active, onSelect, collapsed }: RoomNavB
       className={cn(
         "flex w-full items-center gap-3 rounded-[14px] px-2.5 py-2 text-sm font-medium transition-all duration-150 active:scale-[0.98] leading-relaxed font-myanmar cursor-pointer",
         active
-          ? "bg-[#007AFF] dark:bg-[#0A84FF] text-white shadow-sm shadow-[#007AFF]/20"
+          ? "bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B]"
           : "text-foreground/80 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
       )}
       aria-pressed={active}
@@ -113,12 +113,12 @@ export function Sidebar() {
   return (
     <>
       <aside
-        className="hidden md:flex fixed inset-y-0 left-0 z-30 flex-col border-r-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-white/80 dark:bg-black/80 ios-glass transition-[width] duration-200"
+        className="hidden md:flex fixed inset-y-0 left-0 z-30 flex-col border-r border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5]/95 dark:bg-[#18181B]/95 ios-glass transition-[width] duration-200"
         style={{ width: collapsed ? 68 : 248 }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
-        <div className="flex h-14 items-center justify-between gap-2 border-b-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] px-3">
+        <div className="flex h-14 items-center justify-between gap-2 border-b border-[#E7E5E4] dark:border-[#3F3F46] px-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <CCLogo size={28} className="h-7 w-7 shrink-0 rounded-[9px] shadow-xs" />
             {!collapsed && (
@@ -163,14 +163,14 @@ export function Sidebar() {
           </nav>
         </ScrollArea>
 
-        <div className="px-2.5 pt-2.5 pb-3 space-y-2 border-t-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-white/60 dark:bg-[#1C1C1E]/60">
+        <div className="px-2.5 pt-2.5 pb-3 space-y-2 border-t border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B]">
           <Button
             type="button"
             variant="outline"
             size="sm"
             onClick={() => setQuickIdeaOpen(true)}
             className={cn(
-              "w-full h-9 text-xs font-medium border-[#007AFF]/25 bg-[#007AFF]/10 text-[#007AFF] dark:text-[#0A84FF] hover:bg-[#007AFF]/15",
+              "w-full h-9 text-xs font-medium border-[#E7E5E4] dark:border-[#3F3F46] bg-[#F5F2ED] dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#E7E5E4] dark:hover:bg-[#3F3F46]",
               collapsed ? "px-0 justify-center" : "gap-1.5"
             )}
             title={t(language, "header.quickIdea")}

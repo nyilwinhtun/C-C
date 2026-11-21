@@ -22,7 +22,6 @@ import {
   Scissors,
   ScrollText,
   Share2,
-  Sparkles,
   Square,
   Tag,
   Trash2,
@@ -30,7 +29,6 @@ import {
   Users,
   Volume2,
   VolumeX,
-  Wand2,
   X,
 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
@@ -1001,21 +999,21 @@ export function VoiceoverPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-4 lg:pb-6">
-      <Card className="border-indigo-500/30 bg-gradient-to-br from-indigo-500/[0.04] via-card to-blue-500/[0.04] shadow-sm overflow-hidden">
+      <Card className="border-[#E7E5E4] dark:border-[#3F3F46] bg-card overflow-hidden">
         <CardHeader className="py-3 px-4 border-b border-border/60 flex flex-row items-center justify-between gap-2 space-y-0">
           <div className="min-w-0">
-            <CardTitle className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 font-myanmar">
-              <Sparkles className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-1.5 font-myanmar">
+              <Mic className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span>
                 {isMy
-                  ? "မြန်မာ AI အသံသွင်းနှင့် ဗီဒီယိုထုတ်လုပ်ရေး စတူဒီယို"
-                  : "Burmese AI Voiceover & Video Production Studio"}
+                  ? "အသံသွင်းခန်းနှင့် ဗီဒီယိုထုတ်လုပ်ရေး စတူဒီယို"
+                  : "Recording Booth & Video Studio"}
               </span>
             </CardTitle>
             <CardDescription className="text-xs mt-0.5 font-myanmar">
               {isMy
-                ? "စာသားမှ AI အသံဖန်တီးပြီး ဗီဒီယို သို့မဟုတ် ဓာတ်ပုံ Slideshow နှင့် ပေါင်းစပ်ထုတ်ယူပါ"
-                : "Synthesize Burmese AI voiceover, mix music, and create 9:16 / 16:9 videos"}
+                ? "စာသားမှ အသံသွင်းပြီး ဗီဒီယို သို့မဟုတ် ဓာတ်ပုံ Slideshow နှင့် ပေါင်းစပ်ထုတ်ယူပါ"
+                : "Record Burmese narration, mix music, and create 9:16 / 16:9 videos"}
             </CardDescription>
           </div>
           <Badge variant="secondary" className="text-[10px] shrink-0">
@@ -1352,11 +1350,13 @@ export function VoiceoverPage() {
                                 : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
                             }`}
                           >
-                            <div className="text-xs font-semibold leading-tight">
-                              {type === "female" ? "Female" : "Male"}
+                            <div className="text-xs font-semibold leading-tight font-myanmar">
+                              {isMy
+                                ? type === "female" ? "စာဖတ်သူ - နီလာ" : "စာဖတ်သူ - သီဟ"
+                                : type === "female" ? "Narrator - Nilar" : "Narrator - Thiha"}
                             </div>
                             <div className="text-[10px] opacity-80 truncate font-myanmar">
-                              {type === "female" ? "Nilar" : "Thiha"}
+                              {type === "female" ? "Female" : "Male"}
                             </div>
                             <span className="sr-only">{preset.labelMy}</span>
                           </button>
@@ -1394,7 +1394,7 @@ export function VoiceoverPage() {
                 {/* 1-Tap Intro Sound Effects */}
                 <div className="space-y-1.5">
                   <Label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
-                    <Wand2 className="h-3 w-3" aria-hidden="true" />
+                    <Music className="h-3 w-3" aria-hidden="true" />
                     {isMy ? "အဖွင့်အသံ SFX (Intro Accent)" : "Intro Sound Effect (1-Tap Preview)"}
                   </Label>
                   <div className="grid grid-cols-4 gap-1.5">
@@ -2071,23 +2071,23 @@ export function VoiceoverPage() {
                 onTouchStart={() => unlockIosAudio()}
                 onClick={handleGenerateVoice}
                 disabled={isGeneratingVoice || isMergingVideo || !voiceoverDraftScript.trim()}
-                className="w-full min-h-[44px] sm:h-10 text-sm font-semibold bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white border-0 font-myanmar"
+                className="w-full min-h-[44px] sm:h-10 text-sm font-semibold font-myanmar"
               >
                 {isGeneratingVoice ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
                     {voiceProgress && voiceProgress.totalChunks > 1
                       ? isMy
-                        ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
-                        : `Synthesizing audio... (Part ${voiceProgress.currentChunk}/${voiceProgress.totalChunks})`
+                        ? `အသံဖိုင် ပြင်ဆင်နေပါသည်... (အပိုင်း ${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
+                        : `Preparing audio... (Part ${voiceProgress.currentChunk}/${voiceProgress.totalChunks})`
                       : isMy
-                        ? "အသံဖန်တီးနေပါသည်..."
-                        : "Synthesizing Burmese Voiceover..."}
+                        ? "အသံဖိုင် ပြင်ဆင်နေပါသည်..."
+                        : "Preparing audio..."}
                   </>
                 ) : (
                   <>
                     <Mic className="h-4 w-4 mr-2" aria-hidden="true" />
-                    {isMy ? "AI အသံနမူနာ ဖန်တီးမည်" : "Generate Voice Preview"}
+                    {isMy ? "အသံသွင်းနမူနာ ပြင်ဆင်မည်" : "Generate Voice Preview"}
                   </>
                 )}
               </Button>
@@ -2096,8 +2096,8 @@ export function VoiceoverPage() {
                   <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                     <span>
                       {isMy
-                        ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
-                        : `Synthesizing part ${voiceProgress.currentChunk} of ${voiceProgress.totalChunks}...`}
+                        ? `အသံဖိုင် ပြင်ဆင်နေပါသည်... (အပိုင်း ${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
+                        : `Preparing part ${voiceProgress.currentChunk} of ${voiceProgress.totalChunks}...`}
                     </span>
                     <span className="font-semibold text-foreground">
                       {Math.round((voiceProgress.currentChunk / voiceProgress.totalChunks) * 100)}%
@@ -2105,7 +2105,7 @@ export function VoiceoverPage() {
                   </div>
                   <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                     <div
-                      className="h-full bg-gradient-to-r from-indigo-500 to-blue-500 transition-all duration-200"
+                      className="h-full bg-[#1C1917] dark:bg-[#F5F5F4] transition-all duration-200"
                       style={{
                         width: `${Math.round((voiceProgress.currentChunk / voiceProgress.totalChunks) * 100)}%`,
                       }}
@@ -2226,7 +2226,7 @@ export function VoiceoverPage() {
                 </div>
                 <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-150"
+                    className="h-full bg-[#1C1917] dark:bg-[#F5F5F4] transition-all duration-150"
                     style={{ width: `${mergeProgress}%` }}
                   />
                 </div>

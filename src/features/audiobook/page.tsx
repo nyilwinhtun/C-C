@@ -8,14 +8,13 @@ import {
   Headphones,
   Loader2,
   Pause,
+  PenLine,
   Play,
   SkipBack,
   SkipForward,
-  Sparkles,
   Square,
   Trash2,
   Upload,
-  Wand2,
 } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
 import { extractTextFromDocument, rewriteChapterAsRecap } from "@/api/aiService"
@@ -557,7 +556,7 @@ export function AudiobookPage() {
                   onClick={() => setAudiobookMode("recap")}
                   className="h-7 px-2.5 text-xs"
                 >
-                  {isMy ? "YouTube Recap Storytelling" : "YouTube Recap Mode"}
+                  {isMy ? "စာအုပ်ဇာတ်ကြောင်းပြော" : "Storyteller Mode"}
                 </Button>
               </div>
             </div>
@@ -565,8 +564,8 @@ export function AudiobookPage() {
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                 <p className="text-[11px] text-muted-foreground font-myanmar">
                   {isMy
-                    ? "စာအုပ်အခန်းကို YouTube Recap ပုံစံ စကားပြောဇာတ်ကြောင်းအဖြစ် ပြန်ရေးသားပေးပါမည်။"
-                    : "Rewrites the chapter into engaging conversational YouTube Recap narration."}
+                    ? "စာအုပ်အခန်းကို စကားပြောဇာတ်ကြောင်းအဖြစ် ပြန်ရေးသားပေးပါမည်။"
+                    : "Rewrites the chapter into engaging conversational storyteller narration."}
                 </p>
                 <Button
                   type="button"
@@ -579,9 +578,9 @@ export function AudiobookPage() {
                   {isRewritingRecap ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : (
-                    <Wand2 className="h-3.5 w-3.5 text-indigo-500" />
+                    <PenLine className="h-3.5 w-3.5 text-muted-foreground" />
                   )}
-                  <span>{isMy ? "YouTube Recap ပြောင်းမည်" : "Rewrite as Recap"}</span>
+                  <span>{isMy ? "ဇာတ်ကြောင်းပြော ပြောင်းမည်" : "Rewrite as Story"}</span>
                 </Button>
               </div>
             )}
@@ -713,16 +712,16 @@ export function AudiobookPage() {
               type="button"
               disabled={chapters.length === 0 || isGenerating || isExtracting}
               onClick={handleGenerateAll}
-              className="flex-1 gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700"
+              className="flex-1 gap-2"
             >
               {isGenerating ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Sparkles className="h-4 w-4" />
+                <BookOpen className="h-4 w-4" />
               )}
               <span>
                 {isGenerating
-                  ? progressLabel || (isMy ? "အသံဖန်တီးနေပါသည်..." : "Synthesizing...")
+                  ? progressLabel || (isMy ? "အသံဖိုင် ပြင်ဆင်နေပါသည်..." : "Preparing audio...")
                   : chapters.length > 1
                     ? isMy
                       ? `အပိုင်း ${chapters.length} ခုလုံး အသံပြောင်းမည်`
@@ -735,13 +734,13 @@ export function AudiobookPage() {
           </div>
 
           {isGenerating && (progressLabel || chunkProgress) && (
-            <div className="space-y-1.5 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2">
+            <div className="space-y-1.5 rounded-lg border border-[#E7E5E4] dark:border-[#3F3F46] bg-muted/40 px-3 py-2">
               <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                 <span className="truncate font-medium text-foreground">
-                  {progressLabel || (isMy ? "အသံဖန်တီးနေပါသည်..." : "Synthesizing...")}
+                  {progressLabel || (isMy ? "အသံဖိုင် ပြင်ဆင်နေပါသည်..." : "Preparing audio...")}
                 </span>
                 {chunkProgress && chunkProgress.totalChunks > 1 && (
-                  <span className="shrink-0 font-semibold text-blue-600 dark:text-blue-400">
+                  <span className="shrink-0 font-semibold text-foreground">
                     {Math.round((chunkProgress.currentChunk / chunkProgress.totalChunks) * 100)}%
                   </span>
                 )}
@@ -749,7 +748,7 @@ export function AudiobookPage() {
               {chunkProgress && chunkProgress.totalChunks > 1 && (
                 <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-200"
+                    className="h-full bg-[#1C1917] dark:bg-[#F5F5F4] transition-all duration-200"
                     style={{
                       width: `${Math.round((chunkProgress.currentChunk / chunkProgress.totalChunks) * 100)}%`,
                     }}

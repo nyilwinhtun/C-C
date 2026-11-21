@@ -20,7 +20,8 @@ interface IosAudioPlayerProps {
   className?: string
 }
 
-const BAR_COUNT = 38
+const BAR_COUNT = 42
+const PLAYBACK_SPEEDS = [1.0, 1.2] as const
 
 function generateWaveformHeights(seedSource: string): number[] {
   let hash = 2166136261
@@ -32,9 +33,8 @@ function generateWaveformHeights(seedSource: string): number[] {
   for (let i = 0; i < BAR_COUNT; i++) {
     hash = Math.imul(hash ^ (i + 1), 16777619)
     const raw = ((hash >>> 0) % 100) / 100
-    // Natural voice envelope: taller in the middle, varied peaks
     const envelope = 0.55 + 0.45 * Math.sin((i / BAR_COUNT) * Math.PI)
-    const height = Math.max(22, Math.min(100, Math.round((0.25 + raw * 0.75) * envelope * 100)))
+    const height = Math.max(20, Math.min(100, Math.round((0.22 + raw * 0.78) * envelope * 100)))
     bars.push(height)
   }
   return bars
@@ -52,19 +52,19 @@ export function IosAudioPlayer({
   title,
   subtitle,
   initialDuration = 0,
-  fileExtension,
+  fileExtension = "wav",
   onDownload,
   onShare,
   downloadLabel,
   shareLabel,
   compact = false,
-  accentColor = "blue",
   className,
 }: IosAudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(initialDuration)
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0)
 
   const bars = useMemo(() => generateWaveformHeights(src || title || "voice-memo"), [src, title])
 
@@ -73,6 +73,12 @@ export function IosAudioPlayer({
     setCurrentTime(0)
     setDuration(initialDuration)
   }, [src, initialDuration])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    audio.playbackRate = playbackSpeed
+  }, [playbackSpeed, src])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -91,7 +97,10 @@ export function IosAudioPlayer({
       setCurrentTime(0)
     }
     const onPause = () => setIsPlaying(false)
-    const onPlay = () => setIsPlaying(true)
+    const onPlay = () => {
+      audio.playbackRate = playbackSpeed
+      setIsPlaying(true)
+    }
 
     audio.addEventListener("loadedmetadata", syncDuration)
     audio.addEventListener("loadeddata", syncDuration)
@@ -114,7 +123,7 @@ export function IosAudioPlayer({
       audio.removeEventListener("pause", onPause)
       audio.removeEventListener("play", onPlay)
     }
-  }, [src])
+  }, [src, playbackSpeed])
 
   const togglePlay = async () => {
     const audio = audioRef.current
@@ -125,6 +134,7 @@ export function IosAudioPlayer({
       audio.pause()
     } else {
       try {
+        audio.playbackRate = playbackSpeed
         await audio.play()
       } catch {
         setIsPlaying(false)
@@ -140,6 +150,11 @@ export function IosAudioPlayer({
     const next = Math.max(0, Math.min(maxDur || 0, audio.currentTime + delta))
     audio.currentTime = next
     setCurrentTime(next)
+  }
+
+  const toggleSpeed = () => {
+    triggerHaptic(6)
+    setPlaybackSpeed((prev) => (prev === PLAYBACK_SPEEDS[0] ? PLAYBACK_SPEEDS[1] : PLAYBACK_SPEEDS[0]))
   }
 
   const handleSeekBarClick = (index: number) => {
@@ -161,7 +176,7 @@ export function IosAudioPlayer({
     }
     const link = document.createElement("a")
     link.href = src
-    link.download = `${(title || "audio").replace(/[^a-zA-Z0-9_-]+/g, "_")}.${fileExtension || "mp3"}`
+    link.download = `${(title || "recording").replace(/[^a-zA-Z0-9_-]+/g, "_")}.${fileExtension || "wav"}`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -170,15 +185,10 @@ export function IosAudioPlayer({
   const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0
   const activeBarIndex = Math.floor(progress * bars.length)
 
-  const accentBg =
-    accentColor === "emerald"
-      ? "bg-emerald-500 dark:bg-emerald-400"
-      : "bg-[#007AFF] dark:bg-[#0A84FF]"
-
   return (
     <div
       className={cn(
-        "rounded-[20px] border-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-[#F2F2F7]/85 dark:bg-[#1C1C1E] p-3.5 sm:p-4 space-y-3",
+        "rounded-[16px] border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] p-3.5 sm:p-4 space-y-3",
         className
       )}
     >
@@ -189,29 +199,29 @@ export function IosAudioPlayer({
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             {title && (
-              <p className="text-xs sm:text-sm font-semibold tracking-tight text-foreground truncate font-myanmar">
+              <p className="text-xs sm:text-sm font-semibold tracking-tight text-[#1C1917] dark:text-[#F5F5F4] truncate font-myanmar">
                 {title}
               </p>
             )}
             {subtitle && (
-              <p className="text-[11px] text-muted-foreground truncate font-myanmar">
+              <p className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] truncate font-myanmar">
                 {subtitle}
               </p>
             )}
           </div>
           {fileExtension && (
-            <span className="shrink-0 rounded-full bg-black/[0.06] dark:bg-white/[0.1] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <span className="shrink-0 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#57534E] dark:text-[#A1A1AA]">
               {fileExtension}
             </span>
           )}
         </div>
       )}
 
-      {/* Interactive Voice Memos Waveform */}
+      {/* Voice Memos-Style Minimalist Waveform Progress Bar */}
       <div className="space-y-1.5">
         <div
           className={cn(
-            "flex items-center justify-between gap-[2px] sm:gap-[3px] px-1 select-none",
+            "flex items-center justify-between gap-[2px] px-1 select-none",
             compact ? "h-9" : "h-11"
           )}
           role="slider"
@@ -222,7 +232,6 @@ export function IosAudioPlayer({
         >
           {bars.map((height, idx) => {
             const isPlayed = idx <= activeBarIndex && currentTime > 0
-            const isCurrent = isPlaying && idx === activeBarIndex
             return (
               <button
                 key={idx}
@@ -233,11 +242,10 @@ export function IosAudioPlayer({
               >
                 <span
                   className={cn(
-                    "w-full max-w-[4px] rounded-full transition-all duration-150",
+                    "w-full max-w-[3px] rounded-full transition-colors duration-150",
                     isPlayed
-                      ? accentBg
-                      : "bg-neutral-300 dark:bg-neutral-700 group-hover:bg-neutral-400 dark:group-hover:bg-neutral-500",
-                    isCurrent && "scale-y-110"
+                      ? "bg-amber-700 dark:bg-amber-500"
+                      : "bg-[#D6D3D1] dark:bg-[#3F3F46] group-hover:bg-[#A8A29E] dark:group-hover:bg-[#52525B]"
                   )}
                   style={{ height: `${height}%` }}
                 />
@@ -247,32 +255,30 @@ export function IosAudioPlayer({
         </div>
 
         {/* Tabular-nums Time Counters */}
-        <div className="flex items-center justify-between px-1 text-[11px] font-medium text-muted-foreground tabular-nums">
+        <div className="flex items-center justify-between px-1 text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] tabular-nums">
           <span>{formatClock(currentTime)}</span>
           <span>-{formatClock(Math.max(0, duration - currentTime))}</span>
         </div>
       </div>
 
-      {/* Transport Controls & 1-Tap Pills */}
+      {/* Transport Controls & Tactile Utility Pills */}
       <div className="flex items-center justify-between gap-2 pt-0.5">
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={() => skipBy(-5)}
-            aria-label="Skip back 5 seconds"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-foreground hover:bg-black/[0.1] dark:hover:bg-white/[0.14] transition-all active:scale-95 cursor-pointer"
+            onClick={() => skipBy(-15)}
+            aria-label="Skip back 15 seconds"
+            className="inline-flex h-8 items-center gap-1 px-2.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] transition-all active:scale-95 cursor-pointer tabular-nums"
           >
-            <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.75} />
+            <RotateCcw className="h-3 w-3" strokeWidth={1.75} />
+            <span>15s</span>
           </button>
 
           <button
             type="button"
             onClick={togglePlay}
             aria-label={isPlaying ? "Pause" : "Play"}
-            className={cn(
-              "inline-flex h-10 w-10 items-center justify-center rounded-full text-white shadow-sm transition-all active:scale-95 cursor-pointer",
-              accentBg
-            )}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B] hover:bg-[#292524] dark:hover:bg-[#E7E5E4] transition-all active:scale-95 cursor-pointer"
           >
             {isPlaying ? (
               <Pause className="h-4 w-4 fill-current" strokeWidth={1.75} />
@@ -283,24 +289,34 @@ export function IosAudioPlayer({
 
           <button
             type="button"
-            onClick={() => skipBy(5)}
-            aria-label="Skip forward 5 seconds"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-foreground hover:bg-black/[0.1] dark:hover:bg-white/[0.14] transition-all active:scale-95 cursor-pointer"
+            onClick={() => skipBy(15)}
+            aria-label="Skip forward 15 seconds"
+            className="inline-flex h-8 items-center gap-1 px-2.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] transition-all active:scale-95 cursor-pointer tabular-nums"
           >
-            <RotateCw className="h-3.5 w-3.5" strokeWidth={1.75} />
+            <span>15s</span>
+            <RotateCw className="h-3 w-3" strokeWidth={1.75} />
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleSpeed}
+            aria-label={`Playback speed ${playbackSpeed.toFixed(1)}x`}
+            className="inline-flex h-8 items-center justify-center rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-2.5 text-[11px] font-semibold text-[#57534E] dark:text-[#A1A1AA] hover:text-[#1C1917] dark:hover:text-[#F5F5F4] transition-all active:scale-95 cursor-pointer tabular-nums"
+          >
+            {playbackSpeed.toFixed(1)}x
           </button>
         </div>
 
-        {/* 1-Tap Download & Share Pills */}
+        {/* Clean WAV Download & Share Pills */}
         <div className="flex items-center gap-1.5">
           {(onDownload || fileExtension) && (
             <button
               type="button"
               onClick={handleBuiltInDownload}
-              className="inline-flex h-8 items-center gap-1.5 rounded-full bg-white dark:bg-[#2C2C2E] px-3 text-xs font-medium text-foreground border-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] shadow-xs hover:bg-neutral-50 dark:hover:bg-[#3A3A3C] transition-all active:scale-95 cursor-pointer"
+              className="inline-flex h-8 items-center gap-1.5 rounded-full bg-white dark:bg-[#27272A] px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] border border-[#E7E5E4] dark:border-[#3F3F46] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] transition-all active:scale-95 cursor-pointer"
             >
-              <Download className="h-3.5 w-3.5 text-[#007AFF] dark:text-[#0A84FF]" strokeWidth={1.75} />
-              <span className="font-myanmar">{downloadLabel || "Save"}</span>
+              <Download className="h-3.5 w-3.5 text-[#57534E] dark:text-[#A1A1AA]" strokeWidth={1.75} />
+              <span className="font-myanmar">{downloadLabel || "WAV"}</span>
             </button>
           )}
           {onShare && (
@@ -310,7 +326,7 @@ export function IosAudioPlayer({
                 triggerHaptic(10)
                 onShare()
               }}
-              className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[#007AFF]/12 dark:bg-[#0A84FF]/18 px-3 text-xs font-medium text-[#007AFF] dark:text-[#0A84FF] hover:bg-[#007AFF]/20 dark:hover:bg-[#0A84FF]/25 transition-all active:scale-95 cursor-pointer"
+              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#F0EDE8] dark:bg-[#27272A] px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#E7E5E4] dark:hover:bg-[#3F3F46] transition-all active:scale-95 cursor-pointer"
             >
               <Share2 className="h-3.5 w-3.5" strokeWidth={1.75} />
               <span className="font-myanmar">{shareLabel || "Share"}</span>
@@ -321,4 +337,3 @@ export function IosAudioPlayer({
     </div>
   )
 }
-

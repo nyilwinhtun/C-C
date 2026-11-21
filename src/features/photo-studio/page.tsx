@@ -12,7 +12,7 @@ import {
   RefreshCw,
   Rows2,
   Share2,
-  Sparkles,
+  Star,
   Store,
   Tag,
   Trash2,
@@ -44,13 +44,13 @@ const TEMPLATE_OPTIONS: {
   id: PosterTemplateId
   label: string
   labelMy: string
-  icon: typeof Sparkles
+  icon: typeof LayoutTemplate
 }[] = [
   {
     id: "spotlight",
     label: "Spotlight / Topic Cover",
     labelMy: "အထူးပြ / ခေါင်းစဉ်ကတ်",
-    icon: Sparkles,
+    icon: LayoutTemplate,
   },
   {
     id: "flash_sale",
@@ -908,7 +908,7 @@ export function PhotoStudioPage() {
                             : "border-border text-muted-foreground"
                         )}
                       >
-                        <Sparkles className="h-3.5 w-3.5" />
+                        <Star className="h-3.5 w-3.5" />
                         {isMy ? "ကြယ် ၅ ပွင့်ပြမည် (Review Mode)" : "Show 5-Star Rating (Review Mode)"}
                       </button>
                       <button

@@ -14,13 +14,14 @@ import {
   LayoutList,
   Loader2,
   Mic,
+  PenLine,
   Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
   Save,
+  Scissors,
   SlidersHorizontal,
-  Sparkles,
   Type,
   Upload,
   Video,
@@ -469,11 +470,11 @@ export function VideoToContentSection() {
           onClick={() => setMobileView("result")}
           className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all cursor-pointer font-myanmar ${
             mobileView === "result"
-              ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm"
+              ? "bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B]"
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+          <PenLine className="h-3.5 w-3.5" aria-hidden="true" />
           <span>{t(language, "generator.tabResult")}</span>
           {(result || isGenerating) && (
             <span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden="true" />
@@ -754,7 +755,7 @@ export function VideoToContentSection() {
                 type="button"
                 onClick={() => void handleGenerate("default")}
                 disabled={!videoFile || isGenerating}
-                className="w-full min-h-[44px] rounded-xl font-medium bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 border-0"
+                className="w-full min-h-[44px] rounded-xl font-medium"
               >
                 {isGenerating && !isExpanding ? (
                   <>
@@ -767,7 +768,7 @@ export function VideoToContentSection() {
                   </>
                 ) : (
                   <>
-                    <Sparkles className="h-4 w-4 mr-2" aria-hidden="true" />
+                    <PenLine className="h-4 w-4 mr-2" aria-hidden="true" />
                     <span>{t(language, "generator.videoGenerate")}</span>
                   </>
                 )}
@@ -784,8 +785,8 @@ export function VideoToContentSection() {
                     setClipsCaptionsResult(res)
                     toast.success(
                       language === "my"
-                        ? "Smart Clip Finder နှင့် Auto-Captions ခွဲခြမ်းစိတ်ဖြာပြီးပါပြီ!"
-                        : "Smart Clips & Auto-Captions ready!"
+                        ? "အကောင်းဆုံး အခန်းဖြတ်ရန်နှင့် ရုပ်ရှင်စာတန်းထိုး အဆင်သင့်ဖြစ်ပါပြီ!"
+                        : "Highlight Cutter & Clean Subtitles ready!"
                     )
                   } catch (err) {
                     const msg =
@@ -795,24 +796,24 @@ export function VideoToContentSection() {
                     setIsAnalyzingClips(false)
                   }
                 }}
-                className="w-full min-h-[40px] rounded-xl font-medium border-indigo-500/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/10"
+                className="w-full min-h-[40px] rounded-xl font-medium"
               >
                 {isAnalyzingClips ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     <span>
                       {language === "my"
-                        ? "Smart Clips နှင့် Captions ရှာနေသည်..."
-                        : "Analyzing Clips & Captions..."}
+                        ? "စာသားများ စီစဉ်နေပါသည်..."
+                        : "Preparing highlights & subtitles..."}
                     </span>
                   </>
                 ) : (
                   <>
-                    <Zap className="h-4 w-4 mr-2" />
+                    <Scissors className="h-4 w-4 mr-2" />
                     <span>
                       {language === "my"
-                        ? "Smart Clip Finder & Auto-Captions ရှာမည်"
-                        : "Smart Clip Finder & Auto-Captions"}
+                        ? "အကောင်းဆုံး အခန်းဖြတ်ရန် & ရုပ်ရှင်စာတန်းထိုး"
+                        : "Highlight Cutter & Clean Subtitles"}
                     </span>
                   </>
                 )}
@@ -822,14 +823,14 @@ export function VideoToContentSection() {
         </Card>
 
         {clipsCaptionsResult && (
-          <Card className="border-indigo-500/30 bg-indigo-500/5 shadow-sm">
+          <Card className="border-[#E7E5E4] dark:border-[#3F3F46] bg-card">
             <CardHeader className="pb-2.5">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <Zap className="h-4 w-4 text-indigo-500" />
+                <Scissors className="h-4 w-4 text-muted-foreground" />
                 <span>
                   {language === "my"
-                    ? "Smart Clip Finder & Auto-Captions"
-                    : "Smart Clip Finder & Auto-Captions"}
+                    ? "အကောင်းဆုံး အခန်းဖြတ်ရန် & ရုပ်ရှင်စာတန်းထိုး"
+                    : "Highlight Cutter & Clean Subtitles"}
                 </span>
               </CardTitle>
             </CardHeader>
@@ -868,8 +869,8 @@ export function VideoToContentSection() {
                   <div className="flex items-center justify-between gap-2">
                     <Label className="text-xs font-semibold text-muted-foreground">
                       {language === "my"
-                        ? "Auto-Captions (မြန်မာ/အင်္ဂလိပ် စာတန်း)"
-                        : "Timestamped Auto-Captions"}
+                        ? "ရုပ်ရှင်စာတန်းထိုး (မြန်မာ/အင်္ဂလိပ် စာတန်း)"
+                        : "Clean Subtitles"}
                     </Label>
                     <Button
                       type="button"
@@ -954,7 +955,7 @@ export function VideoToContentSection() {
         ) : !result ? (
           <Card className="border-border/60 border-dashed bg-card/60">
             <CardContent className="p-8 text-center flex flex-col items-center justify-center gap-3">
-              <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-500/10 to-indigo-500/10 border border-blue-500/15 flex items-center justify-center text-blue-600 dark:text-blue-400">
+              <div className="h-14 w-14 rounded-2xl bg-[#F0EDE8] dark:bg-[#27272A] border border-[#E7E5E4] dark:border-[#3F3F46] flex items-center justify-center text-foreground">
                 <Video className="h-6 w-6" aria-hidden="true" />
               </div>
               <div className="space-y-1">
@@ -1140,7 +1141,7 @@ export function VideoToContentSection() {
                 <Button
                   type="button"
                   onClick={handleSendToVoiceover}
-                  className="w-full h-10 text-xs sm:text-sm font-semibold bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white border-0 shadow-sm font-myanmar"
+                  className="w-full h-10 text-xs sm:text-sm font-semibold font-myanmar"
                 >
                   <Mic className="h-4 w-4 mr-1.5" aria-hidden="true" />
                   {t(language, "generator.sendToVoiceover")}
@@ -1290,7 +1291,7 @@ export function VideoToContentSection() {
                     onClick={() => copyText(item.key, item.value)}
                     className={`h-8 px-1.5 text-[11px] font-medium font-myanmar truncate ${
                       item.key === "all"
-                        ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-0"
+                        ? ""
                         : "border-border/60 bg-background/80"
                     }`}
                   >

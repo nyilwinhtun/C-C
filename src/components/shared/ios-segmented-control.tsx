@@ -63,7 +63,7 @@ export function IosSegmentedControl<T extends string = string>({
       role="tablist"
       aria-label={ariaLabel}
       className={cn(
-        "relative inline-flex flex-wrap sm:flex-nowrap items-center gap-0.5 rounded-[14px] bg-[#E5E5EA]/90 dark:bg-[#2C2C2E] p-1 border-[0.5px] border-black/[0.04] dark:border-white/[0.06]",
+        "relative inline-flex flex-wrap sm:flex-nowrap items-center gap-0.5 rounded-[14px] bg-[#F0EDE8] dark:bg-[#27272A] p-1 border border-[#E7E5E4] dark:border-[#3F3F46]",
         fullWidthOnMobile ? "w-full sm:w-auto" : "w-auto",
         className
       )}
@@ -71,7 +71,7 @@ export function IosSegmentedControl<T extends string = string>({
       {thumbStyle && (
         <span
           aria-hidden="true"
-          className="absolute rounded-[11px] bg-white dark:bg-[#3A3A3C] shadow-[0_1px_3px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.06)] dark:shadow-[0_1px_4px_rgba(0,0,0,0.45)] transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] pointer-events-none"
+          className="absolute rounded-[11px] bg-white dark:bg-[#3F3F46] shadow-xs transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] pointer-events-none"
           style={{
             left: thumbStyle.left,
             top: thumbStyle.top,
@@ -110,7 +110,7 @@ export function IosSegmentedControl<T extends string = string>({
               <Icon
                 className={cn(
                   "h-3.5 w-3.5 shrink-0 transition-colors",
-                  isActive ? "text-[#007AFF] dark:text-[#0A84FF]" : "text-muted-foreground"
+                  isActive ? "text-[#1C1917] dark:text-[#F5F5F4]" : "text-muted-foreground"
                 )}
                 strokeWidth={1.75}
                 aria-hidden="true"

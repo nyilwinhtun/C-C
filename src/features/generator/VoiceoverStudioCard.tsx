@@ -7,7 +7,6 @@ import {
   Loader2,
   Mic,
   Share2,
-  Sparkles,
   Volume2,
   VolumeX,
 } from "lucide-react"
@@ -259,17 +258,17 @@ export function VoiceoverStudioCard({
     typeof navigator !== "undefined" && typeof navigator.share === "function"
 
   return (
-    <Card className="border-indigo-500/30 bg-gradient-to-br from-indigo-500/[0.04] via-card to-blue-500/[0.04] shadow-sm overflow-hidden">
+    <Card className="border-[#E7E5E4] dark:border-[#3F3F46] bg-card overflow-hidden">
       <CardHeader className="py-3 px-4 border-b border-border/60 flex flex-row items-center justify-between gap-2 space-y-0">
         <div className="min-w-0">
-          <CardTitle className="text-xs font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
-            <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>AI Voiceover &amp; Video Merge Studio</span>
+          <CardTitle className="text-xs font-semibold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+            <Mic className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{language === "my" ? "အသံသွင်းခန်းနှင့် ဗီဒီယိုပေါင်းစပ်စတူဒီယို" : "Recording Booth & Video Merge"}</span>
           </CardTitle>
           <CardDescription className="text-[11px] mt-0.5 font-myanmar">
             {language === "my"
-              ? "မြန်မာ AI အသံသွင်းပြီး ဗီဒီယိုနှင့် တိုက်ရိုက်ပေါင်းစပ်ထုတ်ယူပါ"
-              : "Synthesize Burmese AI voiceover and merge directly into your video"}
+              ? "မြန်မာအသံသွင်းပြီး ဗီဒီယိုနှင့် တိုက်ရိုက်ပေါင်းစပ်ထုတ်ယူပါ"
+              : "Record Burmese narration and merge directly into your video"}
           </CardDescription>
         </div>
         <Badge variant="secondary" className="text-[10px] shrink-0">
@@ -343,11 +342,13 @@ export function VoiceoverStudioCard({
                         : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40"
                     }`}
                   >
-                    <div className="text-[11px] font-semibold leading-tight">
-                      {type === "female" ? "Female" : "Male"}
+                    <div className="text-[11px] font-semibold leading-tight font-myanmar">
+                      {language === "my"
+                        ? type === "female" ? "စာဖတ်သူ - နီလာ" : "စာဖတ်သူ - သီဟ"
+                        : type === "female" ? "Narrator - Nilar" : "Narrator - Thiha"}
                     </div>
                     <div className="text-[10px] opacity-80 truncate font-myanmar">
-                      {type === "female" ? "Nilar" : "Thiha"}
+                      {type === "female" ? "Female" : "Male"}
                     </div>
                     <span className="sr-only">{preset.labelMy}</span>
                   </button>
@@ -421,12 +422,12 @@ export function VoiceoverStudioCard({
             type="button"
             onClick={handleGenerateVoice}
             disabled={isGeneratingVoice || isMergingVideo || !editableScript.trim()}
-            className="w-full h-9 text-xs font-semibold bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white border-0"
+            className="w-full h-9 text-xs font-semibold"
           >
             {isGeneratingVoice ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" aria-hidden="true" />
-                Synthesizing Burmese Voiceover...
+                {language === "my" ? "အသံဖိုင် ပြင်ဆင်နေပါသည်..." : "Preparing audio..."}
               </>
             ) : (
               <>
@@ -502,7 +503,7 @@ export function VoiceoverStudioCard({
               </div>
               <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-150"
+                  className="h-full bg-[#1C1917] dark:bg-[#F5F5F4] transition-all duration-150"
                   style={{ width: `${mergeProgress}%` }}
                 />
               </div>

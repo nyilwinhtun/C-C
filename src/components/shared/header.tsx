@@ -34,7 +34,7 @@ export function Header({ title, onOpenSettings }: HeaderProps) {
   }
 
   return (
-    <header className="flex items-center justify-between gap-3 px-4 sm:px-6 min-h-14 py-2 border-b-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-white/80 dark:bg-black/80 ios-glass sticky top-0 z-20 pt-safe">
+    <header className="flex items-center justify-between gap-3 px-4 sm:px-6 min-h-14 py-2 border-b border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5]/90 dark:bg-[#18181B]/90 ios-glass sticky top-0 z-20 pt-safe">
       <div className="flex-1 min-w-0 flex items-center gap-2.5">
         <SquircleIcon icon={activeRoom.icon} tone={activeRoom.tone} size="sm" />
         <h2 className="min-w-0 text-[17px] sm:text-lg font-bold tracking-tight leading-snug font-myanmar truncate">

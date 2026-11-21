@@ -27,59 +27,59 @@
 
 @layer base {
   :root {
-    /* Apple iOS Light Mode System Palette */
-    --background: 240 20% 96%; /* #F2F2F7 */
-    --foreground: 240 6% 10%;  /* #1C1C1E */
-    --card: 0 0% 100%;         /* #FFFFFF */
-    --card-foreground: 240 6% 10%;
+    /* Calm Editorial Paper Light Mode */
+    --background: 36 33% 97%;  /* #FAF8F5 Warm Paper */
+    --foreground: 24 10% 10%;  /* #1C1917 Deep Charcoal Ink */
+    --card: 0 0% 100%;         /* #FFFFFF Clean Card Surface */
+    --card-foreground: 24 10% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 6% 10%;
-    --primary: 211 100% 50%;   /* #007AFF Apple System Blue */
-    --primary-foreground: 0 0% 100%;
-    --secondary: 240 11% 91%;  /* #E5E5EA */
-    --secondary-foreground: 240 6% 10%;
-    --muted: 240 11% 91%;      /* #E5E5EA */
-    --muted-foreground: 240 4% 46%;
-    --accent: 240 12% 93%;
-    --accent-foreground: 240 6% 10%;
-    --destructive: 3 100% 59%; /* #FF3B30 Apple System Red */
+    --popover-foreground: 24 10% 10%;
+    --primary: 24 10% 10%;     /* #1C1917 Tactile Charcoal */
+    --primary-foreground: 36 33% 97%; /* #FAF8F5 */
+    --secondary: 36 17% 93%;   /* #F0EDE8 */
+    --secondary-foreground: 24 10% 10%;
+    --muted: 36 14% 92%;
+    --muted-foreground: 25 5% 32%; /* #57534E Muted Slate */
+    --accent: 36 17% 93%;
+    --accent-foreground: 24 10% 10%;
+    --destructive: 0 65% 48%;
     --destructive-foreground: 0 0% 100%;
-    --border: 240 6% 86%;
-    --input: 240 6% 88%;
-    --ring: 211 100% 50%;
+    --border: 24 6% 90%;       /* #E7E5E4 Subtle Stone Border */
+    --input: 24 6% 88%;
+    --ring: 24 10% 10%;
 
-    --ios-hairline: rgba(60, 60, 67, 0.12);
-    --ios-grouped-bg: #F2F2F7;
+    --ios-hairline: #E7E5E4;
+    --ios-grouped-bg: #FAF8F5;
     --ios-card-bg: #FFFFFF;
-    --ios-secondary-fill: #E5E5EA;
+    --ios-secondary-fill: #F0EDE8;
   }
 
   .dark {
-    /* Apple iOS True OLED Dark Mode Palette */
-    --background: 0 0% 0%;     /* #000000 Pure Pitch Black */
-    --foreground: 0 0% 98%;    /* #FAFAFA */
-    --card: 240 4% 11%;        /* #1C1C1E Elevated Dark Grouped */
-    --card-foreground: 0 0% 98%;
-    --popover: 240 4% 11%;     /* #1C1C1E */
-    --popover-foreground: 0 0% 98%;
-    --primary: 210 100% 52%;   /* #0A84FF Apple Dark System Blue */
-    --primary-foreground: 0 0% 100%;
-    --secondary: 240 4% 18%;   /* #2C2C2E Secondary Grouped Fill */
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 4% 18%;       /* #2C2C2E */
-    --muted-foreground: 240 5% 60%;
-    --accent: 240 4% 22%;      /* #3A3A3C */
-    --accent-foreground: 0 0% 98%;
-    --destructive: 4 100% 60%; /* #FF453A Apple Dark Red */
+    /* Soft Studio Charcoal Dark Mode */
+    --background: 240 6% 10%;  /* #18181B Soft Studio Charcoal */
+    --foreground: 60 9% 96%;   /* #F5F5F4 Warm Stone */
+    --card: 240 4% 16%;        /* #27272A Elevated Matte Card */
+    --card-foreground: 60 9% 96%;
+    --popover: 240 4% 16%;     /* #27272A */
+    --popover-foreground: 60 9% 96%;
+    --primary: 60 9% 96%;      /* #F5F5F4 Tactile Warm Stone */
+    --primary-foreground: 240 6% 10%; /* #18181B */
+    --secondary: 240 5% 22%;
+    --secondary-foreground: 60 9% 96%;
+    --muted: 240 5% 22%;
+    --muted-foreground: 240 5% 65%; /* #A1A1AA */
+    --accent: 240 5% 24%;
+    --accent-foreground: 60 9% 96%;
+    --destructive: 0 72% 55%;
     --destructive-foreground: 0 0% 100%;
-    --border: 240 4% 22%;
-    --input: 240 4% 20%;
-    --ring: 210 100% 52%;
+    --border: 240 5% 26%;      /* #3F3F46 Subtle Border */
+    --input: 240 5% 24%;
+    --ring: 60 9% 96%;
 
-    --ios-hairline: rgba(84, 84, 88, 0.36);
-    --ios-grouped-bg: #000000;
-    --ios-card-bg: #1C1C1E;
-    --ios-secondary-fill: #2C2C2E;
+    --ios-hairline: #3F3F46;
+    --ios-grouped-bg: #18181B;
+    --ios-card-bg: #27272A;
+    --ios-secondary-fill: #3F3F46;
   }
 }
 

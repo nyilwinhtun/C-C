@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { Calendar, Copy, FolderKanban, Pencil, Plus, Sparkles, Trash2, Wand2 } from "lucide-react"
+import { Calendar, Copy, FolderKanban, PenLine, Pencil, Plus, Trash2 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { useShallow } from "zustand/react/shallow"
 import type { SavedVaultItem } from "@/store/useContentStore"
@@ -366,7 +366,7 @@ export function VaultPage() {
       </div>
       <Card className="border-border/60 border-dashed bg-card/70">
         <CardContent className="py-12 px-6 flex flex-col items-center justify-center text-center gap-4">
-          <div className="h-14 w-14 rounded-2xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 flex items-center justify-center text-blue-600 dark:text-blue-400">
+          <div className="h-14 w-14 rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#F0EDE8] dark:bg-[#27272A] flex items-center justify-center text-foreground">
             <FolderKanban className="h-6 w-6" aria-hidden="true" />
           </div>
           <div className="space-y-1 max-w-md">
@@ -393,7 +393,7 @@ export function VaultPage() {
                   onClick={() => handleAddStarterPreset(preset.key)}
                   className="flex items-center justify-center gap-1.5 rounded-xl border border-border/60 bg-background/80 hover:bg-accent/60 hover:border-blue-500/30 px-3 py-2.5 text-xs font-medium transition-all cursor-pointer"
                 >
-                  <Sparkles className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
+                  <PenLine className="h-3.5 w-3.5 text-muted-foreground shrink-0" aria-hidden="true" />
                   <span className="truncate">{preset.label}</span>
                 </button>
               ))}
@@ -552,10 +552,9 @@ export function VaultPage() {
                 <Button
                   size="sm"
                   onClick={() => handleUseInGenerator(item)}
-                  className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-0"
                 >
-                  <Wand2 className="h-3 w-3 mr-1.5" aria-hidden="true" />
-                  {language === "my" ? "Generator တွင်သုံးမည်" : "Use in Generator"}
+                  <PenLine className="h-3 w-3 mr-1.5" aria-hidden="true" />
+                  {language === "my" ? "စာရေးစက်တွင်သုံးမည်" : "Use in Post Writer"}
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => handleCopy(item.content)}>
                   <Copy className="h-3 w-3 mr-1.5" aria-hidden="true" />
@@ -611,7 +610,7 @@ export function VaultAndCalendarPage() {
           onClick={() => setSubTab("calendar")}
           className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-xs sm:text-sm font-medium transition-all cursor-pointer font-myanmar ${
             subTab === "calendar"
-              ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm"
+              ? "bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B]"
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
