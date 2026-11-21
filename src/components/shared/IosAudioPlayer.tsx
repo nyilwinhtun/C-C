@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Download, Pause, Play, RotateCcw, RotateCw, Share2 } from "lucide-react"
 import { cn, triggerHaptic } from "@/lib/utils"
-import { unlockIosAudio } from "@/lib/iosAudio"
+import { setIosAudioSessionPlayback, unlockIosAudio } from "@/lib/iosAudio"
 
 interface IosAudioPlayerProps {
   src: string
@@ -128,12 +128,14 @@ export function IosAudioPlayer({
   const togglePlay = async () => {
     const audio = audioRef.current
     if (!audio) return
+    setIosAudioSessionPlayback()
     unlockIosAudio()
     triggerHaptic(10)
     if (isPlaying) {
       audio.pause()
     } else {
       try {
+        setIosAudioSessionPlayback()
         audio.playbackRate = playbackSpeed
         await audio.play()
       } catch {

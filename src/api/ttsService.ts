@@ -5,7 +5,7 @@ import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
 
 export type BurmeseVoiceType = "female" | "male"
-export type VoiceoverSpeed = 0.9 | 1.0 | 1.1 | 1.2
+export type VoiceoverSpeed = 0.85 | 0.9 | 1.0 | 1.1 | 1.15 | 1.2
 export type VoiceDeliveryTone = "promo" | "storytelling" | "educational"
 export type SoundEffectType = "none" | "pop" | "whoosh" | "cash_ding"
 
@@ -700,10 +700,14 @@ async function decodeBlobToAudioBuffer(blob: Blob): Promise<AudioBuffer> {
 
 function getSpeedPromptInstruction(speed: VoiceoverSpeed): string {
   switch (speed) {
+    case 0.85:
+      return "Speak at a calm, unhurried, deliberate pace (0.85x speed)."
     case 0.9:
       return "Speak at a slightly slower, relaxed, clear pace (0.9x speed)."
     case 1.1:
       return "Speak at a slightly brisk, energetic social-media pace (1.1x speed)."
+    case 1.15:
+      return "Speak at a lively, confident, brisk pace (1.15x speed)."
     case 1.2:
       return "Speak at a fast, engaging, punchy TikTok/Reels pace (1.2x speed)."
     default:
