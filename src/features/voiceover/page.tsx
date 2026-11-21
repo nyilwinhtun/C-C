@@ -917,7 +917,7 @@ export function VoiceoverPage() {
   }${enableSubtitles ? ` · ${SUBTITLE_STYLE_OPTIONS.find((s) => s.id === subtitleStyle)?.label ?? "Subtitles"}` : ""}`
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4 pb-24 lg:pb-6">
+    <div className="max-w-3xl mx-auto space-y-4 lg:pb-6">
       <Card className="border-indigo-500/30 bg-gradient-to-br from-indigo-500/[0.04] via-card to-blue-500/[0.04] shadow-sm overflow-hidden">
         <CardHeader className="py-3 px-4 border-b border-border/60 flex flex-row items-center justify-between gap-2 space-y-0">
           <div className="min-w-0">
@@ -1920,14 +1920,14 @@ export function VoiceoverPage() {
             )}
           </div>
 
-          {/* Generate Audio CTA (Desktop, AI TTS Mode only) */}
+          {/* Generate Audio CTA (AI TTS Mode only) */}
           {audioSourceMode === "ai" && (
-            <div className="hidden lg:block pt-1 space-y-2">
+            <div className="pt-1 space-y-2">
               <Button
                 type="button"
                 onClick={handleGenerateVoice}
                 disabled={isGeneratingVoice || isMergingVideo || !voiceoverDraftScript.trim()}
-                className="w-full h-10 text-sm font-semibold bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white border-0"
+                className="w-full min-h-[44px] sm:h-10 text-sm font-semibold bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white border-0 font-myanmar"
               >
                 {isGeneratingVoice ? (
                   <>
@@ -2090,90 +2090,6 @@ export function VoiceoverPage() {
           </div>
         </CardContent>
       </Card>
-
-      {/* Mobile Bottom Thumb-Zone Bar */}
-      <div className="lg:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur-md px-3 py-2.5 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
-        <div className="flex items-center gap-2 max-w-3xl mx-auto">
-          {audioSourceMode === "ai" ? (
-            <Button
-              type="button"
-              onClick={handleGenerateVoice}
-              disabled={isGeneratingVoice || isMergingVideo || !voiceoverDraftScript.trim()}
-              className="flex-1 min-h-[44px] text-xs font-semibold bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white border-0 font-myanmar"
-            >
-              {isGeneratingVoice ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" aria-hidden="true" />
-                  {voiceProgress && voiceProgress.totalChunks > 1
-                    ? isMy
-                      ? `အသံဖန်တီးနေပါသည်... (အပိုင်း ${toBurmeseDigits(voiceProgress.currentChunk)}/${toBurmeseDigits(voiceProgress.totalChunks)})`
-                      : `Part ${voiceProgress.currentChunk}/${voiceProgress.totalChunks}...`
-                    : isMy
-                      ? "အသံဖန်တီးနေပါသည်..."
-                      : "Generating..."}
-                </>
-              ) : (
-                <>
-                  <Mic className="h-4 w-4 mr-1.5" aria-hidden="true" />
-                  {isMy ? "AI အသံဖန်တီးမည်" : "Generate Voice"}
-                </>
-              )}
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              onClick={isRecordingVoice ? stopVoiceRecording : startVoiceRecording}
-              disabled={isTranscribingVoice || isMergingVideo}
-              className={`flex-1 min-h-[44px] text-xs font-semibold text-white border-0 font-myanmar ${
-                isRecordingVoice
-                  ? "bg-destructive hover:bg-destructive/90"
-                  : "bg-rose-600 hover:bg-rose-700"
-              }`}
-            >
-              {isRecordingVoice ? (
-                <>
-                  <Square className="h-3.5 w-3.5 mr-1.5 fill-current" aria-hidden="true" />
-                  {isMy
-                    ? `ရပ်မည် (${formatRecordTimer(recordingSeconds)})`
-                    : `Stop (${formatRecordTimer(recordingSeconds)})`}
-                </>
-              ) : (
-                <>
-                  <Mic className="h-4 w-4 mr-1.5" aria-hidden="true" />
-                  {recordedVoice
-                    ? isMy
-                      ? "အသံပြန်သွင်းမည်"
-                      : "Re-record Voice"
-                    : isMy
-                      ? "အသံဖြင့် ပြောထည့်မည်"
-                      : "Record Voice"}
-                </>
-              )}
-            </Button>
-          )}
-          {activeVoiceoverAudio && hasReadyMedia && (
-            <Button
-              type="button"
-              onClick={handleMergeVideo}
-              disabled={isMergingVideo || isGeneratingVoice || isRecordingVoice}
-              className="min-h-[44px] px-3.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white border-0 font-myanmar"
-            >
-              <Film className="h-4 w-4 mr-1.5" aria-hidden="true" />
-              {mediaMode === "photos" ? (isMy ? "ထုတ်ယူမည်" : "Create") : isMy ? "ပေါင်းစပ်မည်" : "Merge"}
-            </Button>
-          )}
-          {mergedVideo && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleShareVideo}
-              className="min-h-[44px] px-3 text-xs font-semibold border-emerald-500/40"
-            >
-              <Share2 className="h-4 w-4" aria-hidden="true" />
-            </Button>
-          )}
-        </div>
-      </div>
     </div>
   )
 }

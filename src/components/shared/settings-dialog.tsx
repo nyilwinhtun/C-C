@@ -12,10 +12,11 @@ import {
   type BusinessCategory,
 } from "@/types"
 import { useShallow } from "zustand/react/shallow"
-import { Download, Eye, EyeOff, Link, Settings, ShieldAlert, Upload } from "lucide-react"
+import { Download, Eye, EyeOff, Globe, Link, LogOut, Moon, Settings, ShieldAlert, Sun, Upload } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { SquircleIcon } from "@/components/shared/squircle-icon"
 import { triggerHaptic } from "@/lib/utils"
+import { supabase } from "@/lib/supabase"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -94,6 +95,11 @@ const PROVIDER_INFO: Record<
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const {
     language,
+    setLanguage,
+    theme,
+    toggleTheme,
+    user,
+    signOut,
     aiProvider,
     apiKeys,
     models,
@@ -103,6 +109,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   } = useUIStore(
     useShallow((state) => ({
       language: state.language,
+      setLanguage: state.setLanguage,
+      theme: state.theme,
+      toggleTheme: state.toggleTheme,
+      user: state.user,
+      signOut: state.signOut,
       aiProvider: state.aiProvider,
       apiKeys: state.apiKeys,
       models: state.models,
@@ -150,7 +161,23 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [showKey, setShowKey] = useState(false)
   const [loading, setLoading] = useState(false)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const handleSignOut = async () => {
+    setLoggingOut(true)
+    try {
+      const { error } = await supabase.auth.signOut()
+      if (error) throw error
+    } catch (err: unknown) {
+      console.error("Sign out error", err)
+    } finally {
+      signOut()
+      setLoggingOut(false)
+      onOpenChange(false)
+      toast.success(t(language, "auth.signOutSuccess"))
+    }
+  }
 
   const currentPresets = PRESET_MODELS[selectedProvider]
   const isPreset = currentPresets.includes(modelInput)
@@ -303,6 +330,67 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           </div>
         </div>
         <div className="space-y-5 pt-2">
+          {/* Quick iOS App Preferences & Account */}
+          <div className="rounded-[16px] border-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-[#F2F2F7]/70 dark:bg-[#2C2C2E]/70 p-3 space-y-2.5">
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  triggerHaptic(8)
+                  setLanguage(language === "en" ? "my" : "en")
+                }}
+                className="flex-1 h-9 text-xs font-medium gap-1.5 bg-white/80 dark:bg-[#1C1C1E]/80"
+                aria-label="Toggle language"
+              >
+                <Globe className="h-4 w-4 text-muted-foreground shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                <span>{language === "en" ? "EN (English)" : "MY (မြန်မာ)"}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  triggerHaptic(8)
+                  toggleTheme()
+                }}
+                className="flex-1 h-9 text-xs font-medium gap-1.5 bg-white/80 dark:bg-[#1C1C1E]/80"
+                aria-label="Toggle dark mode"
+              >
+                {theme === "dark" ? (
+                  <>
+                    <Sun className="h-4 w-4 text-amber-500 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                    <span>Light Mode</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="h-4 w-4 text-muted-foreground shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                    <span>OLED Dark</span>
+                  </>
+                )}
+              </Button>
+            </div>
+            {user && (
+              <div className="flex items-center justify-between gap-2 pt-1 border-t-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)]">
+                <span className="text-xs text-muted-foreground truncate px-1">
+                  {user.email || "Signed in"}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleSignOut}
+                  disabled={loggingOut}
+                  className="h-8 px-2.5 text-xs font-medium text-destructive hover:text-destructive hover:bg-destructive/10 gap-1.5 shrink-0"
+                >
+                  <LogOut className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                  <span>{t(language, "header.signOut")}</span>
+                </Button>
+              </div>
+            )}
+          </div>
+
           <div className="space-y-2">
             <label className="text-sm font-medium">{t(language, "settings.aiProvider")}</label>
             <Select

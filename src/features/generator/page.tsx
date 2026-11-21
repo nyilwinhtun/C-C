@@ -885,7 +885,7 @@ export function GeneratorPage() {
   }, [contentToShow, viewMode])
 
   return (
-    <div className="space-y-3 sm:space-y-4 pb-24 lg:pb-0">
+    <div className="space-y-3 sm:space-y-4">
       {/* Mobile 2-Pill Create vs Result Switcher */}
       <div
         role="tablist"
@@ -1818,74 +1818,6 @@ export function GeneratorPage() {
             </div>
           )}
         </div>
-      </div>
-
-      {/* Mobile Bottom Thumb-Zone Action Bar */}
-      <div className="lg:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur-md px-3 py-2.5 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
-        {mobileView === "create" ? (
-          <div className="flex items-center gap-2 max-w-2xl mx-auto">
-            <Button
-              type="button"
-              onClick={() => void form.handleSubmit(onSubmit)()}
-              disabled={isGeneratingFlag}
-              className="flex-1 min-h-[44px] rounded-xl font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-0 shadow-md shadow-blue-500/20 font-myanmar"
-            >
-              {isGeneratingFlag ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden="true" />
-                  {t(language, "generator.generating")}
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4 mr-2" aria-hidden="true" />
-                  {t(language, "generator.generate")}
-                </>
-              )}
-            </Button>
-            {result && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setMobileView("result")}
-                className="min-h-[44px] px-3 rounded-xl border-border/60 text-xs font-semibold font-myanmar"
-              >
-                {t(language, "generator.tabResult")}
-              </Button>
-            )}
-          </div>
-        ) : (
-          <div className="flex items-center gap-1.5 max-w-2xl mx-auto">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleCopy}
-              disabled={isCopying || !contentToShow}
-              className="min-h-[44px] px-3 rounded-xl border-border/60 text-xs font-semibold font-myanmar"
-            >
-              <Copy className="h-4 w-4 mr-1" aria-hidden="true" />
-              {t(language, "generator.copy")}
-            </Button>
-            <Button
-              type="button"
-              onClick={handleSendToVoiceover}
-              disabled={!contentToShow || isGeneratingFlag}
-              className="flex-1 min-h-[44px] px-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white border-0 text-xs font-semibold font-myanmar"
-            >
-              <Mic className="h-4 w-4 mr-1.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">{t(language, "generator.sendToVoiceover")}</span>
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleShare}
-              disabled={!contentToShow}
-              className="min-h-[44px] px-3 rounded-xl border-border/60 text-xs font-semibold"
-              aria-label={t(language, "generator.share")}
-            >
-              <Share2 className="h-4 w-4" aria-hidden="true" />
-            </Button>
-          </div>
-        )}
       </div>
     </div>
   )

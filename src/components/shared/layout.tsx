@@ -31,7 +31,6 @@ const pages: Record<string, React.FC> = {
 }
 
 export function Layout() {
-  const [mobileOpen, setMobileOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const { language, activePageKey, setActivePageKey, sidebarCollapsed } = useUIStore(
     useShallow((state) => ({
@@ -46,23 +45,13 @@ export function Layout() {
     document.documentElement.lang = language
   }, [language])
 
-  useEffect(() => {
-    const onResize = () => {
-      if (window.innerWidth >= 768) {
-        setMobileOpen(false)
-      }
-    }
-    window.addEventListener("resize", onResize)
-    return () => window.removeEventListener("resize", onResize)
-  }, [])
-
   const activeRoom = getRoomForPageKey(activePageKey)
   const roomTitle = getRoomTitle(activeRoom, language)
   const Page = pages[activePageKey] ?? GeneratorPage
 
   return (
     <div className="flex h-screen bg-background text-foreground">
-      <Sidebar mobileOpen={mobileOpen} onMobileToggle={setMobileOpen} />
+      <Sidebar />
       <div
         className={cn(
           "flex-1 flex flex-col min-w-0 transition-[padding] duration-200",
@@ -71,10 +60,9 @@ export function Layout() {
       >
         <Header
           title={roomTitle}
-          onMenuToggle={() => setMobileOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
         />
-        <main className="flex-1 overflow-y-auto bg-background text-foreground p-3.5 sm:p-6 pb-24 md:pb-8">
+        <main className="flex-1 overflow-y-auto bg-background text-foreground p-3.5 sm:p-6 pb-28 md:pb-8">
           <div className="mx-auto max-w-6xl space-y-4">
             {activeRoom.tabs.length > 1 && (
               <IosSegmentedControl
@@ -96,7 +84,7 @@ export function Layout() {
       {/* Mobile iOS Frosted Glass Bottom Tab Bar */}
       <nav
         aria-label="Primary sections"
-        className="md:hidden fixed bottom-0 inset-x-0 z-30 border-t-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-white/80 dark:bg-black/80 ios-glass pb-safe"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-white/80 dark:bg-black/80 ios-glass pb-safe"
       >
         <div className="grid grid-cols-4 h-[54px] px-1">
           {WORKSPACE_ROOMS.map((room) => {
