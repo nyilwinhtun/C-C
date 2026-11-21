@@ -17,12 +17,17 @@ import {
 } from "@/types"
 import { supabase } from "@/lib/supabase"
 import { useUIStore } from "./useUIStore"
+import { t as translate } from "@/locales/translations"
+
+const tt = (key: string, subs?: Record<string, string>) =>
+  translate(useUIStore.getState().language, key, subs)
 import {
   cleanVoiceoverText,
   generateBurmeseDialogueVoiceover,
   generateBurmeseVoiceover,
   mixVoiceoverWithAutoDuckingMusic,
   type BurmeseVoiceType,
+  type VoiceDeliveryTone,
   type VoiceoverSpeed,
 } from "@/api/ttsService"
 import { playBlobUrlWithPrimedAudio } from "@/lib/iosAudio"
@@ -163,6 +168,7 @@ interface ContentState {
   voiceSpeed: VoiceoverSpeed
   voiceDialogueMode: boolean
   voiceMusicPreset: BackgroundMusicPreset
+  voiceDeliveryTone: VoiceDeliveryTone
   voiceCustomMusicFile: File | null
   ttsStatus: TtsStatus
   ttsProgress: TtsProgress | null
@@ -216,6 +222,7 @@ interface ContentState {
   setVoiceSpeed: (speed: VoiceoverSpeed) => void
   setVoiceDialogueMode: (enabled: boolean) => void
   setVoiceMusicPreset: (preset: BackgroundMusicPreset) => void
+  setVoiceDeliveryTone: (tone: VoiceDeliveryTone) => void
   setVoiceCustomMusicFile: (file: File | null) => void
   setSelfRecordedNeedsTranscribe: (needs: boolean) => void
   setStudioSelfAudio: (params: {
@@ -301,6 +308,7 @@ export const useContentStore = create<ContentState>()(
       voiceSpeed: 1.0,
       voiceDialogueMode: false,
       voiceMusicPreset: "none",
+      voiceDeliveryTone: "storytelling",
       voiceCustomMusicFile: null,
       ttsStatus: "idle",
       ttsProgress: null,
@@ -420,6 +428,7 @@ export const useContentStore = create<ContentState>()(
       setVoiceSpeed: (voiceSpeed) => set({ voiceSpeed }),
       setVoiceDialogueMode: (voiceDialogueMode) => set({ voiceDialogueMode }),
       setVoiceMusicPreset: (voiceMusicPreset) => set({ voiceMusicPreset }),
+      setVoiceDeliveryTone: (voiceDeliveryTone) => set({ voiceDeliveryTone }),
       setVoiceCustomMusicFile: (voiceCustomMusicFile) => set({ voiceCustomMusicFile }),
       setSelfRecordedNeedsTranscribe: (selfRecordedNeedsTranscribe) =>
         set({ selfRecordedNeedsTranscribe }),
@@ -476,7 +485,7 @@ export const useContentStore = create<ContentState>()(
 
           let finalScript = extractedText.trim()
           if (!finalScript) {
-            throw new Error("စာမျက်နှာများမှ စာသားထုတ်ယူ၍ မရပါ။")
+            throw new Error(tt("store.pdfNoText"))
           }
 
           if (mode === "recap") {
@@ -494,8 +503,8 @@ export const useContentStore = create<ContentState>()(
           const baseTitle = file.name.replace(/\.[^.]+$/, "").trim()
           const pageSuffix = isPdf
             ? startPage === endPage
-              ? ` (စာ-${startPage})`
-              : ` (စာ-${startPage}-${endPage})`
+              ? ` (${tt("store.pageShort")}-${startPage})`
+              : ` (${tt("store.pageShort")}-${startPage}-${endPage})`
             : ""
 
           await get().generateStudioVoiceover(finalScript, {
@@ -505,7 +514,7 @@ export const useContentStore = create<ContentState>()(
           return get().ttsStatus === "done"
         } catch (err) {
           const msg =
-            err instanceof Error ? err.message : "စာအုပ်ဖိုင်မှ စာသားထုတ်ယူ၍ မရပါ။"
+            err instanceof Error ? err.message : tt("store.bookFailed")
           set({
             pdfExtractionStatus: "error",
             pdfExtractionError: msg,
@@ -523,7 +532,7 @@ export const useContentStore = create<ContentState>()(
         const rawScript = scriptOverride ?? state.voiceScriptText
         const cleaned = cleanVoiceoverText(rawScript)
         if (!cleaned) {
-          const msg = "အသံဖတ်ခိုင်းရန် စာသားအရင်ထည့်ပါ။"
+          const msg = tt("store.needScript")
           set({ ttsStatus: "error", ttsError: msg, ttsProgress: null })
           toast.error(msg)
           return
@@ -546,7 +555,7 @@ export const useContentStore = create<ContentState>()(
         try {
           let result = dialogueMode
             ? await generateBurmeseDialogueVoiceover(rawScript, speed, {
-                deliveryTone: "storytelling",
+                deliveryTone: state.voiceDeliveryTone ?? "storytelling",
                 customPronunciations,
                 useAiSpeechPrep,
                 onStageChange: (stage) => {
@@ -560,7 +569,7 @@ export const useContentStore = create<ContentState>()(
                 },
               })
             : await generateBurmeseVoiceover(cleaned, voiceType, speed, {
-                deliveryTone: "storytelling",
+                deliveryTone: state.voiceDeliveryTone ?? "storytelling",
                 customPronunciations,
                 useAiSpeechPrep,
                 onStageChange: (stage) => {
@@ -601,10 +610,10 @@ export const useContentStore = create<ContentState>()(
           const title =
             options?.customTitle ||
             (dialogueMode
-              ? "နီလာ + သီဟ"
+              ? tt("store.voiceBoth")
               : state.selectedVoice === "thiha"
-                ? "သီဟ"
-                : "နီလာ")
+                ? tt("store.voiceThiha")
+                : tt("store.voiceNilar"))
 
           set({
             ttsStatus: "done",
@@ -630,7 +639,7 @@ export const useContentStore = create<ContentState>()(
             void playBlobUrlWithPrimedAudio(result.audioUrl)
           }
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "အသံဖိုင် ပြင်ဆင်၍ မရပါ။"
+          const msg = err instanceof Error ? err.message : tt("store.audioFailed")
           set({
             ttsStatus: "error",
             ttsProgress: null,
@@ -877,6 +886,7 @@ export const useContentStore = create<ContentState>()(
         videoDurationSeconds: state.videoDurationSeconds ?? null,
         generatedVideoResult: state.generatedVideoResult ?? null,
         customPronunciations: state.customPronunciations ?? [],
+        voiceDeliveryTone: state.voiceDeliveryTone ?? "storytelling",
         voiceDnaSamples: state.voiceDnaSamples ?? ["", "", ""],
         shopProfile: state.shopProfile ?? {
           name: "",

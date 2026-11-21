@@ -34,6 +34,7 @@ import {
 } from "@/lib/iosAudio"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
+import { RecentHistorySheet } from "@/components/shared/recent-history-sheet"
 import { t } from "@/locales/translations"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -125,6 +126,8 @@ export function GeneratorPage() {
     setVoiceoverDraftScript,
     saveToVault,
     addGeneratedItem,
+    generatedHistory,
+    setPosterDraft,
     liveModeEnabled,
   } = useContentStore(
     useShallow((state) => ({
@@ -147,6 +150,8 @@ export function GeneratorPage() {
       setVoiceoverDraftScript: state.setVoiceoverDraftScript,
       saveToVault: state.saveToVault,
       addGeneratedItem: state.addGeneratedItem,
+      generatedHistory: state.generatedHistory,
+      setPosterDraft: state.setPosterDraft,
       liveModeEnabled: state.liveModeEnabled,
     }))
   )
@@ -155,6 +160,7 @@ export function GeneratorPage() {
   const rawNotesRef = useRef(rawNotes)
   rawNotesRef.current = rawNotes
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [polishingAction, setPolishingAction] = useState<
     "hooks" | "shorten" | "humanize" | null
@@ -223,15 +229,13 @@ export function GeneratorPage() {
     unlockIosAudio()
 
     if (!navigator.mediaDevices?.getUserMedia || !getAudioContextConstructor()) {
-      toast.error("ဤ Browser တွင် အသံဖမ်းစနစ်ကို မပံ့ပိုးပါ")
+      toast.error(t(language, "postWriter.toast.micUnsupported"))
       return
     }
 
     if (liveModeEnabled && !useUIStore.getState().apiKeys.gemini?.trim()) {
       toast.error(
-        language === "my"
-          ? "Live စာသားပြောင်းရန် Settings ထဲတွင် Gemini API Key ထည့်သွင်းပေးပါ။"
-          : "Please add your Gemini API key in Settings to use Live Transcription."
+        t(language, "postWriter.toast.liveNeedsKey")
       )
       return
     }
@@ -298,7 +302,7 @@ export function GeneratorPage() {
                       const msg =
                         err instanceof Error
                           ? err.message
-                          : "အသံမှ စာသားပြောင်းရာတွင် အမှားရှိနေပါသည်"
+                          : t(language, "postWriter.toast.transcribeError")
                       toast.error(msg)
                     }
                   })
@@ -320,7 +324,7 @@ export function GeneratorPage() {
       stopMediaResources()
       setIsRecording(false)
       const msg =
-        err instanceof Error ? err.message : "မိုက်ခရိုဖုန်း ခွင့်ပြုချက် မရရှိပါ"
+        err instanceof Error ? err.message : t(language, "postWriter.toast.micDenied")
       toast.error(msg)
     }
   }
@@ -343,14 +347,14 @@ export function GeneratorPage() {
       }
 
       if (blob.size <= MIN_VALID_RECORDING_BYTES) {
-        toast.error("အသံတိုလွန်းပါသည် — ထပ်မံပြောကြည့်ပါနော်")
+        toast.error(t(language, "postWriter.toast.audioTooShort"))
         return
       }
 
       setIsTranscribing(true)
       const processed = await prepareAudioForGemini(blob)
       if (processed.isSilent || !processed.wavBlob) {
-        toast.error("အသံမကြားရပါ — မိုက်ခရိုဖုန်းကို စစ်ဆေးပေးပါ")
+        toast.error(t(language, "postWriter.toast.noAudio"))
         return
       }
 
@@ -360,7 +364,7 @@ export function GeneratorPage() {
       const transcript = await transcribeAudioWithGemini(file)
       const cleanTranscript = transcript.trim()
       if (!cleanTranscript) {
-        toast.error("စာသားအဖြစ် ပြောင်းလဲ၍ မရပါ")
+        toast.error(t(language, "postWriter.toast.convertFailed"))
         return
       }
 
@@ -368,10 +372,10 @@ export function GeneratorPage() {
         ? `${rawNotesRef.current.trim()}\n\n${cleanTranscript}`
         : cleanTranscript
       handleNotesChange(nextNotes)
-      toast.success("အသံမှ စာသားသို့ ထည့်သွင်းပြီးပါပြီ")
+      toast.success(t(language, "postWriter.toast.voiceAdded"))
     } catch (err) {
       const msg =
-        err instanceof Error ? err.message : "အသံမှ စာသားပြောင်းရာတွင် အမှားရှိနေပါသည်"
+        err instanceof Error ? err.message : t(language, "postWriter.toast.transcribeError")
       toast.error(msg)
     } finally {
       setIsTranscribing(false)
@@ -381,7 +385,7 @@ export function GeneratorPage() {
   const handleGenerate = async () => {
     const trimmed = rawNotes.trim()
     if (trimmed.length < 3) {
-      toast.error("အကြောင်းအရာ အနည်းငယ် အရင်ချရေးပေးပါနော်")
+      toast.error(t(language, "postWriter.toast.needContent"))
       return
     }
 
@@ -416,7 +420,7 @@ export function GeneratorPage() {
       })
     } catch (err) {
       const msg =
-        err instanceof Error ? err.message : "စာသားပြန်ချောရာတွင် အမှားဖြစ်ပွားပါသည်"
+        err instanceof Error ? err.message : t(language, "postWriter.toast.polishError")
       toast.error(msg)
     } finally {
       setIsGenerating(false)
@@ -476,7 +480,7 @@ export function GeneratorPage() {
       setEditorialResult({ ...latest, hooks })
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "အဖွင့်စာကြောင်းအသစ်များ ဖန်တီး၍မရပါ"
+        err instanceof Error ? err.message : t(language, "postWriter.toast.hooksError")
       )
     } finally {
       setPolishingAction(null)
@@ -503,12 +507,12 @@ export function GeneratorPage() {
       )
       toast.success(
         mode === "shorten"
-          ? "ပိုတိုကျစ်အောင် ချုံ့ပြီးပါပြီ"
-          : "ပိုလူသားဆန်အောင် ပြင်ဆင်ပြီးပါပြီ"
+          ? t(language, "postWriter.toast.shortened")
+          : t(language, "postWriter.toast.humanized")
       )
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "စာသားပြင်ဆင်ရာတွင် အမှားဖြစ်ပွားပါသည်"
+        err instanceof Error ? err.message : t(language, "postWriter.toast.refineError")
       )
     } finally {
       setPolishingAction(null)
@@ -519,7 +523,7 @@ export function GeneratorPage() {
     if (!activeText.trim()) return
     setVoiceoverDraftScript(cleanVoiceoverText(activeText))
     setActivePageKey("voiceover")
-    toast.success("အသံစတူဒီယိုသို့ ပို့ပြီးပါပြီ")
+    toast.success(t(language, "postWriter.toast.sentToVoice"))
   }
 
   const handleCopy = async () => {
@@ -527,11 +531,43 @@ export function GeneratorPage() {
     try {
       await navigator.clipboard.writeText(activeText)
       setCopied(true)
-      toast.success("စာသား ကူးယူပြီးပါပြီ")
+      toast.success(t(language, "postWriter.toast.copied"))
       window.setTimeout(() => setCopied(false), 1800)
     } catch {
-      toast.error("စာသား ကူးယူ၍ မရပါ")
+      toast.error(t(language, "postWriter.toast.copyFailed"))
     }
+  }
+
+  const handleCreatePoster = () => {
+    if (!activeText.trim()) return
+    const lines = activeText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+    setPosterDraft({
+      headline: (lines[0] ?? "").slice(0, 60),
+      spec1: (lines[1] ?? "").slice(0, 40),
+      spec2: (lines[2] ?? "").slice(0, 40),
+      spec3: "",
+      caption: activeText.trim(),
+    })
+    setActivePageKey("photo-studio")
+  }
+
+  const handleRestoreHistory = (id: string) => {
+    const item = generatedHistory.find((entry) => entry.id === id)
+    if (!item) return
+    setRawNotes(item.topic)
+    setEditorialResult({
+      id: item.id,
+      topic: item.topic,
+      format: item.contentType as EditorialFormatOption,
+      optionA: item.content,
+      optionB: item.content,
+      activeOption: "A",
+      hooks: [],
+      createdAt: item.createdAt,
+    })
   }
 
   const handleSaveToVault = () => {
@@ -543,7 +579,7 @@ export function GeneratorPage() {
       tags: [editorialResult.format, editorialTone],
       status: "draft",
     })
-    toast.success("Vault တွင် သိမ်းဆည်းပြီးပါပြီ")
+    toast.success(t(language, "postWriter.toast.savedVault"))
   }
 
   const hookPreviewText = (() => {
@@ -571,10 +607,10 @@ export function GeneratorPage() {
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5">
           <h1 className="text-[19px] font-semibold tracking-tight text-foreground sm:text-xl">
-            အတွေးစများ ချရေးရန်
+            {t(language, "postWriter.brainDumpTitle")}
           </h1>
           <span className="rounded-full border border-border/70 bg-muted/60 px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-            မူကြမ်းမှတ်စု
+            {t(language, "postWriter.draftNotes")}
           </span>
         </div>
       </div>
@@ -720,6 +756,15 @@ export function GeneratorPage() {
         <Button
           type="button"
           variant="outline"
+          onClick={() => setHistoryOpen(true)}
+          className="h-11 shrink-0 rounded-xl border-border/80 bg-card px-3.5 text-[14px] font-medium text-foreground shadow-xs hover:bg-muted/70"
+        >
+          <span>{t(language, "postWriter.historyBtn")}</span>
+        </Button>
+
+        <Button
+          type="button"
+          variant="outline"
           onClick={() => setSettingsOpen(true)}
           className="h-11 shrink-0 rounded-xl border-border/80 bg-card px-3.5 text-[14px] font-medium text-foreground shadow-xs hover:bg-muted/70"
         >
@@ -769,21 +814,21 @@ export function GeneratorPage() {
             <div className="flex items-center justify-between gap-2 border-b border-border/50 px-4 py-2.5">
               <span className="text-xs font-medium text-muted-foreground truncate">
                 {editorialResult.activeOption === "A"
-                  ? "ရိုးရှင်းတိုက်ရိုက်ဟန် (Direct & Clear)"
-                  : "ဇာတ်ကြောင်းပြောဟန် (Warm Storytelling)"}
+                  ? t(language, "postWriter.styleDirect")
+                  : t(language, "postWriter.styleStory")}
               </span>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="hidden text-[11px] text-muted-foreground/75 sm:inline">
-                  ဘယ်/ညာ ပွတ်ဆွဲ၍ ပြောင်းကြည့်နိုင်သည်
+                  {t(language, "postWriter.swipeHint")}
                 </span>
                 <button
                   type="button"
                   onClick={clearEditorialResult}
-                  aria-label="ဖျက်မည်"
+                  aria-label={t(language, "postWriter.deleteBtn")}
                   className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive active:scale-95"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  <span>ဖျက်မည်</span>
+                  <span>{t(language, "postWriter.deleteBtn")}</span>
                 </button>
               </div>
             </div>
@@ -796,7 +841,7 @@ export function GeneratorPage() {
                 <div className="mt-2 flex items-center gap-2">
                   <span className="h-px flex-1 border-t border-dashed border-[#D6D3D1] dark:border-[#3F3F46]" />
                   <span className="shrink-0 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-2.5 py-0.5 text-[10px] font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
-                    Facebook &apos;See More...&apos; အဖွင့်မျဉ်း
+                    {t(language, "postWriter.seeMoreLine")}
                   </span>
                   <span className="h-px flex-1 border-t border-dashed border-[#D6D3D1] dark:border-[#3F3F46]" />
                 </div>
@@ -814,7 +859,7 @@ export function GeneratorPage() {
             {editorialResult.hooks && editorialResult.hooks.length > 0 && (
               <div className="border-t border-border/50 bg-muted/30 px-4 py-3">
                 <p className="mb-2 text-xs font-medium text-muted-foreground">
-                  ကြိုက်နှစ်သက်ရာ အဖွင့်စာကြောင်းကို နှိပ်၍ အစားထိုးနိုင်ပါသည်-
+                  {t(language, "postWriter.hookPickHint")}
                 </p>
                 <div className="space-y-1.5">
                   {editorialResult.hooks.map((hook, idx) => (
@@ -823,7 +868,7 @@ export function GeneratorPage() {
                       type="button"
                       onClick={() => {
                         updateActiveText(replaceOpeningLine(activeText, hook))
-                        toast.success("အဖွင့်စာကြောင်း အစားထိုးပြီးပါပြီ")
+                        toast.success(t(language, "postWriter.toast.hookReplaced"))
                       }}
                       className="block w-full rounded-xl border border-border/70 bg-card px-3 py-2 text-left text-[13px] leading-relaxed text-foreground transition-colors hover:border-foreground/30 hover:bg-muted/50"
                     >
@@ -841,7 +886,14 @@ export function GeneratorPage() {
                 onClick={handleSaveToVault}
                 className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#27272A] px-4 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] transition-all hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] active:scale-95 cursor-pointer font-myanmar"
               >
-                <span>📌 Vault တွင် သိမ်းမည်</span>
+                <span>{t(language, "postWriter.saveVaultBtn")}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleCreatePoster}
+                className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#27272A] px-4 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] transition-all hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] active:scale-95 cursor-pointer font-myanmar"
+              >
+                <span>{t(language, "postWriter.createPosterBtn")}</span>
               </button>
               <Button
                 type="button"
@@ -919,6 +971,21 @@ export function GeneratorPage() {
           </div>
         </div>
       )}
+
+      <RecentHistorySheet
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        title={t(language, "postWriter.historyTitle")}
+        description={t(language, "postWriter.historyDesc")}
+        emptyText={t(language, "postWriter.historyEmpty")}
+        items={generatedHistory.map((item) => ({
+          id: item.id,
+          title: item.topic || t(language, "postWriter.untitledDraft"),
+          preview: item.content,
+          meta: new Date(item.createdAt).toLocaleString(),
+        }))}
+        onSelect={handleRestoreHistory}
+      />
 
       {/* Slide-Up Settings Bottom Sheet (⚙️ ညှိရန်) */}
       <Sheet open={settingsOpen} onOpenChange={setSettingsOpen} side="bottom">

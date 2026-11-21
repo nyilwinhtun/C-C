@@ -31,7 +31,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { t } from "@/locales/translations"
-import { generateProductScene } from "@/api/aiService"
+import { generateProductScene, suggestFromPhoto } from "@/api/aiService"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
 import { isShoppingCategory } from "@/types"
@@ -266,6 +266,8 @@ export function PhotoStudioPage() {
   const [scenePrompt, setScenePrompt] = useState("")
   const [selectedScenePreset, setSelectedScenePreset] = useState<string | null>(null)
   const [isGeneratingScene, setIsGeneratingScene] = useState(false)
+  const [isSuggesting, setIsSuggesting] = useState(false)
+  const [aiCaption, setAiCaption] = useState("")
   const [secondaryDataUrl, setSecondaryDataUrl] = useState<string | null>(null)
   const [primaryImg, setPrimaryImg] = useState<HTMLImageElement | null>(null)
   const [secondaryImg, setSecondaryImg] = useState<HTMLImageElement | null>(null)
@@ -470,6 +472,48 @@ export function PhotoStudioPage() {
     }
   }, [originalPrimaryDataUrl, primaryDataUrl, scenePrompt, language])
 
+  const handleAiSuggest = useCallback(async () => {
+    const sourceUrl = originalPrimaryDataUrl ?? primaryDataUrl
+    if (!sourceUrl) {
+      toast.error(t(language, "photoStudio.sceneUploadFirst"))
+      return
+    }
+    const match = /^data:([^;]+);base64,(.+)$/.exec(sourceUrl)
+    if (!match) return
+    setIsSuggesting(true)
+    try {
+      const suggestion = await suggestFromPhoto({
+        imageBase64: match[2],
+        mimeType: match[1],
+        language,
+      })
+      setPoster((prev) => ({
+        ...prev,
+        title: suggestion.headline || prev.title,
+        subtitle:
+          [suggestion.spec1, suggestion.spec2, suggestion.spec3].filter(Boolean).join(" • ") ||
+          prev.subtitle,
+        priceTag: suggestion.suggestedPrice || prev.priceTag,
+        showPriceBadge: suggestion.suggestedPrice ? true : prev.showPriceBadge,
+      }))
+      setAiCaption(suggestion.caption ?? "")
+      toast.success(t(language, "photoStudio.aiSuggestDone"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(language, "photoStudio.aiSuggestFailed"))
+    } finally {
+      setIsSuggesting(false)
+    }
+  }, [originalPrimaryDataUrl, primaryDataUrl, language])
+
+  const handleCopyAiCaption = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(aiCaption)
+      toast.success(t(language, "postWriter.toast.copied"))
+    } catch {
+      toast.error(t(language, "postWriter.toast.copyFailed"))
+    }
+  }, [aiCaption, language])
+
   const handleRevertToOriginal = useCallback(() => {
     if (!originalPrimaryDataUrl) return
     setPrimaryDataUrl(originalPrimaryDataUrl)
@@ -623,7 +667,7 @@ export function PhotoStudioPage() {
                     : "bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
               >
-                {ratio === "1:1" ? "1:1 Square" : "4:5 Portrait"}
+                {ratio === "1:1" ? t(language, "photoStudio.ratioSquare") : t(language, "photoStudio.ratioPortrait")}
               </button>
             )
           })}
@@ -699,7 +743,7 @@ export function PhotoStudioPage() {
                   className="h-9 flex-1 gap-1.5 text-xs"
                 >
                   <ImagePlus className="h-3.5 w-3.5" />
-                  {primaryDataUrl ? "Change Before" : "Before Photo"}
+                  {primaryDataUrl ? t(language, "photoStudio.changeBefore") : t(language, "photoStudio.beforePhoto")}
                 </Button>
                 {primaryDataUrl && (
                   <Button
@@ -724,7 +768,7 @@ export function PhotoStudioPage() {
                   className="h-9 flex-1 gap-1.5 text-xs"
                 >
                   <ImagePlus className="h-3.5 w-3.5" />
-                  {secondaryDataUrl ? "Change After" : "After Photo"}
+                  {secondaryDataUrl ? t(language, "photoStudio.changeAfter") : t(language, "photoStudio.afterPhoto")}
                 </Button>
                 {secondaryDataUrl && (
                   <Button
@@ -741,6 +785,7 @@ export function PhotoStudioPage() {
               </div>
             </div>
           ) : (
+            <>
             <div className="flex items-center gap-2">
               <Button
                 type="button"
@@ -770,6 +815,43 @@ export function PhotoStudioPage() {
                 </Button>
               )}
             </div>
+
+            {primaryDataUrl && (
+              <div className="space-y-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleAiSuggest()}
+                  disabled={isSuggesting}
+                  className="h-9 w-full gap-1.5 text-xs font-medium font-myanmar"
+                >
+                  {isSuggesting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  {t(language, "photoStudio.aiSuggestBtn")}
+                </Button>
+                {aiCaption && (
+                  <div className="rounded-xl border border-[#18181B]/10 dark:border-[#FAF8F5]/10 bg-[#FAF8F5] dark:bg-[#27272A]/60 p-3">
+                    <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-foreground font-myanmar">
+                      {aiCaption}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void handleCopyAiCaption()}
+                      className="mt-1.5 h-7 px-2 text-[11px]"
+                    >
+                      {t(language, "generator.copy")}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+            </>
           )}
         </div>
 
@@ -1003,7 +1085,7 @@ export function PhotoStudioPage() {
                         )}
                       >
                         <Columns2 className="h-3.5 w-3.5" />
-                        Side-by-Side
+                        {t(language, "photoStudio.sideBySide")}
                       </button>
                       <button
                         type="button"
@@ -1018,7 +1100,7 @@ export function PhotoStudioPage() {
                         )}
                       >
                         <Rows2 className="h-3.5 w-3.5" />
-                        Top-Bottom
+                        {t(language, "photoStudio.topBottom")}
                       </button>
                     </div>
                   </div>
@@ -1184,7 +1266,7 @@ export function PhotoStudioPage() {
                   <div className="grid grid-cols-2 gap-2.5">
                     <div className="space-y-1">
                       <Label htmlFor="before-label" className="text-xs">
-                        Before Label
+                        {t(language, "photoStudio.beforeLabel")}
                       </Label>
                       <Input
                         id="before-label"
@@ -1197,7 +1279,7 @@ export function PhotoStudioPage() {
                     </div>
                     <div className="space-y-1">
                       <Label htmlFor="after-label" className="text-xs">
-                        After Label
+                        {t(language, "photoStudio.afterLabel")}
                       </Label>
                       <Input
                         id="after-label"

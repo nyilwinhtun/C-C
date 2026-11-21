@@ -81,12 +81,12 @@ const PRESET_MODELS: Record<AIProvider, readonly string[]> = {
 }
 
 const MODEL_LABELS: Record<string, string> = {
-  "gemini-2.5-flash": "Gemini 2.5 Flash (Recommended)",
-  "gemini-2.5-pro": "Gemini 2.5 Pro (စာရေးအား အကောင်းဆုံး)",
-  "gemini-2.5-flash-lite": "Gemini 2.5 Flash-Lite (အမြန်ဆုံး / Quota သက်သာ)",
-  "gemini-2.0-flash": "Gemini 2.0 Flash (အရန် / တည်ငြိမ်)",
-  "google/gemma-3-27b-it:free": "Gemma 3 27B (Free - No VPN)",
-  "qwen/qwen2.5-vl-72b-instruct:free": "Qwen 2.5 VL 72B (Free - Vision)",
+  "gemini-2.5-flash": "settings.model.flash",
+  "gemini-2.5-pro": "settings.model.pro",
+  "gemini-2.5-flash-lite": "settings.model.lite",
+  "gemini-2.0-flash": "settings.model.flash2",
+  "google/gemma-3-27b-it:free": "settings.model.gemma",
+  "qwen/qwen2.5-vl-72b-instruct:free": "settings.model.qwen",
 }
 
 interface SettingsDialogProps {
@@ -102,21 +102,21 @@ const PROVIDER_INFO: Record<
     label: "Google Gemini",
     shortLabel: "Gemini",
     link: "https://makersuite.google.com/app/apikey",
-    linkLabel: "Get free Gemini API key",
+    linkLabel: "settings.getKey.gemini",
     placeholder: "AIza... or AQ....",
   },
   groq: {
     label: "Groq",
     shortLabel: "Groq",
     link: "https://console.groq.com/keys",
-    linkLabel: "Get free Groq API key",
+    linkLabel: "settings.getKey.groq",
     placeholder: "gsk_...",
   },
   openrouter: {
     label: "OpenRouter",
     shortLabel: "OpenRouter",
     link: "https://openrouter.ai/keys",
-    linkLabel: "Get free OpenRouter API key",
+    linkLabel: "settings.getKey.openrouter",
     placeholder: "sk-or-v1-...",
   },
 }
@@ -512,7 +512,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     className="inline-flex items-center gap-1 text-xs text-[#57534E] dark:text-[#A1A1AA] underline underline-offset-4 hover:text-[#1C1917] dark:hover:text-[#F5F5F4]"
                   >
                     <Link className="h-3 w-3 shrink-0 opacity-70" aria-hidden="true" />
-                    <span>{PROVIDER_INFO.gemini.linkLabel}</span>
+                    <span>{t(language, PROVIDER_INFO.gemini.linkLabel)}</span>
                   </a>
                 </div>
 
@@ -561,7 +561,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 >
                   {GEMINI_PRESET_MODELS.map((preset) => (
                     <option key={preset} value={preset}>
-                      {MODEL_LABELS[preset] ?? preset}
+                      {(MODEL_LABELS[preset] ? t(language, MODEL_LABELS[preset]) : preset)}
                     </option>
                   ))}
                   <option value="custom">{t(language, "settings.customModelOption")}</option>
@@ -625,7 +625,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                         }
                         className="h-9 rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] text-xs"
                       >
-                        <option value="gemini">Google Gemini (Default)</option>
+                        <option value="gemini">{t(language, "settings.providerGeminiDefault")}</option>
                         <option value="openrouter">OpenRouter</option>
                         <option value="groq">Groq</option>
                       </Select>
@@ -639,7 +639,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                             htmlFor="api-key-openrouter"
                             className="text-xs font-medium text-[#57534E] dark:text-[#A1A1AA]"
                           >
-                            OpenRouter API Key (Fallback)
+                            {t(language, "settings.openrouterKeyLabel")}
                           </label>
                           <a
                             href={PROVIDER_INFO.openrouter.link}
@@ -647,7 +647,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                             rel="noopener noreferrer"
                             className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] underline underline-offset-2"
                           >
-                            Get key
+                            {t(language, "settings.getKey")}
                           </a>
                         </div>
                         <Input
@@ -673,7 +673,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                           >
                             {PRESET_MODELS.openrouter.map((m) => (
                               <option key={m} value={m}>
-                                {MODEL_LABELS[m] ?? m}
+                                {(MODEL_LABELS[m] ? t(language, MODEL_LABELS[m]) : m)}
                               </option>
                             ))}
                           </Select>
@@ -686,7 +686,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                             htmlFor="api-key-groq"
                             className="text-xs font-medium text-[#57534E] dark:text-[#A1A1AA]"
                           >
-                            Groq API Key (Fallback)
+                            {t(language, "settings.groqKeyLabel")}
                           </label>
                           <a
                             href={PROVIDER_INFO.groq.link}
@@ -694,7 +694,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                             rel="noopener noreferrer"
                             className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] underline underline-offset-2"
                           >
-                            Get key
+                            {t(language, "settings.getKey")}
                           </a>
                         </div>
                         <Input
@@ -773,7 +773,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     )}
                   >
                     <Sun className="h-3.5 w-3.5 text-amber-500" />
-                    <span>Light</span>
+                    <span>{t(language, "settings.lightBtn")}</span>
                   </button>
                   <button
                     type="button"
@@ -791,7 +791,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     )}
                   >
                     <Moon className="h-3.5 w-3.5" />
-                    <span>Dark</span>
+                    <span>{t(language, "settings.darkBtn")}</span>
                   </button>
                 </div>
               </div>

@@ -247,7 +247,7 @@ export function Sidebar() {
                 ) : (
                   <Moon className="h-3.5 w-3.5 text-muted-foreground shrink-0" strokeWidth={1.75} aria-hidden="true" />
                 )}
-                <span>{theme === "dark" ? "Light" : "Dark"}</span>
+                <span>{theme === "dark" ? t(language, "settings.lightBtn") : t(language, "settings.darkBtn")}</span>
               </Button>
             </div>
           )}

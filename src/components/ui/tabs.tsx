@@ -13,7 +13,7 @@ const TabsList = React.forwardRef<
   <TabsPrimitive.List
     ref={ref}
     className={cn(
-      "inline-flex h-10 items-center justify-center rounded-lg border bg-background p-1",
+      "inline-flex h-10 items-center justify-center rounded-lg border border-[#18181B]/10 bg-[#F3EFE8] dark:bg-[#27272A] p-1",
       className
     )}
     {...props}
@@ -28,7 +28,7 @@ const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground",
+      "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#18181B]/40 focus-visible:ring-offset-2 data-[state=active]:bg-[#18181B] data-[state=active]:text-[#FAF8F5] dark:data-[state=active]:bg-[#FAF8F5] dark:data-[state=active]:text-[#18181B]",
       className
     )}
     {...props}
@@ -43,7 +43,7 @@ const TabsContent = React.forwardRef<
   <TabsPrimitive.Content
     ref={ref}
     className={cn(
-      "rounded-lg border bg-text-muted p-6 leading-relaxed",
+      "rounded-lg border border-[#18181B]/10 bg-[#F3EFE8] dark:bg-[#27272A] p-6 leading-relaxed",
       className
     )}
     {...props}

@@ -30,6 +30,7 @@ import { t } from "@/locales/translations"
 import { getAudioBlobDurationSeconds } from "@/lib/videoAudioMerger"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
+import { RecentHistorySheet } from "@/components/shared/recent-history-sheet"
 import { StudioSettingsSheet } from "./StudioSettingsSheet"
 
 const WAVEFORM_BAR_COUNT = 28
@@ -213,9 +214,7 @@ export function VoiceoverPage() {
     const geminiKey = useUIStore.getState().apiKeys.gemini?.trim()
     if (!geminiKey) {
       toast.error(
-        language === "my"
-          ? "Live စာသားပြောင်းရန် Settings ထဲတွင် Gemini API Key ထည့်သွင်းပေးပါ။"
-          : "Please add your Gemini API key in Settings to use Live Transcription."
+        t(language, "postWriter.toast.liveNeedsKey")
       )
       return
     }
@@ -302,9 +301,7 @@ export function VoiceoverPage() {
       const msg =
         err instanceof Error && err.message
           ? err.message
-          : language === "my"
-            ? "မိုက်ခရိုဖုန်း ခွင့်ပြုချက် မရရှိပါ။"
-            : "Microphone permission was denied."
+          : t(language, "booth.toast.micDenied")
       toast.error(msg)
     }
   }, [
@@ -320,6 +317,9 @@ export function VoiceoverPage() {
 
   // Studio settings sheet visibility
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const audioHistory = useContentStore((state) => state.audioHistory)
+  const deleteAudioSession = useContentStore((state) => state.deleteAudioSession)
 
   // Recording state
   const [isRecordingVoice, setIsRecordingVoice] = useState(false)
@@ -460,7 +460,7 @@ export function VoiceoverPage() {
     triggerHaptic(12)
 
     if (!navigator.mediaDevices?.getUserMedia || !getAudioContextConstructor()) {
-      toast.error("ဤ Browser တွင် အသံဖမ်းစနစ်ကို မပံ့ပိုးပါ။")
+      toast.error(t(language, "booth.toast.micUnsupported"))
       return
     }
 
@@ -511,7 +511,7 @@ export function VoiceoverPage() {
       recorderCtx?.close().catch(() => {})
       stopRecorderResources()
       setIsRecordingVoice(false)
-      const msg = err instanceof Error ? err.message : "မိုက်ခရိုဖုန်း ခွင့်ပြုချက် မရရှိပါ။"
+      const msg = err instanceof Error ? err.message : t(language, "booth.toast.micDenied")
       toast.error(msg)
     }
   }
@@ -528,13 +528,13 @@ export function VoiceoverPage() {
     try {
       const { blob, mimeType } = await handle.stop()
       if (blob.size <= MIN_VALID_RECORDING_BYTES) {
-        toast.error("အသံဖမ်းယူမှု မအောင်မြင်ပါ သို့မဟုတ် အသံတိုလွန်းပါသည်။")
+        toast.error(t(language, "booth.toast.recordFailed"))
         return
       }
-      const title = `ကိုယ်တိုင်အသံသွင်းချက် (${formatRecordTimer(elapsed)})`
+      const title = t(language, "booth.selfRecordingTitle", { time: formatRecordTimer(elapsed) })
       await finalizeMyVoiceBlob(blob, mimeType, title, "recording.wav", elapsed)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "အသံဖိုင် သိမ်းဆည်း၍ မရပါ။"
+      const msg = err instanceof Error ? err.message : t(language, "booth.toast.saveFailed")
       toast.error(msg)
     }
   }
@@ -546,7 +546,7 @@ export function VoiceoverPage() {
 
     const mimeType = file.type || "audio/mpeg"
     await finalizeMyVoiceBlob(file, mimeType, file.name, file.name)
-    toast.success("အသံဖိုင် ထည့်သွင်းပြီးပါပြီ။")
+    toast.success(t(language, "booth.toast.audioAdded"))
   }
 
   const transcribeMyVoiceBlob = async (
@@ -562,7 +562,7 @@ export function VoiceoverPage() {
       try {
         const processed = await prepareAudioForGemini(sourceBlob)
         if (processed.isSilent) {
-          toast.error("အသံမကြားရပါ — မိုက်ခရိုဖုန်း စစ်ဆေးပါ။")
+          toast.error(t(language, "booth.toast.noAudio"))
           return null
         }
         if (processed.wavBlob) {
@@ -582,7 +582,7 @@ export function VoiceoverPage() {
       )
       const trimmed = cleanedText.trim()
       if (!trimmed) {
-        toast.info("စကားသံ မတွေ့ရှိပါ။")
+        toast.info(t(language, "booth.toast.noSpeech"))
         return null
       }
       return trimmed
@@ -600,9 +600,9 @@ export function VoiceoverPage() {
       setSelfRecordedNeedsTranscribe(false)
       const existing = voiceScriptText.trim()
       setVoiceScriptText(existing ? `${existing}\n\n${trimmed}` : trimmed)
-      toast.success("စာသားအဖြစ် သန့်ရှင်းစွာ ပြောင်းလဲပြီးပါပြီ။")
+      toast.success(t(language, "booth.toast.cleanDone"))
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "စာသားပြောင်းလဲ၍ မရပါ။"
+      const msg = err instanceof Error ? err.message : t(language, "booth.toast.convertFailed")
       toast.error(msg)
     }
   }
@@ -627,7 +627,7 @@ export function VoiceoverPage() {
         setVoiceScriptText(transcribed)
         scriptOverride = transcribed
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "စာသားပြောင်းလဲ၍ မရပါ။"
+        const msg = err instanceof Error ? err.message : t(language, "booth.toast.convertFailed")
         toast.error(msg)
         return
       }
@@ -689,6 +689,14 @@ export function VoiceoverPage() {
           >
             <Radio className={cn("h-3.5 w-3.5", liveModeEnabled && "animate-pulse")} />
             <span>{t(language, "booth.liveMode")}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setHistoryOpen(true)}
+            className="relative inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-3.5 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] transition-all hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] active:scale-95 cursor-pointer font-myanmar"
+          >
+            <span>{t(language, "booth.historyBtn")}</span>
           </button>
 
           <button
@@ -837,12 +845,12 @@ export function VoiceoverPage() {
                   {teleprompterScrolling ? (
                     <>
                       <Pause className="h-3 w-3" />
-                      <span>ခဏရပ်</span>
+                      <span>{t(language, "booth.teleprompterPause")}</span>
                     </>
                   ) : (
                     <>
                       <Play className="h-3 w-3" />
-                      <span>ဆက်ရွှေ့</span>
+                      <span>{t(language, "booth.teleprompterResume")}</span>
                     </>
                   )}
                 </button>
@@ -850,7 +858,7 @@ export function VoiceoverPage() {
 
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
-                  အမြန်နှုန်း
+                  {t(language, "booth.teleprompterSpeed")}
                 </span>
                 <input
                   type="range"
@@ -894,14 +902,14 @@ export function VoiceoverPage() {
             {voiceScriptText.trim() && (
               <div className="flex items-center justify-between border-t border-[#E7E5E4]/70 dark:border-[#3F3F46]/70 px-4 py-2 text-[11px] text-[#57534E] dark:text-[#A1A1AA]">
                 <span className="tabular-nums font-myanmar">
-                  ခန့်မှန်းကြာချိန် ~{toBurmeseDigits(estimateSpokenDurationSeconds(voiceScriptText, voiceSpeed))} စက္ကန့်
+                  {t(language, "booth.estimatedDuration", { seconds: language === "my" ? toBurmeseDigits(estimateSpokenDurationSeconds(voiceScriptText, voiceSpeed)) : String(estimateSpokenDurationSeconds(voiceScriptText, voiceSpeed)) })}
                 </span>
                 <button
                   type="button"
                   onClick={() => setVoiceScriptText("")}
                   className="hover:text-[#1C1917] dark:hover:text-[#F5F5F4] transition-colors cursor-pointer font-myanmar"
                 >
-                  ရှင်းမည်
+                  {t(language, "booth.clearScript")}
                 </button>
               </div>
             )}
@@ -1091,11 +1099,11 @@ export function VoiceoverPage() {
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
                   <span>
                     {isExtractingPdf
-                      ? "စာမျက်နှာများကို ဖတ်ရှုသန့်စင်နေပါသည်..."
+                      ? t(language, "booth.pdfReading")
                       : ttsStatus === "preparing"
                         ? t(language, "booth.preparingText")
                         : ttsProgress && ttsProgress.total > 1
-                          ? `အသံဖိုင် တစ်ဆက်တည်း ပေါင်းစပ်နေပါသည်... (${language === "my" ? toBurmeseDigits(ttsProgress.current) : ttsProgress.current}/${language === "my" ? toBurmeseDigits(ttsProgress.total) : ttsProgress.total})`
+                          ? t(language, "booth.stitching", { current: language === "my" ? toBurmeseDigits(ttsProgress.current) : String(ttsProgress.current), total: language === "my" ? toBurmeseDigits(ttsProgress.total) : String(ttsProgress.total) })
                           : t(language, "booth.generatingAudio")}
                   </span>
                 </>
@@ -1123,8 +1131,8 @@ export function VoiceoverPage() {
         <div className="space-y-2.5">
           <IosAudioPlayer
             src={generatedAudioUrl}
-            title={generatedAudioTitle || "အသံဖိုင်"}
-            subtitle={`ကြာချိန် ${formatAudioClockDuration(generatedAudioDuration)}`}
+            title={generatedAudioTitle || t(language, "booth.audioFallbackTitle")}
+            subtitle={t(language, "booth.playerSubtitle", { duration: formatAudioClockDuration(generatedAudioDuration) })}
             initialDuration={generatedAudioDuration}
             fileExtension={generatedAudioExtension}
             onDownload={handleDownloadActiveAudio}
@@ -1153,6 +1161,26 @@ export function VoiceoverPage() {
           )}
         </div>
       )}
+
+      <RecentHistorySheet
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        title={t(language, "booth.historyTitle")}
+        description={t(language, "booth.historyDesc")}
+        emptyText={t(language, "booth.historyEmpty")}
+        deleteLabel={t(language, "postWriter.deleteBtn")}
+        items={audioHistory.map((item) => ({
+          id: item.id,
+          title: item.voiceLabel,
+          preview: item.script,
+          meta: `${formatAudioClockDuration(item.durationSeconds)} · ${new Date(item.createdAt).toLocaleString()}`,
+        }))}
+        onSelect={(id) => {
+          const item = audioHistory.find((entry) => entry.id === id)
+          if (item) setVoiceScriptText(item.script)
+        }}
+        onDelete={deleteAudioSession}
+      />
 
       {/* 5. Slide-Up ⚙️ ညှိရန် Bottom Sheet */}
       <StudioSettingsSheet

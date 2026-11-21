@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Clock,
   Copy,
+  Download,
   Film,
   FolderOpen,
   Hash,
@@ -52,7 +53,9 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ReadAloudButton } from "@/components/shared/read-aloud-button"
-import { cleanVoiceoverText } from "@/api/ttsService"
+import { cleanVoiceoverText, estimateSpokenDurationSeconds } from "@/api/ttsService"
+import { generateSrtContent } from "@/lib/videoAudioMerger"
+import { VoiceoverStudioCard } from "./VoiceoverStudioCard"
 import {
   Card,
   CardContent,
@@ -413,9 +416,7 @@ export function VideoToContentSection() {
       scheduledDate: todayIso,
     })
     toast.success(
-      language === "my"
-        ? `ယနေ့ (${todayIso}) ပြက္ခဒိန်တွင် စီစဉ်ပြီးပါပြီ`
-        : `Scheduled to Calendar for Today (${todayIso})`
+      t(language, "video.toast.scheduledToday", { date: todayIso })
     )
   }, [result, formatAllContent, saveToVault, productNote, videoFile, platform, language])
 
@@ -439,6 +440,22 @@ export function VideoToContentSection() {
     { id: "caption", label: t(language, "generator.videoTabCaption"), icon: Hash },
     { id: "cover", label: t(language, "generator.videoTabCover"), icon: Type },
   ]
+
+  const handleDownloadSrt = useCallback(() => {
+    const script = result?.voiceoverScript?.trim()
+    if (!script) return
+    const duration = videoDurationSeconds ?? estimateSpokenDurationSeconds(script, 1)
+    const srt = generateSrtContent(cleanVoiceoverText(script), duration)
+    const blob = new Blob([srt], { type: "application/x-subrip;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `${(videoFile?.name ?? "video").replace(/\.[^.]+$/, "")}.srt`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }, [result, videoDurationSeconds, videoFile])
 
   const handleSendToVoiceover = useCallback(() => {
     if (!result) return
@@ -506,7 +523,7 @@ export function VideoToContentSection() {
                 className="h-7 px-2.5 text-xs shrink-0 border-border/60 text-muted-foreground hover:text-foreground"
               >
                 <RotateCcw className="h-3 w-3 mr-1" aria-hidden="true" />
-                <span>{language === "my" ? "Clear / ရှင်းမည်" : "Clear / New Video"}</span>
+                <span>{t(language, "video.clearBtn")}</span>
               </Button>
             )}
           </CardHeader>
@@ -587,7 +604,7 @@ export function VideoToContentSection() {
                     />
                     <FolderOpen className="h-3.5 w-3.5 mr-1.5 pointer-events-none" aria-hidden="true" />
                     <span className="pointer-events-none font-myanmar">
-                      Browse All Files / ဖိုင်အားလုံးမှ ရွေးမည်
+                      {t(language, "video.browseAll")}
                     </span>
                   </div>
                 </div>
@@ -791,9 +808,7 @@ export function VideoToContentSection() {
                     const res = await analyzeVideoClipsAndCaptions(videoFile, outputLanguage)
                     setClipsCaptionsResult(res)
                     toast.success(
-                      language === "my"
-                        ? "အကောင်းဆုံး အခန်းဖြတ်ရန်နှင့် ရုပ်ရှင်စာတန်းထိုး အဆင်သင့်ဖြစ်ပါပြီ!"
-                        : "Highlight Cutter & Clean Subtitles ready!"
+                      t(language, "video.toast.clipsReady")
                     )
                   } catch (err) {
                     const msg =
@@ -809,18 +824,14 @@ export function VideoToContentSection() {
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     <span>
-                      {language === "my"
-                        ? "စာသားများ စီစဉ်နေပါသည်..."
-                        : "Preparing highlights & subtitles..."}
+                      {t(language, "video.clipsPreparing")}
                     </span>
                   </>
                 ) : (
                   <>
                     <Scissors className="h-4 w-4 mr-2" />
                     <span>
-                      {language === "my"
-                        ? "အကောင်းဆုံး အခန်းဖြတ်ရန် & ရုပ်ရှင်စာတန်းထိုး"
-                        : "Highlight Cutter & Clean Subtitles"}
+                      {t(language, "video.clipsTitle")}
                     </span>
                   </>
                 )}
@@ -835,9 +846,7 @@ export function VideoToContentSection() {
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <Scissors className="h-4 w-4 text-muted-foreground" />
                 <span>
-                  {language === "my"
-                    ? "အကောင်းဆုံး အခန်းဖြတ်ရန် & ရုပ်ရှင်စာတန်းထိုး"
-                    : "Highlight Cutter & Clean Subtitles"}
+                  {t(language, "video.clipsTitle")}
                 </span>
               </CardTitle>
             </CardHeader>
@@ -845,9 +854,7 @@ export function VideoToContentSection() {
               {clipsCaptionsResult.clips.length > 0 && (
                 <div className="space-y-2">
                   <Label className="text-xs font-semibold text-muted-foreground">
-                    {language === "my"
-                      ? "Viral ဖြစ်နိုင်သော 30s Highlight အပိုင်းများ"
-                      : "Viral 30s Highlight Timestamps"}
+                    {t(language, "video.viralHighlights")}
                   </Label>
                   <div className="space-y-2">
                     {clipsCaptionsResult.clips.map((clip, idx) => (
@@ -875,9 +882,7 @@ export function VideoToContentSection() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <Label className="text-xs font-semibold text-muted-foreground">
-                      {language === "my"
-                        ? "ရုပ်ရှင်စာတန်းထိုး (မြန်မာ/အင်္ဂလိပ် စာတန်း)"
-                        : "Clean Subtitles"}
+                      {t(language, "video.cleanSubtitles")}
                     </Label>
                     <Button
                       type="button"
@@ -888,12 +893,12 @@ export function VideoToContentSection() {
                           .map((c) => `[${c.startTime} - ${c.endTime}] ${c.text}`)
                           .join("\n")
                         void navigator.clipboard?.writeText(text)
-                        toast.success(language === "my" ? "Captions Copy ကူးပြီးပါပြီ" : "Captions copied!")
+                        toast.success(t(language, "video.toast.captionsCopied"))
                       }}
                       className="h-7 px-2.5 text-[11px]"
                     >
                       <Copy className="h-3 w-3 mr-1" />
-                      {language === "my" ? "Copy Captions" : "Copy Captions"}
+                      {t(language, "video.copyCaptions")}
                     </Button>
                   </div>
                   <div className="max-h-48 overflow-y-auto rounded-lg border border-border/60 bg-background/80 p-2.5 space-y-1.5">
@@ -993,7 +998,7 @@ export function VideoToContentSection() {
                   <RefreshCw className="h-3.5 w-3.5 mr-1.5 shrink-0" aria-hidden="true" />
                 )}
                 <span className="truncate">
-                  {language === "my" ? "🔄 ထပ်ထုတ်မည်" : "🔄 Regenerate"}
+                  {t(language, "video.regenerate")}
                 </span>
               </Button>
               <Button
@@ -1010,7 +1015,7 @@ export function VideoToContentSection() {
                   <Plus className="h-3.5 w-3.5 mr-1.5 shrink-0" aria-hidden="true" />
                 )}
                 <span className="truncate">
-                  {language === "my" ? "➕ ပိုရှည်ရှည် ရေးမည်" : "➕ Expand / Longer"}
+                  {t(language, "video.expand")}
                 </span>
               </Button>
             </div>
@@ -1332,6 +1337,27 @@ export function VideoToContentSection() {
                   {t(language, "vault.schedule")}
                 </Button>
               </div>
+
+              {result.voiceoverScript?.trim() && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDownloadSrt}
+                  className="w-full h-8 text-xs font-myanmar border-border/60"
+                >
+                  <Download className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                  {t(language, "video.downloadSrt")}
+                </Button>
+              )}
+
+              {videoFile && result.voiceoverScript?.trim() && (
+                <VoiceoverStudioCard
+                  voiceoverScript={result.voiceoverScript}
+                  videoFile={videoFile}
+                  language={language}
+                />
+              )}
             </div>
           </div>
         )}

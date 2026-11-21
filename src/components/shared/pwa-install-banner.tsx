@@ -283,12 +283,8 @@ export function PWAInstallBanner() {
               <Download className="h-3.5 w-3.5" />
               <span>
                 {installing
-                  ? language === "my"
-                    ? "ထည့်သွင်းနေသည်..."
-                    : "Installing..."
-                  : language === "my"
-                    ? "အက်ပ်ထည့်သွင်းမည်"
-                    : "Install App / အက်ပ်ထည့်သွင်းမည်"}
+                  ? t(language, "pwa.installing")
+                  : t(language, "pwa.installApp")}
               </span>
             </Button>
           </div>

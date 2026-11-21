@@ -34,6 +34,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { VOICE_DELIVERY_PRESETS, type VoiceDeliveryTone } from "@/api/ttsService"
+import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { t } from "@/locales/translations"
 import { useContentStore } from "@/store/useContentStore"
@@ -98,6 +100,23 @@ export function StudioSettingsSheet({
     }))
   )
 
+  const voiceDeliveryTone = useContentStore((state) => state.voiceDeliveryTone)
+  const setVoiceDeliveryTone = useContentStore((state) => state.setVoiceDeliveryTone)
+  const customPronunciations = useContentStore((state) => state.customPronunciations)
+  const addCustomPronunciation = useContentStore((state) => state.addCustomPronunciation)
+  const removeCustomPronunciation = useContentStore((state) => state.removeCustomPronunciation)
+  const [pronWord, setPronWord] = useState("")
+  const [pronPhonetic, setPronPhonetic] = useState("")
+
+  const handleAddPronunciation = () => {
+    const word = pronWord.trim()
+    const phonetic = pronPhonetic.trim()
+    if (!word || !phonetic) return
+    addCustomPronunciation(word, phonetic)
+    setPronWord("")
+    setPronPhonetic("")
+  }
+
   const [isPreviewingMusic, setIsPreviewingMusic] = useState(false)
   const customMusicInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -130,7 +149,7 @@ export function StudioSettingsSheet({
     }
     if (musicPreset === "none") return
     if (musicPreset === "custom" && !customMusicFile) {
-      toast.info("အရင်ဆုံး .mp3 / .m4a ဖိုင်ရွေးပါ။")
+      toast.info(t(language, "ebook.toast.pickMusic"))
       return
     }
     setIsPreviewingMusic(true)
@@ -167,7 +186,7 @@ export function StudioSettingsSheet({
     } catch {
       setSelectedBookFile(null)
       setTotalPdfPages(null)
-      toast.error("PDF ဖိုင်ကို ဖွင့်၍ မရပါ။")
+      toast.error(t(language, "ebook.toast.pdfOpenFailed"))
     } finally {
       setIsLoadingPdfMeta(false)
     }
@@ -277,7 +296,7 @@ export function StudioSettingsSheet({
                     : "border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
                 )}
               >
-                {dialogueMode ? "ဖွင့်ထား" : "ပိတ်ထား"}
+                {dialogueMode ? t(language, "ebook.on") : t(language, "ebook.off")}
               </button>
             </div>
           </section>
@@ -356,7 +375,7 @@ export function StudioSettingsSheet({
             {musicPreset === "custom" && (
               <div className="flex items-center justify-between gap-2 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#27272A] px-3 py-2 text-xs">
                 <span className="truncate text-[#57534E] dark:text-[#A1A1AA]">
-                  {customMusicFile ? customMusicFile.name : ".mp3 / .m4a ဖိုင်မရွေးရသေးပါ"}
+                  {customMusicFile ? customMusicFile.name : t(language, "ebook.noMusicFile")}
                 </span>
                 <Button
                   type="button"
@@ -365,9 +384,99 @@ export function StudioSettingsSheet({
                   onClick={() => customMusicInputRef.current?.click()}
                   className="h-7 px-2.5 text-[11px] shrink-0 font-myanmar"
                 >
-                  {customMusicFile ? "ပြောင်းမည်" : "ဖိုင်ရွေးမည်"}
+                  {customMusicFile ? t(language, "ebook.changeFile") : t(language, "ebook.chooseFile")}
                 </Button>
               </div>
+            )}
+          </section>
+
+          {/* Voice Delivery Style */}
+          <section className="space-y-2.5">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground font-myanmar">
+              {t(language, "booth.deliveryTitle")}
+            </Label>
+            <div className="flex flex-wrap gap-2">
+              {(Object.keys(VOICE_DELIVERY_PRESETS) as VoiceDeliveryTone[]).map((tone) => {
+                const active = (voiceDeliveryTone ?? "storytelling") === tone
+                return (
+                  <button
+                    key={tone}
+                    type="button"
+                    onClick={() => setVoiceDeliveryTone(tone)}
+                    className={cn(
+                      "rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors cursor-pointer font-myanmar",
+                      active
+                        ? "bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B]"
+                        : "border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
+                    )}
+                  >
+                    {language === "my"
+                      ? VOICE_DELIVERY_PRESETS[tone].labelMy
+                      : VOICE_DELIVERY_PRESETS[tone].label}
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+
+          {/* Custom Pronunciations */}
+          <section className="space-y-2.5">
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground font-myanmar">
+                {t(language, "booth.pronTitle")}
+              </Label>
+              <p className="mt-0.5 text-[11px] text-muted-foreground font-myanmar">
+                {t(language, "booth.pronDesc")}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                value={pronWord}
+                onChange={(e) => setPronWord(e.target.value)}
+                placeholder={t(language, "booth.pronWord")}
+                className="h-9 text-xs font-myanmar"
+              />
+              <Input
+                value={pronPhonetic}
+                onChange={(e) => setPronPhonetic(e.target.value)}
+                placeholder={t(language, "booth.pronPhonetic")}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleAddPronunciation()
+                }}
+                className="h-9 text-xs font-myanmar"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleAddPronunciation}
+                disabled={!pronWord.trim() || !pronPhonetic.trim()}
+                className="h-9 shrink-0 px-3 text-xs font-myanmar"
+              >
+                {t(language, "booth.pronAdd")}
+              </Button>
+            </div>
+            {customPronunciations.length > 0 && (
+              <ul className="space-y-1.5">
+                {customPronunciations.map((rule) => (
+                  <li
+                    key={rule.id}
+                    className="flex items-center justify-between gap-2 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#27272A]/60 px-3 py-1.5 text-xs font-myanmar"
+                  >
+                    <span className="truncate">
+                      {rule.word} → {rule.phonetic}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeCustomPronunciation(rule.id)}
+                      aria-label={t(language, "postWriter.deleteBtn")}
+                      className="shrink-0 cursor-pointer text-muted-foreground hover:text-destructive"
+                    >
+                      ✕
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
           </section>
 
@@ -377,10 +486,10 @@ export function StudioSettingsSheet({
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
                   <BookOpen className="h-3.5 w-3.5 shrink-0" />
-                  <span>စာအုပ်ဇာတ်ကြောင်းပြော (PDF / E-book)</span>
+                  <span>{t(language, "ebook.title")}</span>
                 </div>
                 <p className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar mt-0.5">
-                  မြန်မာစာအုပ် PDF များကို စာမျက်နှာအလိုက် သန့်စင်ပြီး အသံဖိုင်တစ်ဆက်တည်း နားထောင်ပါ
+                  {t(language, "ebook.subtitle")}
                 </p>
               </div>
               <input
@@ -403,7 +512,7 @@ export function StudioSettingsSheet({
                 ) : (
                   <Upload className="h-3.5 w-3.5 mr-1.5" />
                 )}
-                PDF စာအုပ်ရွေးရန်
+                {t(language, "ebook.pickBook")}
               </Button>
             </div>
 
@@ -416,7 +525,7 @@ export function StudioSettingsSheet({
                   </span>
                   {totalPdfPages !== null && (
                     <span className="tabular-nums shrink-0 font-myanmar">
-                      စုစုပေါင်း {toBurmeseDigits(totalPdfPages)} စာမျက်နှာ
+                      {t(language, "ebook.totalPages", { count: language === "my" ? toBurmeseDigits(totalPdfPages) : String(totalPdfPages) })}
                     </span>
                   )}
                 </div>
@@ -424,7 +533,7 @@ export function StudioSettingsSheet({
                 {totalPdfPages !== null && (
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#18181B] px-3 py-2">
                     <span className="text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
-                      စာမျက်နှာ (မှ - အထိ)
+                      {t(language, "ebook.pageRange")}
                     </span>
                     <div className="flex items-center gap-1.5">
                       <input
@@ -441,7 +550,7 @@ export function StudioSettingsSheet({
                         aria-label="Start page"
                         className="w-14 h-7 rounded-lg border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#27272A] px-2 text-center text-xs font-semibold tabular-nums text-[#1C1917] dark:text-[#F5F5F4]"
                       />
-                      <span className="text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">မှ</span>
+                      <span className="text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">{t(language, "ebook.from")}</span>
                       <input
                         type="number"
                         min={startPage}
@@ -455,7 +564,7 @@ export function StudioSettingsSheet({
                         aria-label="End page"
                         className="w-14 h-7 rounded-lg border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#27272A] px-2 text-center text-xs font-semibold tabular-nums text-[#1C1917] dark:text-[#F5F5F4]"
                       />
-                      <span className="text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">အထိ</span>
+                      <span className="text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">{t(language, "ebook.to")}</span>
                     </div>
                   </div>
                 )}
@@ -473,7 +582,7 @@ export function StudioSettingsSheet({
                         : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
                     )}
                   >
-                    စာသားအတိုင်း အပြည့်ဖတ်မည်
+                    {t(language, "ebook.modeFull")}
                   </button>
                   <button
                     type="button"
@@ -486,7 +595,7 @@ export function StudioSettingsSheet({
                         : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
                     )}
                   >
-                    အနှစ်ချုပ် ဇာတ်ကြောင်းပြောမည်
+                    {t(language, "ebook.modeRecap")}
                   </button>
                 </div>
 
@@ -501,13 +610,13 @@ export function StudioSettingsSheet({
                   {isExtracting ? (
                     <>
                       <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
-                      <span>စာမျက်နှာများကို ဖတ်ရှုသန့်စင်နေပါသည်...</span>
+                      <span>{t(language, "booth.pdfReading")}</span>
                     </>
                   ) : isSynthesizing ? (
                     <>
                       <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
                       <span>
-                        အသံဖိုင် တစ်ဆက်တည်း ပေါင်းစပ်နေပါသည်...
+                        {t(language, "ebook.stitchingShort")}
                         {ttsProgress && ttsProgress.total > 1
                           ? ` (${toBurmeseDigits(ttsProgress.current)}/${toBurmeseDigits(ttsProgress.total)})`
                           : ""}
@@ -516,7 +625,7 @@ export function StudioSettingsSheet({
                   ) : (
                     <>
                       <Play className="h-3.5 w-3.5 mr-1.5 fill-current" />
-                      <span>စာသားထုတ်ပြီး အသံဖတ်မည်</span>
+                      <span>{t(language, "ebook.extractAndRead")}</span>
                     </>
                   )}
                 </Button>

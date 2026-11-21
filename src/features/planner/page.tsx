@@ -581,7 +581,7 @@ export function PlannerPage() {
                   onClick={() => handleCopy(previewItem.content)}
                 >
                   <Copy className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                  {language === "my" ? "Copy Post" : "Copy Post"}
+                  {t(language, "planner.copyPost")}
                 </Button>
               </div>
             </div>
