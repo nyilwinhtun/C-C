@@ -6,6 +6,7 @@ import { LoginPage } from "@/components/shared/login-page"
 import { useUIStore } from "@/store/useUIStore"
 import { useContentStore } from "@/store/useContentStore"
 import { isSupabaseConfigured, supabase } from "@/lib/supabase"
+import { setIosAudioSessionPlayback } from "@/lib/iosAudio"
 import { useShallow } from "zustand/react/shallow"
 
 class AppErrorBoundary extends Component<
@@ -63,6 +64,7 @@ function AppContent() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    setIosAudioSessionPlayback()
     if (!isSupabaseConfigured) {
       setAuth(null, null)
       setLoading(false)

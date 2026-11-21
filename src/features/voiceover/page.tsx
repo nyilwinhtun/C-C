@@ -6,22 +6,28 @@ import {
   Captions,
   ChevronDown,
   Clock,
+  Copy,
   FileText,
   Film,
+  History,
   ImagePlus,
   Loader2,
   Mic,
   Music,
+  Pause,
   Play,
   Plus,
   RectangleVertical,
   Repeat,
   Scissors,
+  ScrollText,
   Share2,
   Sparkles,
   Square,
   Tag,
+  Trash2,
   Upload,
+  Users,
   Volume2,
   VolumeX,
   Wand2,
@@ -33,10 +39,11 @@ import { isSupportedVideoFile, transcribeAudioWithGemini } from "@/api/aiService
 import { prepareAudioForGemini } from "@/lib/audioProcessor"
 import {
   MIN_VALID_RECORDING_BYTES,
-  createSafeAudioMediaRecorder,
-  getRecorderTimesliceMs,
-  resolveRecordedAudioMime,
+  createWavAudioRecorder,
+  getAudioContextConstructor,
+  playBlobUrlWithPrimedAudio,
   unlockIosAudio,
+  type WavAudioRecorderHandle,
 } from "@/lib/iosAudio"
 import {
   BURMESE_VOICE_PRESETS,
@@ -46,7 +53,9 @@ import {
   cleanVoiceoverText,
   estimateSpokenDurationSeconds,
   formatAudioClockDuration,
+  generateBurmeseDialogueVoiceover,
   generateBurmeseVoiceover,
+  mixVoiceoverWithAutoDuckingMusic,
   optimizeScriptPreservingPauses,
   playSoundEffectPreview,
   toBurmeseDigits,
@@ -215,6 +224,9 @@ export function VoiceoverPage() {
     customPronunciations,
     addCustomPronunciation,
     removeCustomPronunciation,
+    audioHistory,
+    addAudioSession,
+    deleteAudioSession,
   } = useContentStore(
     useShallow((state) => ({
       voiceoverDraftScript: state.voiceoverDraftScript,
@@ -230,6 +242,9 @@ export function VoiceoverPage() {
       customPronunciations: state.customPronunciations,
       addCustomPronunciation: state.addCustomPronunciation,
       removeCustomPronunciation: state.removeCustomPronunciation,
+      audioHistory: state.audioHistory,
+      addAudioSession: state.addAudioSession,
+      deleteAudioSession: state.deleteAudioSession,
     }))
   )
 
@@ -238,11 +253,18 @@ export function VoiceoverPage() {
     uploadedPhotos.length > 0 && !videoFile ? "photos" : "video"
   )
 
+  const [dialogueMode, setDialogueMode] = useState(false)
   const [voiceType, setVoiceType] = useState<BurmeseVoiceType>("female")
   const [deliveryTone, setDeliveryTone] = useState<VoiceDeliveryTone>("promo")
   const [speed, setSpeed] = useState<VoiceoverSpeed>(1.0)
   const [introSfx, setIntroSfx] = useState<SoundEffectType>("none")
   const [originalVolume, setOriginalVolume] = useState<OriginalAudioVolume>(0.15)
+
+  const [teleprompterOpen, setTeleprompterOpen] = useState(false)
+  const [teleprompterPlaying, setTeleprompterPlaying] = useState(false)
+  const [teleprompterSpeed, setTeleprompterSpeed] = useState(1.2)
+  const [teleprompterFontSize, setTeleprompterFontSize] = useState<"md" | "lg" | "xl">("lg")
+  const teleprompterScrollRef = useRef<HTMLDivElement | null>(null)
 
   const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>("9:16")
   const [enableBlurredBackground, setEnableBlurredBackground] = useState(true)
@@ -282,10 +304,9 @@ export function VoiceoverPage() {
   const voiceUrlRef = useRef<string | null>(null)
   const recordedVoiceUrlRef = useRef<string | null>(null)
   const mergedUrlRef = useRef<string | null>(null)
-  const recorderRef = useRef<MediaRecorder | null>(null)
+  const wavRecorderRef = useRef<WavAudioRecorderHandle | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const recordTimerRef = useRef<number | null>(null)
-  const recordChunksRef = useRef<BlobPart[]>([])
   const recordingSecondsRef = useRef(0)
 
   const revokeVoiceUrl = useCallback(() => {
@@ -418,7 +439,7 @@ export function VoiceoverPage() {
   const startVoiceRecording = async () => {
     unlockIosAudio()
 
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    if (!navigator.mediaDevices?.getUserMedia || !getAudioContextConstructor()) {
       toast.error(
         isMy
           ? "ဤ Browser တွင် အသံဖမ်းစနစ်ကို မပံ့ပိုးပါ။"
@@ -427,58 +448,42 @@ export function VoiceoverPage() {
       return
     }
 
+    let recorderCtx: AudioContext | null = null
+    const AudioCtx = getAudioContextConstructor()
+    if (AudioCtx) {
+      try {
+        recorderCtx = new AudioCtx()
+        if (recorderCtx.state === "suspended") {
+          recorderCtx.resume().catch(() => {})
+        }
+      } catch {
+        recorderCtx = null
+      }
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          noiseSuppression: true,
+          echoCancellation: true,
+          autoGainControl: true,
+        },
+      })
       streamRef.current = stream
 
-      const { recorder, mimeType } = createSafeAudioMediaRecorder(stream)
-      recorderRef.current = recorder
-      recordChunksRef.current = []
-
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          recordChunksRef.current.push(e.data)
-        }
-      }
-
-      recorder.onstop = () => {
-        const finalMime = resolveRecordedAudioMime(
-          recorder.mimeType,
-          recordChunksRef.current,
-          mimeType
-        )
-        const blob = new Blob(recordChunksRef.current, { type: finalMime })
-        const elapsed = recordingSecondsRef.current
-        stopRecorderResources()
-        setIsRecordingVoice(false)
-        if (blob.size <= MIN_VALID_RECORDING_BYTES) {
-          toast.error(
-            isMy
-              ? "အသံဖမ်းယူမှု မအောင်မြင်ပါ သို့မဟုတ် အသံတိုလွန်းပါသည် — မိုက်ခရိုဖုန်း ခွင့်ပြုချက်ကို စစ်ဆေးပါ။"
-              : "Recording was empty or too short. Please check microphone permissions and try again."
-          )
-          return
-        }
-        const label = isMy
-          ? `ကိုယ်ပိုင်အသံသွင်းချက် (${formatRecordTimer(elapsed)})`
-          : `My Recording (${formatRecordTimer(elapsed)})`
-        void processRecordedOrUploadedAudio(blob, finalMime, label, undefined, elapsed)
-      }
+      wavRecorderRef.current = createWavAudioRecorder(stream, {
+        audioContext: recorderCtx,
+      })
 
       recordingSecondsRef.current = 0
       setRecordingSeconds(0)
       setIsRecordingVoice(true)
-      const timesliceMs = getRecorderTimesliceMs(mimeType)
-      if (timesliceMs !== undefined) {
-        recorder.start(timesliceMs)
-      } else {
-        recorder.start()
-      }
       recordTimerRef.current = window.setInterval(() => {
         recordingSecondsRef.current += 1
         setRecordingSeconds(recordingSecondsRef.current)
       }, 1000)
     } catch (err) {
+      recorderCtx?.close().catch(() => {})
       stopRecorderResources()
       setIsRecordingVoice(false)
       const msg =
@@ -487,12 +492,31 @@ export function VoiceoverPage() {
     }
   }
 
-  const stopVoiceRecording = () => {
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
-      recorderRef.current.stop()
-    } else {
-      stopRecorderResources()
-      setIsRecordingVoice(false)
+  const stopVoiceRecording = async () => {
+    const handle = wavRecorderRef.current
+    wavRecorderRef.current = null
+    const elapsed = recordingSecondsRef.current
+    stopRecorderResources()
+    setIsRecordingVoice(false)
+
+    if (!handle) return
+    try {
+      const { blob, mimeType } = await handle.stop()
+      if (blob.size <= MIN_VALID_RECORDING_BYTES) {
+        toast.error(
+          isMy
+            ? "အသံဖမ်းယူမှု မအောင်မြင်ပါ သို့မဟုတ် အသံတိုလွန်းပါသည် — မိုက်ခရိုဖုန်း ခွင့်ပြုချက်ကို စစ်ဆေးပါ။"
+            : "Recording was empty or too short. Please check microphone permissions and try again."
+        )
+        return
+      }
+      const label = isMy
+        ? `ကိုယ်ပိုင်အသံသွင်းချက် (${formatRecordTimer(elapsed)})`
+        : `My Recording (${formatRecordTimer(elapsed)})`
+      void processRecordedOrUploadedAudio(blob, mimeType, label, "recording.wav", elapsed)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to finalize WAV recording."
+      toast.error(msg)
     }
   }
 
@@ -669,6 +693,23 @@ export function VoiceoverPage() {
     )
   }
 
+  useEffect(() => {
+    if (!teleprompterOpen || !teleprompterPlaying) return
+    let rafId = 0
+    let last = performance.now()
+    const step = (now: number) => {
+      const dt = (now - last) / 1000
+      last = now
+      const el = teleprompterScrollRef.current
+      if (el) {
+        el.scrollTop += dt * 32 * teleprompterSpeed
+      }
+      rafId = requestAnimationFrame(step)
+    }
+    rafId = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(rafId)
+  }, [teleprompterOpen, teleprompterPlaying, teleprompterSpeed])
+
   const handleGenerateVoice = async () => {
     unlockIosAudio()
     const trimmed = cleanVoiceoverText(voiceoverDraftScript)
@@ -684,12 +725,39 @@ export function VoiceoverPage() {
     setIsGeneratingVoice(true)
     setVoiceProgress(null)
     try {
-      const result = await generateBurmeseVoiceover(trimmed, voiceType, speed, {
-        deliveryTone,
-        customPronunciations,
-        introSfx,
-        onProgress: setVoiceProgress,
-      })
+      let result = dialogueMode
+        ? await generateBurmeseDialogueVoiceover(voiceoverDraftScript, speed, {
+            deliveryTone,
+            customPronunciations,
+            introSfx,
+            onProgress: setVoiceProgress,
+          })
+        : await generateBurmeseVoiceover(trimmed, voiceType, speed, {
+            deliveryTone,
+            customPronunciations,
+            introSfx,
+            onProgress: setVoiceProgress,
+          })
+
+      if (musicPreset !== "none") {
+        const mixed = await mixVoiceoverWithAutoDuckingMusic({
+          voiceoverBlob: result.blob,
+          musicPreset,
+          customMusicFile,
+          musicVolume: 0.34,
+        })
+        URL.revokeObjectURL(result.audioUrl)
+        result = {
+          ...result,
+          audioUrl: mixed.audioUrl,
+          blob: mixed.blob,
+          audioBuffer: mixed.audioBuffer,
+          durationSeconds: mixed.durationSeconds,
+          mimeType: "audio/wav",
+          fileExtension: "wav",
+        }
+      }
+
       revokeVoiceUrl()
       revokeMergedUrl()
       voiceUrlRef.current = result.audioUrl
@@ -698,6 +766,13 @@ export function VoiceoverPage() {
       if (videoDuration !== null) {
         setDurationSyncMode(result.durationSeconds > videoDuration ? "loop_video" : "fit_video")
       }
+      addAudioSession({
+        script: voiceoverDraftScript.trim(),
+        voiceLabel: result.voiceName,
+        mode: dialogueMode ? "dialogue" : "single",
+        durationSeconds: result.durationSeconds,
+      })
+      void playBlobUrlWithPrimedAudio(result.audioUrl)
       toast.success(
         isMy ? "AI အသံနမူနာ ဖန်တီးပြီးပါပြီ။" : "Burmese AI voiceover generated!"
       )
@@ -1075,7 +1150,21 @@ export function VoiceoverPage() {
                   </Badge>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setTeleprompterPlaying(false)
+                    setTeleprompterOpen(true)
+                  }}
+                  disabled={!voiceoverDraftScript.trim()}
+                  className="h-7 px-2.5 text-[11px] font-medium font-myanmar border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
+                >
+                  <ScrollText className="h-3 w-3 mr-1" />
+                  {isMy ? "Teleprompter" : "Teleprompter"}
+                </Button>
                 <Button
                   type="button"
                   variant="outline"
@@ -1165,6 +1254,51 @@ export function VoiceoverPage() {
                 )}
                 {audioSourceMode === "ai" && (
                   <>
+                {/* Dual-Voice Dialogue Mode Toggle */}
+                <div className="rounded-lg border border-border/60 bg-background/60 p-2.5 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                      <Users className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                      <span>
+                        {isMy ? "နှစ်ယောက်စကားပြော (Dual-Voice Dialogue)" : "Dual-Voice Dialogue (Nilar + Thiha)"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground font-myanmar mt-0.5">
+                      {isMy
+                        ? "Nilar: / Thiha: ဖြင့် ရေးပါ သို့မဟုတ် စာကြောင်းအလိုက် အလှည့်ကျပြောပါမည်"
+                        : "Use Nilar: / Thiha: prefixes or alternate lines automatically."}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {dialogueMode && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          setVoiceoverDraftScript(
+                            isMy
+                              ? "Nilar: မင်္ဂလာပါရှင်! ဒီနေ့တော့ အရမ်းမိုက်တဲ့ Product အသစ်လေးကို မိတ်ဆက်ပေးမယ်နော်။\nThiha: ဟုတ်ပါတယ်! ဈေးနှုန်းကလည်း အရမ်းတန်ပြီး Quality ကလည်း စိတ်ချရပါတယ်။"
+                              : "Nilar: Hey everyone! Today we are checking out something super exciting.\nThiha: That's right, and the best part is how easy it is to use every day!"
+                          )
+                        }
+                        className="h-7 px-2 text-[11px]"
+                      >
+                        {isMy ? "နမူနာ" : "Sample"}
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={dialogueMode ? "default" : "outline"}
+                      onClick={() => setDialogueMode((prev) => !prev)}
+                      className="h-7 px-2.5 text-[11px]"
+                    >
+                      {dialogueMode ? (isMy ? "ဖွင့်ထားသည်" : "ON") : isMy ? "ပိတ်ထားသည်" : "OFF"}
+                    </Button>
+                  </div>
+                </div>
+
                 {/* Delivery Tone */}
                 <div className="space-y-1.5">
                   <Label className="text-[11px] font-medium text-muted-foreground font-myanmar">
@@ -2101,6 +2235,186 @@ export function VoiceoverPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Auto-Saved Audio Session History */}
+      {audioHistory.length > 0 && (
+        <Card className="border-border/60 shadow-sm">
+          <CardHeader className="pb-2.5">
+            <CardTitle className="flex items-center gap-2 text-sm sm:text-base">
+              <History className="h-4 w-4 text-indigo-500" />
+              <span>{isMy ? "အသံသွင်းမှတ်တမ်း (Audio History)" : "Recent Audio Sessions"}</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {audioHistory.slice(0, 6).map((item) => (
+              <div
+                key={item.id}
+                className="flex items-start justify-between gap-2.5 rounded-lg border border-border/60 bg-muted/20 p-2.5"
+              >
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Badge variant="secondary" className="text-[10px]">
+                      {item.voiceLabel}
+                    </Badge>
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      {formatAudioClockDuration(item.durationSeconds)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-foreground line-clamp-2 font-myanmar">
+                    {item.script}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setVoiceoverDraftScript(item.script)
+                      setDialogueMode(item.mode === "dialogue")
+                      toast.success(isMy ? "Script ထဲသို့ ပြန်ထည့်ပြီးပါပြီ" : "Loaded into script!")
+                    }}
+                    className="h-7 px-2 text-[11px]"
+                  >
+                    <Play className="h-3 w-3 mr-1" />
+                    {isMy ? "ပြန်သုံးမည်" : "Load"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(item.script)
+                      toast.success(isMy ? "Copy ကူးပြီးပါပြီ" : "Copied!")
+                    }}
+                    className="h-7 w-7 p-0"
+                    aria-label="Copy script"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => deleteAudioSession(item.id)}
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                    aria-label="Delete session"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Smart Teleprompter Overlay */}
+      <Dialog
+        open={teleprompterOpen}
+        onOpenChange={(open) => {
+          setTeleprompterOpen(open)
+          if (!open) setTeleprompterPlaying(false)
+        }}
+      >
+        <DialogContent className="max-w-lg sm:max-w-xl p-4 sm:p-5 bg-neutral-950 text-white border-neutral-800">
+          <DialogTitle className="flex items-center justify-between gap-2 text-sm font-semibold">
+            <span className="flex items-center gap-2">
+              <ScrollText className="h-4 w-4 text-emerald-400" />
+              <span>{isMy ? "Smart Teleprompter" : "Smart Teleprompter"}</span>
+            </span>
+          </DialogTitle>
+          <DialogDescription className="sr-only">
+            Auto-scrolling teleprompter for voiceover recording.
+          </DialogDescription>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-neutral-900 p-2 border border-neutral-800">
+            <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => setTeleprompterPlaying((prev) => !prev)}
+                className="h-8 px-3 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                {teleprompterPlaying ? (
+                  <>
+                    <Pause className="h-3.5 w-3.5 mr-1" />
+                    {isMy ? "ခဏရပ်" : "Pause"}
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-3.5 w-3.5 mr-1" />
+                    {isMy ? "စတင်ရွှေ့မည်" : "Scroll"}
+                  </>
+                )}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  if (teleprompterScrollRef.current) {
+                    teleprompterScrollRef.current.scrollTop = 0
+                  }
+                }}
+                className="h-8 px-2.5 text-xs border-neutral-700 text-neutral-200 hover:bg-neutral-800"
+              >
+                {isMy ? "အစသို့" : "Top"}
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] text-neutral-400 flex items-center gap-1.5">
+                <span>{isMy ? "အမြန်နှုန်း" : "Speed"}</span>
+                <input
+                  type="range"
+                  min={0.5}
+                  max={3}
+                  step={0.1}
+                  value={teleprompterSpeed}
+                  onChange={(e) => setTeleprompterSpeed(Number(e.target.value))}
+                  className="w-20 accent-emerald-500"
+                />
+                <span className="tabular-nums w-8">{teleprompterSpeed.toFixed(1)}x</span>
+              </label>
+              <div className="flex items-center rounded-md border border-neutral-700 overflow-hidden">
+                {(["md", "lg", "xl"] as const).map((sz) => (
+                  <button
+                    key={sz}
+                    type="button"
+                    onClick={() => setTeleprompterFontSize(sz)}
+                    className={`px-2 py-1 text-[11px] uppercase cursor-pointer ${
+                      teleprompterFontSize === sz
+                        ? "bg-emerald-600 text-white"
+                        : "text-neutral-300 hover:bg-neutral-800"
+                    }`}
+                  >
+                    {sz}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div
+            ref={teleprompterScrollRef}
+            className="h-72 sm:h-80 overflow-y-auto rounded-xl bg-black/60 border border-neutral-800 p-5 scroll-smooth"
+          >
+            <p
+              className={`font-myanmar leading-relaxed whitespace-pre-wrap text-neutral-100 ${
+                teleprompterFontSize === "xl"
+                  ? "text-2xl sm:text-3xl"
+                  : teleprompterFontSize === "lg"
+                    ? "text-xl sm:text-2xl"
+                    : "text-base sm:text-lg"
+              }`}
+            >
+              {voiceoverDraftScript}
+            </p>
+            <div className="h-48" />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

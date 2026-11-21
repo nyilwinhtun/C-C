@@ -11,22 +11,25 @@ import {
   Square,
   Upload,
   Video,
+  Volume2,
   Wand2,
 } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
 import {
   generateContent,
   transcribeAudioWithGemini,
+  type AudioTopicHint,
   type AudioTranscriptionLanguage,
 } from "@/api/aiService"
+import { generateBurmeseVoiceover } from "@/api/ttsService"
 import { prepareAudioForGemini } from "@/lib/audioProcessor"
 import {
   MIN_VALID_RECORDING_BYTES,
-  createSafeAudioMediaRecorder,
+  createWavAudioRecorder,
   getAudioContextConstructor,
-  getRecorderTimesliceMs,
-  resolveRecordedAudioMime,
+  playBlobUrlWithPrimedAudio,
   unlockIosAudio,
+  type WavAudioRecorderHandle,
 } from "@/lib/iosAudio"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -69,6 +72,7 @@ export function TranscriberPage() {
   const isMy = language === "my"
 
   const [langHint, setLangHint] = useState<AudioTranscriptionLanguage>("auto")
+  const [topicHint, setTopicHint] = useState<AudioTopicHint>("general")
   const [isRecording, setIsRecording] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const [waveformBars, setWaveformBars] = useState<number[]>(
@@ -81,34 +85,29 @@ export function TranscriberPage() {
   const [transcript, setTranscript] = useState("")
   const [copied, setCopied] = useState(false)
 
-  const [isPolishing, setIsPolishing] = useState<"post" | "script" | null>(null)
+  const [isPolishing, setIsPolishing] = useState<"post" | "script" | "voice_content" | null>(null)
   const [polishedResult, setPolishedResult] = useState<{
-    kind: "post" | "script"
+    kind: "post" | "script" | "voice_content"
     text: string
+  } | null>(null)
+  const [polishedAudio, setPolishedAudio] = useState<{
+    audioUrl: string
+    durationSeconds: number
+    fileExtension: "wav" | "mp3"
   } | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const recorderRef = useRef<MediaRecorder | null>(null)
+  const wavRecorderRef = useRef<WavAudioRecorderHandle | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const timerRef = useRef<number | null>(null)
-  const audioCtxRef = useRef<AudioContext | null>(null)
-  const rafRef = useRef<number>(0)
-  const chunksRef = useRef<BlobPart[]>([])
   const previewUrlRef = useRef<string | null>(null)
+  const polishedAudioUrlRef = useRef<string | null>(null)
   const recordingSecondsRef = useRef(0)
 
   const stopMediaResources = () => {
     if (timerRef.current !== null) {
       window.clearInterval(timerRef.current)
       timerRef.current = null
-    }
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current)
-      rafRef.current = 0
-    }
-    if (audioCtxRef.current) {
-      audioCtxRef.current.close().catch(() => {})
-      audioCtxRef.current = null
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop())
@@ -119,9 +118,13 @@ export function TranscriberPage() {
 
   useEffect(() => {
     return () => {
+      wavRecorderRef.current?.cancel()
       stopMediaResources()
       if (previewUrlRef.current) {
         URL.revokeObjectURL(previewUrlRef.current)
+      }
+      if (polishedAudioUrlRef.current) {
+        URL.revokeObjectURL(polishedAudioUrlRef.current)
       }
     }
   }, [])
@@ -162,7 +165,14 @@ export function TranscriberPage() {
         // Fallback to raw blob if browser cannot decode an uploaded file format
       }
 
-      const text = await transcribeAudioWithGemini(uploadBlob, uploadMime, langHint, uploadName)
+      const text = await transcribeAudioWithGemini(
+        uploadBlob,
+        uploadMime,
+        langHint,
+        uploadName,
+        false,
+        topicHint
+      )
       if (!text.trim()) {
         toast.info(
           isMy
@@ -185,7 +195,7 @@ export function TranscriberPage() {
   const startRecording = async () => {
     unlockIosAudio()
 
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    if (!navigator.mediaDevices?.getUserMedia || !getAudioContextConstructor()) {
       toast.error(
         isMy
           ? "ဤ Browser တွင် အသံဖမ်းစနစ်ကို မပံ့ပိုးပါ"
@@ -194,98 +204,45 @@ export function TranscriberPage() {
       return
     }
 
-    // Create & resume analyser AudioContext synchronously inside user gesture before await getUserMedia
-    let analyserCtx: AudioContext | null = null
+    // Create & resume AudioContext synchronously inside user gesture before await getUserMedia
+    let recorderCtx: AudioContext | null = null
     const AudioCtx = getAudioContextConstructor()
     if (AudioCtx) {
       try {
-        analyserCtx = new AudioCtx()
-        audioCtxRef.current = analyserCtx
-        if (analyserCtx.state === "suspended") {
-          analyserCtx.resume().catch(() => {})
+        recorderCtx = new AudioCtx()
+        if (recorderCtx.state === "suspended") {
+          recorderCtx.resume().catch(() => {})
         }
       } catch {
-        analyserCtx = null
+        recorderCtx = null
       }
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          noiseSuppression: true,
+          echoCancellation: true,
+          autoGainControl: true,
+        },
+      })
       streamRef.current = stream
 
-      const { recorder, mimeType } = createSafeAudioMediaRecorder(stream)
-      recorderRef.current = recorder
-      chunksRef.current = []
-
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          chunksRef.current.push(e.data)
-        }
-      }
-
-      recorder.onstop = () => {
-        const finalMime = resolveRecordedAudioMime(
-          recorder.mimeType,
-          chunksRef.current,
-          mimeType
-        )
-        const blob = new Blob(chunksRef.current, { type: finalMime })
-        const elapsed = recordingSecondsRef.current
-        stopMediaResources()
-        setIsRecording(false)
-        if (blob.size <= MIN_VALID_RECORDING_BYTES) {
-          toast.error(
-            isMy
-              ? "အသံဖမ်းယူမှု မအောင်မြင်ပါ သို့မဟုတ် အသံတိုလွန်းပါသည် — မိုက်ခရိုဖုန်း ခွင့်ပြုချက်ကို စစ်ဆေးပါ။"
-              : "Recording was empty or too short. Please check microphone permissions and try again."
-          )
-          return
-        }
-        setPreviewFromBlob(
-          blob,
-          isMy ? `အသံသွင်းချက် (${formatTimer(elapsed)})` : "Voice Recording"
-        )
-        void runTranscription(blob, finalMime)
-      }
-
-      // Live waveform analyser
-      if (analyserCtx) {
-        if (analyserCtx.state === "suspended") {
-          analyserCtx.resume().catch(() => {})
-        }
-        const source = analyserCtx.createMediaStreamSource(stream)
-        const analyser = analyserCtx.createAnalyser()
-        analyser.fftSize = 64
-        source.connect(analyser)
-        const data = new Uint8Array(analyser.frequencyBinCount)
-
-        const updateBars = () => {
-          analyser.getByteFrequencyData(data)
-          const bars: number[] = []
-          for (let i = 0; i < WAVEFORM_BAR_COUNT; i += 1) {
-            const val = data[i % data.length] ?? 0
-            bars.push(Math.max(14, Math.min(100, Math.round((val / 255) * 100))))
-          }
-          setWaveformBars(bars)
-          rafRef.current = requestAnimationFrame(updateBars)
-        }
-        rafRef.current = requestAnimationFrame(updateBars)
-      }
+      wavRecorderRef.current = createWavAudioRecorder(stream, {
+        audioContext: recorderCtx,
+        barCount: WAVEFORM_BAR_COUNT,
+        onBars: setWaveformBars,
+      })
 
       recordingSecondsRef.current = 0
       setRecordingSeconds(0)
       setIsRecording(true)
-      const timesliceMs = getRecorderTimesliceMs(mimeType)
-      if (timesliceMs !== undefined) {
-        recorder.start(timesliceMs)
-      } else {
-        recorder.start()
-      }
       timerRef.current = window.setInterval(() => {
         recordingSecondsRef.current += 1
         setRecordingSeconds(recordingSecondsRef.current)
       }, 1000)
     } catch (err) {
+      recorderCtx?.close().catch(() => {})
       stopMediaResources()
       setIsRecording(false)
       const msg =
@@ -294,12 +251,32 @@ export function TranscriberPage() {
     }
   }
 
-  const stopRecording = () => {
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
-      recorderRef.current.stop()
-    } else {
-      stopMediaResources()
-      setIsRecording(false)
+  const stopRecording = async () => {
+    const handle = wavRecorderRef.current
+    wavRecorderRef.current = null
+    const elapsed = recordingSecondsRef.current
+    stopMediaResources()
+    setIsRecording(false)
+
+    if (!handle) return
+    try {
+      const { blob, mimeType } = await handle.stop()
+      if (blob.size <= MIN_VALID_RECORDING_BYTES) {
+        toast.error(
+          isMy
+            ? "အသံဖမ်းယူမှု မအောင်မြင်ပါ သို့မဟုတ် အသံတိုလွန်းပါသည် — မိုက်ခရိုဖုန်း ခွင့်ပြုချက်ကို စစ်ဆေးပါ။"
+            : "Recording was empty or too short. Please check microphone permissions and try again."
+        )
+        return
+      }
+      setPreviewFromBlob(
+        blob,
+        isMy ? `အသံသွင်းချက် (${formatTimer(elapsed)})` : `Voice Recording (${formatTimer(elapsed)})`
+      )
+      await runTranscription(blob, mimeType, "recording.wav")
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to finalize WAV recording."
+      toast.error(msg)
     }
   }
 
@@ -321,6 +298,49 @@ export function TranscriberPage() {
       window.setTimeout(() => setCopied(false), 1800)
     } catch {
       toast.error("Could not copy text.")
+    }
+  }
+
+  const handleVoiceToPolishedContent = async () => {
+    if (!transcript.trim()) return
+    unlockIosAudio()
+    setIsPolishing("voice_content")
+    try {
+      const outputLang =
+        langHint === "en" ? "english" : langHint === "my" ? "myanmar" : "myanmar"
+      const res = await generateContent({
+        topic: `Clean up any spoken filler words and rewrite this rough voice idea into a polished, ready-to-read Burmese social media voiceover script with a strong hook and clear flow:\n\n${transcript}`,
+        platform: "tiktok",
+        contentType: "video_script",
+        tone: "engaging",
+        language: outputLang,
+        includeHashtags: false,
+      })
+      setPolishedResult({ kind: "voice_content", text: res.content })
+
+      const tts = await generateBurmeseVoiceover(res.content, "female", 1.0, {
+        deliveryTone: "storytelling",
+      })
+      if (polishedAudioUrlRef.current) {
+        URL.revokeObjectURL(polishedAudioUrlRef.current)
+      }
+      polishedAudioUrlRef.current = tts.audioUrl
+      setPolishedAudio({
+        audioUrl: tts.audioUrl,
+        durationSeconds: tts.durationSeconds,
+        fileExtension: tts.fileExtension,
+      })
+      void playBlobUrlWithPrimedAudio(tts.audioUrl)
+      toast.success(
+        isMy
+          ? "Script ပြင်ဆင်ပြီး AI Voiceover အသံဖိုင် ထုတ်ပြီးပါပြီ!"
+          : "Polished script & AI voiceover ready!"
+      )
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to generate polished voiceover."
+      toast.error(msg)
+    } finally {
+      setIsPolishing(null)
     }
   }
 
@@ -394,6 +414,35 @@ export function TranscriberPage() {
                   size="sm"
                   variant={langHint === opt.id ? "default" : "outline"}
                   onClick={() => setLangHint(opt.id)}
+                  disabled={isRecording || isTranscribing}
+                  className="text-xs"
+                >
+                  {isMy ? opt.labelMy : opt.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {/* Topic Context Hint */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-muted-foreground">
+              {isMy ? "အကြောင်းအရာ အမျိုးအစား (Topic Context Hint)" : "Topic Context Hint"}
+            </Label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {(
+                [
+                  { id: "general", label: "General", labelMy: "အထွေထွေ" },
+                  { id: "tech", label: "Tech / Mobile", labelMy: "နည်းပညာ / ဖုန်း" },
+                  { id: "sales", label: "Sales / Marketing", labelMy: "အရောင်း / ဈေးကွက်" },
+                  { id: "storytelling", label: "Storytelling", labelMy: "ပုံပြင် / Recap" },
+                ] as const
+              ).map((opt) => (
+                <Button
+                  key={opt.id}
+                  type="button"
+                  size="sm"
+                  variant={topicHint === opt.id ? "default" : "outline"}
+                  onClick={() => setTopicHint(opt.id)}
                   disabled={isRecording || isTranscribing}
                   className="text-xs"
                 >
@@ -552,6 +601,25 @@ export function TranscriberPage() {
                 )}
                 <span>{isMy ? "ဗီဒီယို Script ပြောင်းမည်" : "Turn into Video Script"}</span>
               </Button>
+
+              <Button
+                type="button"
+                size="sm"
+                disabled={!transcript.trim() || isPolishing !== null}
+                onClick={handleVoiceToPolishedContent}
+                className="gap-1.5 text-xs rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:from-emerald-700 hover:to-teal-700"
+              >
+                {isPolishing === "voice_content" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Volume2 className="h-3.5 w-3.5" />
+                )}
+                <span>
+                  {isMy
+                    ? "Script ပြင် + AI အသံတန်းထုတ်မည်"
+                    : "Polish & Generate AI Voiceover"}
+                </span>
+              </Button>
             </div>
           </div>
         </CardContent>
@@ -587,6 +655,16 @@ export function TranscriberPage() {
               }
               className="min-h-[140px] text-sm leading-relaxed bg-background"
             />
+            {polishedAudio && (
+              <IosAudioPlayer
+                src={polishedAudio.audioUrl}
+                title={isMy ? "AI Voiceover (Nilar)" : "AI Voiceover (Nilar)"}
+                initialDuration={polishedAudio.durationSeconds}
+                fileExtension={polishedAudio.fileExtension}
+                compact
+                accentColor="emerald"
+              />
+            )}
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
@@ -617,7 +695,7 @@ export function TranscriberPage() {
               >
                 <span>{isMy ? "Vault တွင် သိမ်းမည်" : "Save to Vault"}</span>
               </Button>
-              {polishedResult.kind === "script" ? (
+              {polishedResult.kind === "script" || polishedResult.kind === "voice_content" ? (
                 <Button
                   type="button"
                   size="sm"

@@ -1,4 +1,5 @@
 import { DEFAULT_MODELS, useUIStore } from "@/store/useUIStore"
+import { extractTextFromEpub } from "@/features/audiobook/epubExtractor"
 import {
   normalizeBusinessCategory,
   normalizeSalesAngle,
@@ -487,7 +488,6 @@ function resolveGroqVisionModel(model: string): string {
   }
   return trimmed
 }
-
 function isRateLimitError(err: unknown): boolean {
   if (err instanceof ApiError) {
     return err.status === 429 || err.isQuotaExceeded
@@ -2043,17 +2043,18 @@ async function callGeminiMultimodalText(params: {
 }
 
 /**
- * Extract readable text from a `.txt` file (via FileReader) or `.pdf` file
- * (via Gemini 2.5 Flash multimodal inlineData).
+ * Extract readable text from `.txt`, `.md`, `.epub`, or `.pdf` files
+ * (PDF uses Gemini 2.5 Flash multimodal inlineData for scanned & Zawgyi docs).
  */
 export async function extractTextFromDocument(file: File): Promise<string> {
   const name = file.name.toLowerCase()
   const isPdf = file.type === "application/pdf" || name.endsWith(".pdf")
+  const isEpub = file.type === "application/epub+zip" || name.endsWith(".epub")
   const isTxt =
     file.type.startsWith("text/") || name.endsWith(".txt") || name.endsWith(".md")
 
-  if (!isPdf && !isTxt) {
-    throw new Error("Unsupported file type. Please upload a .txt or .pdf file.")
+  if (!isPdf && !isTxt && !isEpub) {
+    throw new Error("Unsupported file type. Please upload a .txt, .md, .pdf, or .epub file.")
   }
 
   if (isTxt) {
@@ -2062,6 +2063,10 @@ export async function extractTextFromDocument(file: File): Promise<string> {
       throw new Error("The uploaded text file is empty.")
     }
     return text.trim()
+  }
+
+  if (isEpub) {
+    return await extractTextFromEpub(file)
   }
 
   const maxPdfBytes = 18 * 1024 * 1024
@@ -2074,12 +2079,20 @@ export async function extractTextFromDocument(file: File): Promise<string> {
     mimeType: "application/pdf",
     base64Data,
     prompt:
-      "Extract all readable body text from this PDF document verbatim in natural reading order. Preserve chapter/section headings and paragraph breaks. Do not summarize, translate, or add commentary. Output plain text only.",
+      "Extract all readable body text from this PDF document verbatim in natural reading order. If the document is scanned or contains legacy Zawgyi Burmese font encoding, accurately convert and output clean, standard Burmese Unicode (Myanmar Unicode) text. Preserve chapter/section headings and paragraph breaks. Do not summarize, translate, or add commentary. Output plain text only.",
     maxOutputTokens: 8192,
   })
 }
 
 export type AudioTranscriptionLanguage = "auto" | "my" | "en"
+export type AudioTopicHint = "general" | "tech" | "sales" | "storytelling"
+
+const TOPIC_HINT_INSTRUCTIONS: Record<AudioTopicHint, string> = {
+  general: "Topic context: General conversation / everyday content.",
+  tech: "Topic context: Technology, mobile phones, apps, gadgets, and software. Preserve tech brand names, model numbers, specs, and English terms accurately.",
+  sales: "Topic context: E-commerce, online shop sales, product promotion, pricing, and customer CTA. Preserve prices, discounts, and product names accurately.",
+  storytelling: "Topic context: Storytelling, book recap, vlog narration, or personal experience. Preserve emotional flow and natural sentence pauses.",
+}
 
 function normalizeAudioMimeType(mimeType: string, fileName?: string): string {
   const clean = mimeType.split(";")[0].trim().toLowerCase()
@@ -2104,7 +2117,8 @@ export async function transcribeAudioWithGemini(
   mimeType?: string,
   languageHint: AudioTranscriptionLanguage = "auto",
   fileName?: string,
-  cleanScript = false
+  cleanScript = false,
+  topicHint: AudioTopicHint = "general"
 ): Promise<string> {
   const maxAudioBytes = 19 * 1024 * 1024
   if (audioBlob.size > maxAudioBytes) {
@@ -2119,23 +2133,28 @@ export async function transcribeAudioWithGemini(
 
   const langInstruction =
     languageHint === "my"
-      ? "The speaker is speaking primarily in Burmese (Myanmar Unicode). Transcribe accurately in natural Myanmar Unicode script."
+      ? "The speaker is speaking primarily in Burmese (Myanmar Unicode). Transcribe accurately in natural Myanmar Unicode script, while preserving any code-switched English words in proper English spelling."
       : languageHint === "en"
         ? "The speaker is speaking primarily in English. Transcribe accurately in clean English."
-        : "The speaker may speak Burmese (Myanmar), English, or a mix of both (code-switching). Transcribe each word accurately in its spoken language (Myanmar Unicode for Burmese, English for English)."
+        : "The speaker may speak Burmese (Myanmar), English, or a mix of both (code-switching). Transcribe each word accurately in its spoken language (Myanmar Unicode for Burmese, proper English spelling for English)."
+
+  const topicInstruction = TOPIC_HINT_INSTRUCTIONS[topicHint]
+
+  const fillerInstruction =
+    "Automatically strip Burmese and English filler hesitations (such as 'အဲ...', 'အင်း...', 'ပေါ့နော်...', 'ဟိုဟာ...', 'um', 'uh', 'er') while keeping the speaker's exact meaning."
 
   const cleanupInstruction = cleanScript
-    ? " Automatically remove spoken filler hesitations, stumbles, and false starts (such as 'အဲ...', 'အင်း...', 'ဟို...', 'um', 'uh', 'er') and polish the wording into smooth, natural, ready-to-read voiceover script text while keeping the speaker's exact meaning and tone."
-    : ""
+    ? ` ${fillerInstruction} Also polish false starts into smooth, natural, ready-to-read voiceover script text.`
+    : ` ${fillerInstruction}`
 
   const rawText = await callGeminiMultimodalText({
     mimeType: resolvedMime,
     base64Data,
-    prompt: `Transcribe ONLY the actual spoken words clearly heard in this audio into clean, readable text with proper punctuation. ${langInstruction}${cleanupInstruction}
+    prompt: `Transcribe ONLY the actual spoken words clearly heard in this audio into clean, readable text with proper punctuation. ${langInstruction} ${topicInstruction}${cleanupInstruction}
 
 STRICT ANTI-REPETITION & ACCURACY RULES:
 1. Transcribe ONLY actual spoken words. Do NOT invent, guess, or hallucinate words during quiet parts or background noise.
-2. NEVER repeat filler syllables or phrases such as "ဟို ဟာ", "ဟု ဟာ", "ဟိုဟာ", "အဲ", "အင်း", "um", or "uh" in a loop.
+2. NEVER repeat filler syllables or phrases such as "ဟို ဟာ", "ဟု ဟာ", "ဟိုဟာ", "ပေါ့နော်", "အဲ", "အင်း", "um", or "uh" in a loop.
 3. If the audio is silent, contains only background noise/breathing, or has no clearly intelligible speech, return "" (empty string) and nothing else.
 4. Do not include timestamps, speaker labels unless clearly multiple speakers, or any extra commentary—output only the transcribed text.`,
     maxOutputTokens: 4096,
@@ -2157,6 +2176,168 @@ STRICT ANTI-REPETITION & ACCURACY RULES:
   }
 
   return trimmed
+}
+
+/**
+ * Rewrite a book chapter or article into engaging conversational Burmese
+ * YouTube Recap Storytelling narration with natural pauses (၊, ။).
+ */
+export async function rewriteChapterAsRecap(
+  chapterText: string,
+  language: "my" | "en" = "my"
+): Promise<string> {
+  const { apiKeys } = getAiConfig()
+  const geminiKey = apiKeys.gemini.trim()
+  if (!geminiKey) {
+    throw new ApiError(401, "Gemini API key is required in Settings.")
+  }
+
+  const trimmed = chapterText.trim()
+  if (!trimmed) {
+    throw new Error("Chapter text is empty.")
+  }
+
+  const prompt =
+    language === "en"
+      ? `Rewrite the following book/article excerpt into an engaging YouTube Recap storytelling narration script in natural conversational English. Keep all key plot points, insights, and emotional beats, add a gripping opening hook, and use clear sentence punctuation for smooth voiceover pacing. Output ONLY the narration script.\n\n---\n${trimmed.slice(0, 12000)}`
+      : `Rewrite the following book/article excerpt into an engaging YouTube Book Recap / Movie Recap storytelling narration in natural conversational Burmese (Myanmar Unicode).
+Rules:
+1. Start with a captivating storytelling hook (e.g., "ဒီအခန်းမှာတော့...").
+2. Keep all key events, lessons, and emotional turning points faithful to the source text.
+3. Write in natural spoken Burmese storytelling style suitable for a YouTube narrator, using proper Burmese punctuation (၊ and ။) for natural breathing pauses.
+4. Spell out numbers and dates naturally in Burmese or clean digits, and keep output plain text only (no markdown headings, no stage directions).
+
+Source text:
+${trimmed.slice(0, 12000)}`
+
+  const res = await fetchGeminiGenerateContent(GEMINI_MODEL, geminiKey, {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.55,
+      topP: 0.95,
+      maxOutputTokens: 4096,
+    },
+  })
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "")
+    throw parseApiError("Gemini", res.status, errText)
+  }
+
+  const data = await res.json()
+  const parts: Array<{ text?: string; thought?: boolean }> =
+    data.candidates?.[0]?.content?.parts ?? []
+  const output = parts
+    .filter((p) => !p.thought && typeof p.text === "string")
+    .map((p) => p.text)
+    .join("")
+    .trim()
+
+  if (!output) {
+    throw new Error("Gemini returned an empty recap script.")
+  }
+  return output
+}
+
+export interface VideoClipSuggestion {
+  startTime: string
+  endTime: string
+  title: string
+  reason: string
+  hookScore: number
+}
+
+export interface VideoCaptionSegment {
+  startTime: string
+  endTime: string
+  text: string
+}
+
+export interface VideoClipsAndCaptionsResult {
+  clips: VideoClipSuggestion[]
+  captions: VideoCaptionSegment[]
+}
+
+/**
+ * Analyze a video with Gemini 2.5 Flash to suggest viral ~30s highlight timestamps
+ * (Smart Clip Finder) and generate timestamped Burmese-English subtitles (Auto-Captions).
+ */
+export async function analyzeVideoClipsAndCaptions(
+  file: File,
+  language: "my" | "en" = "my"
+): Promise<VideoClipsAndCaptionsResult> {
+  const { apiKeys } = getAiConfig()
+  const geminiKey = apiKeys.gemini.trim()
+  if (!geminiKey) {
+    throw new ApiError(401, "Gemini API key is required in Settings for video clip & caption analysis.")
+  }
+
+  let mediaPart: { inlineData: { mimeType: string; data: string } }
+  if (file.size <= VIDEO_DIRECT_MAX_BYTES) {
+    const base64 = await fileToBase64(file)
+    mediaPart = {
+      inlineData: {
+        mimeType: inferVideoMimeType(file),
+        data: base64,
+      },
+    }
+  } else {
+    const extracted = await extractKeyframeMedia({
+      file,
+      platform: "TikTok / Reels",
+      language,
+    })
+    if (extracted.mediaParts.length === 0) {
+      throw new Error("Could not extract frames from video.")
+    }
+    mediaPart = extracted.mediaParts[0]
+  }
+
+  const langPrompt =
+    language === "en"
+      ? "Write clip titles/reasons and captions in clean English."
+      : "Write clip titles/reasons and captions in natural Burmese (Myanmar Unicode) with proper English spelling for any code-switched English terms."
+
+  const prompt = `Analyze this video and return ONLY valid JSON (no markdown fences) with two arrays:
+1. "clips": Suggest 2 to 4 viral ~30-second highlight segments for TikTok/Reels/Shorts ("Smart Clip Finder"). Each item: { "startTime": "MM:SS", "endTime": "MM:SS", "title": string, "reason": string, "hookScore": number (1-100) }.
+2. "captions": Generate timestamped subtitles/captions covering the spoken or visual narrative ("Auto-Captions"). Each item: { "startTime": "MM:SS", "endTime": "MM:SS", "text": string }.
+${langPrompt}`
+
+  const res = await fetchGeminiGenerateContent(GEMINI_VISION_MODEL, geminiKey, {
+    contents: [
+      {
+        parts: [mediaPart, { text: prompt }],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.3,
+      topP: 0.95,
+      maxOutputTokens: 4096,
+      responseMimeType: "application/json",
+    },
+  })
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "")
+    throw parseApiError("Gemini", res.status, errText)
+  }
+
+  const data = await res.json()
+  const parts: Array<{ text?: string; thought?: boolean }> =
+    data.candidates?.[0]?.content?.parts ?? []
+  const rawJson = parts
+    .filter((p) => !p.thought && typeof p.text === "string")
+    .map((p) => p.text)
+    .join("")
+    .trim()
+
+  const cleaned = rawJson.replace(/^```json\s*/i, "").replace(/```$/i, "").trim()
+  const parsed = JSON.parse(cleaned) as Partial<VideoClipsAndCaptionsResult>
+
+  return {
+    clips: Array.isArray(parsed.clips) ? parsed.clips : [],
+    captions: Array.isArray(parsed.captions) ? parsed.captions : [],
+  }
 }
 
 

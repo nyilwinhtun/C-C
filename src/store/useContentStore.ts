@@ -24,6 +24,15 @@ export interface GeneratedItem {
   createdAt: string
 }
 
+export interface AudioSessionItem {
+  id: string
+  script: string
+  voiceLabel: string
+  mode: "single" | "dialogue" | "recorded"
+  durationSeconds: number
+  createdAt: string
+}
+
 export interface SavedVaultItem {
   id: string
   title: string
@@ -69,6 +78,7 @@ interface ContentState {
   draftInput: GeneratorFormValues
   textPostResult: GeneratedContent | null
   generatedHistory: GeneratedItem[]
+  audioHistory: AudioSessionItem[]
   savedVault: SavedVaultItem[]
   brandSignature: string
   businessCategory: BusinessCategory
@@ -91,6 +101,8 @@ interface ContentState {
   setTextPostResult: (result: GeneratedContent | null) => void
   clearTextPostDraft: () => void
   addGeneratedItem: (item: Omit<GeneratedItem, "id" | "createdAt">) => void
+  addAudioSession: (item: Omit<AudioSessionItem, "id" | "createdAt">) => void
+  deleteAudioSession: (id: string) => void
   setBrandSignature: (signature: string) => void
   setBusinessCategory: (category: BusinessCategory) => void
   setCustomNiche: (niche: string) => void
@@ -139,6 +151,7 @@ export const useContentStore = create<ContentState>()(
       draftInput: defaultDraft,
       textPostResult: null,
       generatedHistory: [],
+      audioHistory: [],
       savedVault: [],
       brandSignature: "",
       businessCategory: "general",
@@ -182,6 +195,25 @@ export const useContentStore = create<ContentState>()(
           )
           return { generatedHistory: [entry, ...deduped].slice(0, 10) }
         }),
+
+      addAudioSession: (item) =>
+        set((state) => {
+          const entry: AudioSessionItem = {
+            ...item,
+            id: crypto.randomUUID(),
+            createdAt: new Date().toISOString(),
+          }
+          const normalized = item.script.trim()
+          const deduped = state.audioHistory.filter(
+            (existing) => existing.script.trim() !== normalized
+          )
+          return { audioHistory: [entry, ...deduped].slice(0, 15) }
+        }),
+
+      deleteAudioSession: (id) =>
+        set((state) => ({
+          audioHistory: state.audioHistory.filter((item) => item.id !== id),
+        })),
 
       setBrandSignature: (brandSignature) => set({ brandSignature }),
       setBusinessCategory: (businessCategory) => set({ businessCategory }),
@@ -371,6 +403,7 @@ export const useContentStore = create<ContentState>()(
         draftInput: state.draftInput ?? defaultDraft,
         textPostResult: state.textPostResult ?? null,
         generatedHistory: (state.generatedHistory ?? []).slice(0, 10),
+        audioHistory: (state.audioHistory ?? []).slice(0, 15),
         savedVault: state.savedVault ?? [],
         brandSignature: state.brandSignature ?? "",
         businessCategory: state.businessCategory ?? "general",

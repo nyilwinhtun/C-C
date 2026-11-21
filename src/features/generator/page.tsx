@@ -975,6 +975,58 @@ export function GeneratorPage() {
                 }}
                 className="grid gap-3 p-3.5 sm:p-5"
               >
+                {/* Quick Preset Chips */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-medium text-muted-foreground font-myanmar mr-0.5">
+                    {language === "my" ? "အမြန်ရွေးရန်:" : "Quick Presets:"}
+                  </span>
+                  {(
+                    [
+                      {
+                        label: "TikTok Viral Hook",
+                        topic: "Scroll-stopping 3-second viral hook & story",
+                        platform: "tiktok",
+                        contentType: "video_script",
+                        tone: "engaging",
+                      },
+                      {
+                        label: "Facebook အရောင်းပို့စ်",
+                        topic: "အွန်လိုင်းဆိုင် ပစ္စည်းအရောင်းပို့စ် (ဈေးနှုန်းနှင့် Order CTA)",
+                        platform: "facebook",
+                        contentType: "post_caption",
+                        tone: "sales",
+                      },
+                      {
+                        label: "Product Review",
+                        topic: "Honest hands-on product review & pros/cons",
+                        platform: "tiktok",
+                        contentType: "video_script",
+                        tone: "educational",
+                      },
+                    ] as const
+                  ).map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => {
+                        form.setValue("topic", preset.topic, { shouldDirty: true })
+                        form.setValue("platform", preset.platform, { shouldDirty: true })
+                        form.setValue("contentType", preset.contentType, { shouldDirty: true })
+                        form.setValue("tone", preset.tone, { shouldDirty: true })
+                        setDraftInput({
+                          topic: preset.topic,
+                          platform: preset.platform,
+                          contentType: preset.contentType,
+                          tone: preset.tone,
+                        })
+                      }}
+                      className="inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/15 px-2.5 py-1 text-[11px] font-medium text-blue-700 dark:text-blue-300 transition-colors cursor-pointer font-myanmar"
+                    >
+                      ✨ {preset.label}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="grid gap-1.5">
                   <Label htmlFor="topic" className="leading-relaxed">{t(language, "generator.topic")}</Label>
                   <Input
@@ -1061,7 +1113,7 @@ export function GeneratorPage() {
                     <span className="flex items-center gap-2 min-w-0">
                       <SlidersHorizontal className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden="true" />
                       <span className="font-semibold font-myanmar">
-                        ⚙️ {t(language, "generator.optionsToggle")}
+                        ⚙️ {language === "my" ? "အသေးစိတ်ညှိရန် (Options)" : "Options (အသေးစိတ်ညှိရန်)"}
                       </span>
                       <span className="text-[11px] text-muted-foreground truncate">
                         · {selectedTone || "engaging"} · {form.watch("language") || "english"}
@@ -1666,7 +1718,7 @@ export function GeneratorPage() {
                   className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white border-0 shadow-xs font-myanmar"
                 >
                   <Mic className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                  {t(language, "generator.sendToVoiceover")}
+                  {language === "my" ? "အသံပြောင်းမည် (Send to Sound Studio)" : "Send to Sound Studio"}
                 </Button>
                 <Button
                   type="button"

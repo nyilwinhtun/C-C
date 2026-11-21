@@ -1,4 +1,5 @@
 import { sanitizeSpeechText } from "@/components/shared/read-aloud-button"
+import { encodeMonoWav16Bit } from "@/lib/audioProcessor"
 import { decodeAudioBlob, getAudioContextConstructor, unlockIosAudio } from "@/lib/iosAudio"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
@@ -1747,6 +1748,256 @@ export async function generateBurmeseVoiceover(
     voiceName: lastVoiceName,
     provider: lastProvider,
     cleanedText: combinedCleanedText,
+  }
+}
+
+export interface DialogueTurn {
+  speaker: BurmeseVoiceType
+  text: string
+}
+
+const FEMALE_LABEL_RE = /^(?:nilar|နီလာ|female|speaker\s*1|a)\s*[:：]\s*/i
+const MALE_LABEL_RE = /^(?:thiha|သီဟ|male|speaker\s*2|b)\s*[:：]\s*/i
+
+export function parseDialogueTurns(rawScript: string): DialogueTurn[] {
+  const lines = rawScript
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+
+  const turns: DialogueTurn[] = []
+  let nextAlternating: BurmeseVoiceType = "female"
+
+  for (const line of lines) {
+    let speaker: BurmeseVoiceType
+    let text: string
+    if (FEMALE_LABEL_RE.test(line)) {
+      speaker = "female"
+      text = line.replace(FEMALE_LABEL_RE, "").trim()
+    } else if (MALE_LABEL_RE.test(line)) {
+      speaker = "male"
+      text = line.replace(MALE_LABEL_RE, "").trim()
+    } else {
+      speaker = nextAlternating
+      text = line
+    }
+    if (!text) continue
+    turns.push({ speaker, text })
+    nextAlternating = speaker === "female" ? "male" : "female"
+  }
+
+  return turns
+}
+
+/**
+ * Dual-Voice Dialogue Mode: alternates between Nilar (Female) and Thiha (Male)
+ * for conversational scripts, inserting natural 0.35s pauses between turns.
+ */
+export async function generateBurmeseDialogueVoiceover(
+  scriptText: string,
+  speed: VoiceoverSpeed = 1.0,
+  options: GenerateVoiceoverOptions = {}
+): Promise<VoiceoverResult> {
+  const turns = parseDialogueTurns(scriptText)
+  if (turns.length === 0) {
+    throw new TtsError("Dialogue script is empty.")
+  }
+
+  const deliveryTone = options.deliveryTone ?? "storytelling"
+  const introSfx = options.introSfx ?? "none"
+  const onProgress = options.onProgress
+
+  const timeline: Array<
+    | { kind: "speech"; blob: Blob }
+    | { kind: "pause"; seconds: number }
+  > = []
+
+  const cleanedParts: string[] = []
+  let lastProvider: VoiceoverResult["provider"] = "neural-tts"
+
+  for (let i = 0; i < turns.length; i += 1) {
+    const turn = turns[i]
+    onProgress?.({ currentChunk: i + 1, totalChunks: turns.length })
+    const res = await generateBurmeseVoiceover(turn.text, turn.speaker, speed, {
+      deliveryTone,
+      introSfx: "none",
+      customPronunciations: options.customPronunciations,
+    })
+    lastProvider = res.provider
+    cleanedParts.push(`${turn.speaker === "female" ? "Nilar" : "Thiha"}: ${res.cleanedText}`)
+    timeline.push({ kind: "speech", blob: res.blob })
+    URL.revokeObjectURL(res.audioUrl)
+    if (i < turns.length - 1) {
+      timeline.push({ kind: "pause", seconds: 0.35 })
+    }
+  }
+
+  const assembled = await assembleSegmentsWithPausesAndSfx(timeline, introSfx)
+  const audioUrl = URL.createObjectURL(assembled.blob)
+  return {
+    audioUrl,
+    blob: assembled.blob,
+    audioBuffer: assembled.audioBuffer,
+    mimeType: "audio/wav",
+    fileExtension: "wav",
+    durationSeconds: assembled.audioBuffer.duration,
+    voiceName: "Nilar + Thiha (Dialogue)",
+    provider: lastProvider,
+    cleanedText: cleanedParts.join("\n"),
+  }
+}
+
+export type StandaloneBgMusicPreset =
+  | "none"
+  | "lofi_chill"
+  | "calm_lofi"
+  | "upbeat_promo"
+  | "soft_piano"
+  | "soft_vlog"
+
+function synthesizeAmbientLoopBuffer(
+  ctx: BaseAudioContext,
+  preset: Exclude<StandaloneBgMusicPreset, "none">,
+  durationSeconds: number
+): AudioBuffer {
+  const normalizedPreset: "lofi_chill" | "upbeat_promo" | "soft_piano" =
+    preset === "calm_lofi"
+      ? "lofi_chill"
+      : preset === "soft_vlog"
+        ? "soft_piano"
+        : preset
+
+  const sampleRate = ctx.sampleRate
+  const length = Math.max(1, Math.ceil(durationSeconds * sampleRate))
+  const buffer = ctx.createBuffer(1, length, sampleRate)
+  const data = buffer.getChannelData(0)
+
+  const chords: Record<"lofi_chill" | "upbeat_promo" | "soft_piano", number[][]> = {
+    lofi_chill: [
+      [220, 261.63, 329.63, 392.0],
+      [174.61, 220.0, 261.63, 329.63],
+      [196.0, 246.94, 293.66, 349.23],
+      [164.81, 196.0, 246.94, 293.66],
+    ],
+    upbeat_promo: [
+      [261.63, 329.63, 392.0],
+      [293.66, 369.99, 440.0],
+      [220.0, 261.63, 329.63],
+      [246.94, 311.13, 392.0],
+    ],
+    soft_piano: [
+      [261.63, 329.63, 392.0, 493.88],
+      [220.0, 261.63, 329.63, 392.0],
+      [174.61, 220.0, 261.63, 349.23],
+      [196.0, 246.94, 293.66, 392.0],
+    ],
+  }
+
+  const progression = chords[normalizedPreset]
+  const barSec = normalizedPreset === "upbeat_promo" ? 1.5 : 2.5
+
+  for (let i = 0; i < length; i += 1) {
+    const t = i / sampleRate
+    const chordIdx = Math.floor(t / barSec) % progression.length
+    const chord = progression[chordIdx]
+    const barPos = (t % barSec) / barSec
+    const env = Math.sin(Math.min(1, barPos * 4) * (Math.PI / 2)) * (1 - 0.35 * barPos)
+    let sample = 0
+    for (let n = 0; n < chord.length; n += 1) {
+      sample += Math.sin(2 * Math.PI * chord[n] * t) / chord.length
+    }
+    data[i] = sample * env * 0.35
+  }
+
+  return buffer
+}
+
+/**
+ * Mix a voiceover Blob with optional background music using Web Audio API GainNode
+ * auto-ducking so music smoothly lowers during speech and rises during pauses.
+ */
+export async function mixVoiceoverWithAutoDuckingMusic(params: {
+  voiceoverBlob: Blob
+  musicPreset: StandaloneBgMusicPreset | "custom"
+  customMusicFile?: File | null
+  musicVolume?: number
+}): Promise<{
+  audioUrl: string
+  blob: Blob
+  audioBuffer: AudioBuffer
+  durationSeconds: number
+}> {
+  const voiceBuffer = await decodeBlobToAudioBuffer(params.voiceoverBlob)
+  const sampleRate = voiceBuffer.sampleRate
+  const totalSamples = voiceBuffer.length
+  const durationSeconds = voiceBuffer.duration
+
+  const OfflineCtx =
+    window.OfflineAudioContext ||
+    (window as unknown as { webkitOfflineAudioContext?: typeof OfflineAudioContext })
+      .webkitOfflineAudioContext
+  if (!OfflineCtx) {
+    throw new Error("OfflineAudioContext is not supported in this browser.")
+  }
+
+  const offlineCtx = new OfflineCtx(1, totalSamples, sampleRate)
+
+  const voiceSrc = offlineCtx.createBufferSource()
+  voiceSrc.buffer = voiceBuffer
+  voiceSrc.connect(offlineCtx.destination)
+
+  let musicBuffer: AudioBuffer
+  if (params.musicPreset === "custom" && params.customMusicFile) {
+    musicBuffer = await decodeBlobToAudioBuffer(params.customMusicFile)
+  } else {
+    const preset =
+      params.musicPreset === "none" || params.musicPreset === "custom"
+        ? "lofi_chill"
+        : params.musicPreset
+    musicBuffer = synthesizeAmbientLoopBuffer(offlineCtx, preset, durationSeconds + 0.5)
+  }
+
+  const musicSrc = offlineCtx.createBufferSource()
+  musicSrc.buffer = musicBuffer
+  musicSrc.loop = true
+
+  const musicGain = offlineCtx.createGain()
+  const baseVol = Math.max(0.05, Math.min(0.8, params.musicVolume ?? 0.3))
+  const duckedVol = baseVol * 0.22
+
+  // Compute 100ms RMS speech envelope for GainNode auto-ducking
+  const voiceChannel = voiceBuffer.getChannelData(0)
+  const windowSize = Math.max(1, Math.floor(sampleRate * 0.1))
+  musicGain.gain.setValueAtTime(baseVol, 0)
+
+  for (let start = 0; start < voiceChannel.length; start += windowSize) {
+    const end = Math.min(voiceChannel.length, start + windowSize)
+    let sumSq = 0
+    for (let i = start; i < end; i += 1) {
+      sumSq += voiceChannel[i] * voiceChannel[i]
+    }
+    const rms = Math.sqrt(sumSq / Math.max(1, end - start))
+    const targetGain = rms > 0.015 ? duckedVol : baseVol
+    const timeSec = Math.min(durationSeconds, (start + windowSize * 0.5) / sampleRate)
+    musicGain.gain.linearRampToValueAtTime(targetGain, timeSec)
+  }
+
+  musicSrc.connect(musicGain)
+  musicGain.connect(offlineCtx.destination)
+
+  voiceSrc.start(0)
+  musicSrc.start(0)
+  musicSrc.stop(durationSeconds)
+
+  const rendered = await offlineCtx.startRendering()
+  const wavBlob = encodeMonoWav16Bit(rendered.getChannelData(0), rendered.sampleRate)
+  const audioUrl = URL.createObjectURL(wavBlob)
+
+  return {
+    audioUrl,
+    blob: wavBlob,
+    audioBuffer: rendered,
+    durationSeconds: rendered.duration,
   }
 }
 

@@ -7,13 +7,19 @@ import {
   FileText,
   Headphones,
   Loader2,
+  Pause,
   Play,
+  SkipBack,
+  SkipForward,
   Sparkles,
+  Square,
   Trash2,
   Upload,
+  Wand2,
 } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
-import { extractTextFromDocument } from "@/api/aiService"
+import { extractTextFromDocument, rewriteChapterAsRecap } from "@/api/aiService"
+import { unlockIosAudio } from "@/lib/iosAudio"
 import {
   BURMESE_VOICE_PRESETS,
   TTS_BYTE_RATE,
@@ -44,6 +50,7 @@ import { useUIStore } from "@/store/useUIStore"
 import {
   formatDurationLabel,
   splitDocumentIntoChapters,
+  splitTextIntoSmartChunks,
   type BookChapter,
 } from "./chapterSplitter"
 
@@ -63,6 +70,8 @@ export function AudiobookPage() {
   const [rawText, setRawText] = useState("")
   const [sourceFileName, setSourceFileName] = useState<string | null>(null)
   const [isExtracting, setIsExtracting] = useState(false)
+  const [audiobookMode, setAudiobookMode] = useState<"direct" | "recap">("direct")
+  const [isRewritingRecap, setIsRewritingRecap] = useState(false)
 
   const [voiceType, setVoiceType] = useState<BurmeseVoiceType>("female")
   const [speed, setSpeed] = useState<VoiceoverSpeed>(1.0)
@@ -80,6 +89,15 @@ export function AudiobookPage() {
     title: string
   } | null>(null)
 
+  // Pre-Fetch Auto-Queue Player state
+  const [queueActive, setQueueActive] = useState(false)
+  const [queuePlaying, setQueuePlaying] = useState(false)
+  const [queueLoadingChunk, setQueueLoadingChunk] = useState(false)
+  const [queueIndex, setQueueIndex] = useState(0)
+  const queueAudioRef = useRef<HTMLAudioElement | null>(null)
+  const queueCacheRef = useRef<Map<number, Promise<string>>>(new Map())
+  const queueRunIdRef = useRef(0)
+
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const activeUrlsRef = useRef<string[]>([])
 
@@ -96,6 +114,10 @@ export function AudiobookPage() {
     }
   }, [])
 
+  const smartChunks = useMemo(() => {
+    return splitTextIntoSmartChunks(rawText, 500, 800)
+  }, [rawText])
+
   const chapters = useMemo<BookChapter[]>(() => {
     return splitDocumentIntoChapters(rawText, 1200)
   }, [rawText])
@@ -109,10 +131,126 @@ export function AudiobookPage() {
     return estimateSpokenDurationSeconds(rawText, speed)
   }, [rawText, speed])
 
+  const stopAutoQueue = () => {
+    queueRunIdRef.current += 1
+    const audio = queueAudioRef.current
+    if (audio) {
+      audio.pause()
+      audio.removeAttribute("src")
+    }
+    queueCacheRef.current.clear()
+    setQueueActive(false)
+    setQueuePlaying(false)
+    setQueueLoadingChunk(false)
+  }
+
   const clearGeneratedAudio = () => {
+    stopAutoQueue()
     revokeAllAudioUrls()
     setChapterAudios({})
     setFullAudio(null)
+  }
+
+  const fetchChunkAudioUrl = (index: number, runId: number): Promise<string> => {
+    const cached = queueCacheRef.current.get(index)
+    if (cached) return cached
+
+    const text = smartChunks[index]
+    const promise = generateBurmeseVoiceover(text, voiceType, speed, {
+      deliveryTone: "storytelling",
+    }).then((res) => {
+      if (queueRunIdRef.current !== runId) {
+        URL.revokeObjectURL(res.audioUrl)
+        throw new Error("Playback cancelled")
+      }
+      activeUrlsRef.current.push(res.audioUrl)
+      return res.audioUrl
+    })
+    queueCacheRef.current.set(index, promise)
+    return promise
+  }
+
+  const playQueueChunkAt = async (index: number, runId: number) => {
+    if (queueRunIdRef.current !== runId || index < 0 || index >= smartChunks.length) {
+      if (index >= smartChunks.length) {
+        setQueuePlaying(false)
+      }
+      return
+    }
+    setQueueIndex(index)
+    setQueueLoadingChunk(true)
+    try {
+      const url = await fetchChunkAudioUrl(index, runId)
+      if (queueRunIdRef.current !== runId) return
+
+      // Pre-fetch next chunk while current chunk plays
+      if (index + 1 < smartChunks.length) {
+        void fetchChunkAudioUrl(index + 1, runId).catch(() => {})
+      }
+
+      const audio = queueAudioRef.current
+      if (!audio) return
+      audio.src = url
+      audio.currentTime = 0
+      setQueueLoadingChunk(false)
+      setQueuePlaying(true)
+      await audio.play()
+    } catch (err) {
+      if (queueRunIdRef.current !== runId) return
+      setQueueLoadingChunk(false)
+      setQueuePlaying(false)
+      const msg = err instanceof Error ? err.message : "Failed to play chunk."
+      toast.error(msg)
+    }
+  }
+
+  const handleStartAutoQueue = () => {
+    if (smartChunks.length === 0) return
+    unlockIosAudio()
+    const runId = queueRunIdRef.current + 1
+    queueRunIdRef.current = runId
+    queueCacheRef.current.clear()
+    setQueueActive(true)
+    void playQueueChunkAt(0, runId)
+  }
+
+  const handleToggleQueuePlayPause = async () => {
+    unlockIosAudio()
+    const audio = queueAudioRef.current
+    if (!audio) return
+    if (queuePlaying) {
+      audio.pause()
+      setQueuePlaying(false)
+    } else {
+      try {
+        await audio.play()
+        setQueuePlaying(true)
+      } catch {
+        setQueuePlaying(false)
+      }
+    }
+  }
+
+  const handleRewriteAsRecap = async () => {
+    if (!rawText.trim()) return
+    setIsRewritingRecap(true)
+    try {
+      const targetText = activeChapter ? activeChapter.text : rawText
+      const recap = await rewriteChapterAsRecap(targetText, isMy ? "my" : "en")
+      clearGeneratedAudio()
+      setRawText(recap)
+      setSelectedChapterId(null)
+      toast.success(
+        isMy
+          ? "YouTube Recap ပုံစံဖြင့် ပြန်လည်ရေးသားပြီးပါပြီ!"
+          : "Rewritten into engaging YouTube Recap narration!"
+      )
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to rewrite as recap."
+      toast.error(msg)
+    } finally {
+      setIsRewritingRecap(false)
+    }
   }
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -321,7 +459,7 @@ export function AudiobookPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".txt,.md,.pdf,text/plain,application/pdf"
+              accept=".txt,.md,.pdf,.epub,text/plain,application/pdf,application/epub+zip"
               className="hidden"
               onChange={handleFileUpload}
             />
@@ -344,8 +482,8 @@ export function AudiobookPage() {
                     ? "စာသားထုတ်ယူနေသည်..."
                     : "Extracting..."
                   : isMy
-                    ? ".txt / .pdf ဖိုင်တင်မည်"
-                    : "Upload .txt / .pdf"}
+                    ? ".txt / .pdf / .epub ဖိုင်တင်မည်"
+                    : "Upload .txt / .pdf / .epub"}
               </span>
             </Button>
 
@@ -394,6 +532,59 @@ export function AudiobookPage() {
               }
               className="min-h-[150px] resize-y text-sm leading-relaxed"
             />
+          </div>
+
+          {/* Audiobook Mode Switcher (Direct vs YouTube Recap Storytelling) */}
+          <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label className="text-xs font-medium text-muted-foreground">
+                {isMy ? "စာဖတ်မုဒ် (Narration Mode)" : "Narration Mode"}
+              </Label>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={audiobookMode === "direct" ? "default" : "outline"}
+                  onClick={() => setAudiobookMode("direct")}
+                  className="h-7 px-2.5 text-xs"
+                >
+                  {isMy ? "Direct Audiobook" : "Direct Audiobook"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={audiobookMode === "recap" ? "default" : "outline"}
+                  onClick={() => setAudiobookMode("recap")}
+                  className="h-7 px-2.5 text-xs"
+                >
+                  {isMy ? "YouTube Recap Storytelling" : "YouTube Recap Mode"}
+                </Button>
+              </div>
+            </div>
+            {audiobookMode === "recap" && (
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <p className="text-[11px] text-muted-foreground font-myanmar">
+                  {isMy
+                    ? "စာအုပ်အခန်းကို YouTube Recap ပုံစံ စကားပြောဇာတ်ကြောင်းအဖြစ် ပြန်ရေးသားပေးပါမည်။"
+                    : "Rewrites the chapter into engaging conversational YouTube Recap narration."}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={!rawText.trim() || isRewritingRecap || isGenerating}
+                  onClick={handleRewriteAsRecap}
+                  className="h-7 px-3 text-xs gap-1.5"
+                >
+                  {isRewritingRecap ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Wand2 className="h-3.5 w-3.5 text-indigo-500" />
+                  )}
+                  <span>{isMy ? "YouTube Recap ပြောင်းမည်" : "Rewrite as Recap"}</span>
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Voice & Speed Controls */}
@@ -485,6 +676,22 @@ export function AudiobookPage() {
 
           {/* Generate Buttons */}
           <div className="flex flex-col sm:flex-row gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={smartChunks.length === 0 || isGenerating || isExtracting}
+              onTouchStart={() => unlockIosAudio()}
+              onClick={handleStartAutoQueue}
+              className="flex-1 gap-2 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
+            >
+              <Headphones className="h-4 w-4" />
+              <span>
+                {isMy
+                  ? `တိုက်ရိုက်နားဆင်မည် (${smartChunks.length} ပိုင်း Pre-Fetch)`
+                  : `Stream Auto-Queue (${smartChunks.length} chunks)`}
+              </span>
+            </Button>
+
             {activeChapter && chapters.length > 1 && (
               <Button
                 type="button"
@@ -553,6 +760,114 @@ export function AudiobookPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Pre-Fetch Auto-Queue Continuous Player */}
+      <audio
+        ref={queueAudioRef}
+        playsInline
+        preload="auto"
+        className="sr-only"
+        onEnded={() => {
+          const nextIdx = queueIndex + 1
+          if (nextIdx < smartChunks.length) {
+            void playQueueChunkAt(nextIdx, queueRunIdRef.current)
+          } else {
+            setQueuePlaying(false)
+            toast.success(isMy ? "စာအုပ်တစ်ခုလုံး ဖတ်ပြီးပါပြီ!" : "Finished reading all chunks!")
+          }
+        }}
+      />
+
+      {queueActive && smartChunks.length > 0 && (
+        <Card className="border-blue-500/30 bg-blue-500/5 shadow-sm">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="flex items-center gap-2 text-sm sm:text-base">
+                <Headphones className="h-4 w-4 text-blue-500" />
+                <span>
+                  {isMy ? "Pre-Fetch Auto-Queue Player" : "Pre-Fetch Auto-Queue Player"}
+                </span>
+              </CardTitle>
+              <Badge variant="secondary" className="text-xs tabular-nums">
+                {isMy
+                  ? `အပိုင်း ${toBurmeseDigits(queueIndex + 1)} / ${toBurmeseDigits(smartChunks.length)}`
+                  : `Chunk ${queueIndex + 1} / ${smartChunks.length}`}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground line-clamp-2 font-myanmar bg-background/60 rounded-lg p-2.5 border border-border/60">
+              {smartChunks[queueIndex]}
+            </p>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={queueIndex <= 0 || queueLoadingChunk}
+                  onClick={() => {
+                    unlockIosAudio()
+                    void playQueueChunkAt(queueIndex - 1, queueRunIdRef.current)
+                  }}
+                >
+                  <SkipBack className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={queueLoadingChunk}
+                  onClick={handleToggleQueuePlayPause}
+                  className="gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {queueLoadingChunk ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : queuePlaying ? (
+                    <Pause className="h-4 w-4" />
+                  ) : (
+                    <Play className="h-4 w-4" />
+                  )}
+                  <span>
+                    {queueLoadingChunk
+                      ? isMy
+                        ? "ပြင်ဆင်နေသည်..."
+                        : "Loading..."
+                      : queuePlaying
+                        ? isMy
+                          ? "ခဏရပ်"
+                          : "Pause"
+                        : isMy
+                          ? "ဆက်ဖွင့်မည်"
+                          : "Resume"}
+                  </span>
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={queueIndex >= smartChunks.length - 1 || queueLoadingChunk}
+                  onClick={() => {
+                    unlockIosAudio()
+                    void playQueueChunkAt(queueIndex + 1, queueRunIdRef.current)
+                  }}
+                >
+                  <SkipForward className="h-4 w-4" />
+                </Button>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={stopAutoQueue}
+                className="text-xs text-muted-foreground hover:text-destructive gap-1"
+              >
+                <Square className="h-3.5 w-3.5" />
+                <span>{isMy ? "ရပ်မည်" : "Stop"}</span>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Audio Player & Download */}
       {fullAudio && (

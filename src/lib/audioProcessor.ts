@@ -22,7 +22,7 @@ function writeAscii(view: DataView, offset: number, text: string) {
 /**
  * Encode mono Float32 PCM samples [-1, 1] into a standard 16-bit PCM WAV Blob.
  */
-function encodeMonoWav16Bit(samples: Float32Array, sampleRate: number): Blob {
+export function encodeMonoWav16Bit(samples: Float32Array, sampleRate: number): Blob {
   const numChannels = 1
   const bitsPerSample = 16
   const byteRate = sampleRate * numChannels * (bitsPerSample / 8)

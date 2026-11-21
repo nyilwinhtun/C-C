@@ -4,6 +4,8 @@
  * while preventing silent/empty recordings and blocked playback on iOS Safari.
  */
 
+import { encodeMonoWav16Bit } from "@/lib/audioProcessor"
+
 export const MIN_VALID_RECORDING_BYTES = 1000
 
 const AUDIO_RECORDER_MIME_CANDIDATES = [
@@ -18,6 +20,42 @@ const SILENT_WAV_DATA_URI =
 
 let sharedUnlockCtx: AudioContext | null = null
 let sharedPrimerAudio: HTMLAudioElement | null = null
+
+/**
+ * Configure iOS Safari / WebKit AudioSession to 'playback' so audio plays
+ * even when the hardware Silent/Mute switch is ON.
+ */
+export function setIosAudioSessionPlayback(): void {
+  if (typeof navigator === "undefined") return
+  try {
+    if ("audioSession" in navigator) {
+      const navWithSession = navigator as unknown as {
+        audioSession?: { type: string }
+      }
+      if (navWithSession.audioSession) {
+        navWithSession.audioSession.type = "playback"
+      }
+    }
+  } catch {
+    // Ignore unsupported audioSession environments
+  }
+}
+
+/**
+ * Return (or lazily create) the persistent <audio playsInline> element
+ * primed on user gestures for iOS Safari / PWA playback.
+ */
+export function getSharedPrimerAudio(): HTMLAudioElement | null {
+  if (typeof document === "undefined") return null
+  if (!sharedPrimerAudio) {
+    const el = document.createElement("audio")
+    el.setAttribute("playsinline", "")
+    el.setAttribute("webkit-playsinline", "")
+    el.preload = "auto"
+    sharedPrimerAudio = el
+  }
+  return sharedPrimerAudio
+}
 
 export function isAppleTouchDevice(): boolean {
   if (typeof navigator === "undefined") return false
@@ -44,20 +82,18 @@ export function getAudioContextConstructor(): typeof AudioContext | null {
 export function unlockIosAudio(): AudioContext | null {
   if (typeof window === "undefined") return null
 
+  setIosAudioSessionPlayback()
+
   // 1. Unlock HTML5 <audio playsInline> element synchronously on tap
   try {
-    if (!sharedPrimerAudio) {
-      const el = document.createElement("audio")
-      el.setAttribute("playsinline", "")
-      el.setAttribute("webkit-playsinline", "")
-      el.preload = "auto"
+    const el = getSharedPrimerAudio()
+    if (el) {
       el.src = SILENT_WAV_DATA_URI
       el.volume = 0.01
-      sharedPrimerAudio = el
-    }
-    const playPromise = sharedPrimerAudio.play()
-    if (playPromise && typeof playPromise.catch === "function") {
-      playPromise.catch(() => {})
+      const playPromise = el.play()
+      if (playPromise && typeof playPromise.catch === "function") {
+        playPromise.catch(() => {})
+      }
     }
   } catch {
     // Ignore autoplay restrictions outside user gestures
@@ -195,4 +231,175 @@ export function resolveRecordedAudioMime(
   if (resolved) return resolved
 
   return isAppleTouchDevice() ? "audio/mp4" : "audio/webm"
+}
+
+/**
+ * Play a Blob URL through the persistent primed HTML5 <audio playsInline>
+ * element (call unlockIosAudio() synchronously inside the tap handler first).
+ */
+export async function playBlobUrlWithPrimedAudio(blobUrl: string): Promise<HTMLAudioElement | null> {
+  const el = getSharedPrimerAudio()
+  if (!el) return null
+  setIosAudioSessionPlayback()
+  el.pause()
+  el.volume = 1
+  el.src = blobUrl
+  el.currentTime = 0
+  try {
+    await el.play()
+  } catch {
+    // Ignore autoplay errors if gesture expired
+  }
+  return el
+}
+
+export interface WavAudioRecorderHandle {
+  stop: () => Promise<{
+    blob: Blob
+    mimeType: "audio/wav"
+    durationSeconds: number
+  }>
+  cancel: () => void
+}
+
+const WAV_RECORDER_TARGET_SAMPLE_RATE = 16000
+
+function resampleTo16kMono(samples: Float32Array, sourceRate: number): Float32Array {
+  if (sourceRate === WAV_RECORDER_TARGET_SAMPLE_RATE || samples.length === 0) {
+    return samples
+  }
+  const targetLength = Math.max(
+    1,
+    Math.round((samples.length * WAV_RECORDER_TARGET_SAMPLE_RATE) / sourceRate)
+  )
+  const resampled = new Float32Array(targetLength)
+  const ratio = sourceRate / WAV_RECORDER_TARGET_SAMPLE_RATE
+  for (let i = 0; i < targetLength; i += 1) {
+    const srcPos = i * ratio
+    const idx0 = Math.min(samples.length - 1, Math.floor(srcPos))
+    const idx1 = Math.min(samples.length - 1, idx0 + 1)
+    const frac = srcPos - idx0
+    resampled[i] = samples[idx0] * (1 - frac) + samples[idx1] * frac
+  }
+  return resampled
+}
+
+/**
+ * Direct Web Audio API 16kHz mono 16-bit PCM-to-WAV recorder.
+ * Works identically on iPhone (Safari + Home Screen PWA), Android, and Desktop
+ * without MediaRecorder MIME/empty-blob issues.
+ */
+export function createWavAudioRecorder(
+  stream: MediaStream,
+  options?: {
+    audioContext?: AudioContext | null
+    onBars?: (bars: number[]) => void
+    barCount?: number
+  }
+): WavAudioRecorderHandle {
+  const AudioCtx = getAudioContextConstructor()
+  if (!AudioCtx) {
+    throw new Error("Web Audio API is not supported in this browser.")
+  }
+
+  const ctx =
+    options?.audioContext && options.audioContext.state !== "closed"
+      ? options.audioContext
+      : new AudioCtx()
+
+  if (ctx.state === "suspended") {
+    ctx.resume().catch(() => {})
+  }
+
+  const source = ctx.createMediaStreamSource(stream)
+  const processor = ctx.createScriptProcessor(4096, 1, 1)
+  const silentGain = ctx.createGain()
+  silentGain.gain.value = 0
+
+  const pcmChunks: Float32Array[] = []
+  let totalSamples = 0
+  let stopped = false
+
+  processor.onaudioprocess = (event) => {
+    if (stopped) return
+    const input = event.inputBuffer.getChannelData(0)
+    if (input.length === 0) return
+    const copy = new Float32Array(input.length)
+    copy.set(input)
+    pcmChunks.push(copy)
+    totalSamples += copy.length
+  }
+
+  source.connect(processor)
+  processor.connect(silentGain)
+  silentGain.connect(ctx.destination)
+
+  let rafId = 0
+  let analyser: AnalyserNode | null = null
+  if (options?.onBars) {
+    const barCount = options.barCount ?? 16
+    analyser = ctx.createAnalyser()
+    analyser.fftSize = 64
+    source.connect(analyser)
+    const freqData = new Uint8Array(analyser.frequencyBinCount)
+
+    const tick = () => {
+      if (stopped || !analyser) return
+      analyser.getByteFrequencyData(freqData)
+      const bars: number[] = []
+      for (let i = 0; i < barCount; i += 1) {
+        const val = freqData[i % freqData.length] ?? 0
+        bars.push(Math.max(14, Math.min(100, Math.round((val / 255) * 100))))
+      }
+      options.onBars?.(bars)
+      rafId = requestAnimationFrame(tick)
+    }
+    rafId = requestAnimationFrame(tick)
+  }
+
+  const cleanup = async () => {
+    if (stopped) return
+    stopped = true
+    if (rafId) {
+      cancelAnimationFrame(rafId)
+      rafId = 0
+    }
+    try {
+      processor.onaudioprocess = null
+      source.disconnect()
+      processor.disconnect()
+      silentGain.disconnect()
+      analyser?.disconnect()
+    } catch {
+      // Ignore disconnect errors
+    }
+    await ctx.close().catch(() => {})
+  }
+
+  return {
+    stop: async () => {
+      const sampleRate = ctx.sampleRate || 44100
+      await cleanup()
+
+      const merged = new Float32Array(totalSamples)
+      let offset = 0
+      for (const chunk of pcmChunks) {
+        merged.set(chunk, offset)
+        offset += chunk.length
+      }
+
+      const samples16k = resampleTo16kMono(merged, sampleRate)
+      const blob = encodeMonoWav16Bit(samples16k, WAV_RECORDER_TARGET_SAMPLE_RATE)
+      const durationSeconds = samples16k.length / WAV_RECORDER_TARGET_SAMPLE_RATE
+
+      return {
+        blob,
+        mimeType: "audio/wav",
+        durationSeconds,
+      }
+    },
+    cancel: () => {
+      void cleanup()
+    },
+  }
 }

@@ -29,9 +29,11 @@ import {
 } from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import {
+  analyzeVideoClipsAndCaptions,
   generateContent,
   generateVideoContent,
   isSupportedVideoFile,
+  type VideoClipsAndCaptionsResult,
   type VideoContentResult,
   type VideoPlatformOption,
 } from "@/api/aiService"
@@ -143,6 +145,9 @@ export function VideoToContentSection() {
   const [optionsOpen, setOptionsOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<VideoOutputTab>("hooks")
   const [showAllTabs, setShowAllTabs] = useState(false)
+  const [isAnalyzingClips, setIsAnalyzingClips] = useState(false)
+  const [clipsCaptionsResult, setClipsCaptionsResult] =
+    useState<VideoClipsAndCaptionsResult | null>(null)
 
   useEffect(() => {
     if (prevLanguageRef.current !== language) {
@@ -171,6 +176,7 @@ export function VideoToContentSection() {
       setUploadedVideo(file, nextPreviewUrl)
       setVideoDurationSeconds(null)
       setResult(null)
+      setClipsCaptionsResult(null)
       setMobileView("create")
     },
     [setUploadedVideo, setResult]
@@ -743,7 +749,7 @@ export function VideoToContentSection() {
               )}
             </div>
 
-            <div className="pt-2">
+            <div className="pt-2 space-y-2">
               <Button
                 type="button"
                 onClick={() => void handleGenerate("default")}
@@ -766,9 +772,137 @@ export function VideoToContentSection() {
                   </>
                 )}
               </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!videoFile || isGenerating || isAnalyzingClips}
+                onClick={async () => {
+                  if (!videoFile) return
+                  setIsAnalyzingClips(true)
+                  try {
+                    const res = await analyzeVideoClipsAndCaptions(videoFile, outputLanguage)
+                    setClipsCaptionsResult(res)
+                    toast.success(
+                      language === "my"
+                        ? "Smart Clip Finder နှင့် Auto-Captions ခွဲခြမ်းစိတ်ဖြာပြီးပါပြီ!"
+                        : "Smart Clips & Auto-Captions ready!"
+                    )
+                  } catch (err) {
+                    const msg =
+                      err instanceof Error ? err.message : "Failed to analyze clips & captions."
+                    toast.error(msg)
+                  } finally {
+                    setIsAnalyzingClips(false)
+                  }
+                }}
+                className="w-full min-h-[40px] rounded-xl font-medium border-indigo-500/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/10"
+              >
+                {isAnalyzingClips ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <span>
+                      {language === "my"
+                        ? "Smart Clips နှင့် Captions ရှာနေသည်..."
+                        : "Analyzing Clips & Captions..."}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="h-4 w-4 mr-2" />
+                    <span>
+                      {language === "my"
+                        ? "Smart Clip Finder & Auto-Captions ရှာမည်"
+                        : "Smart Clip Finder & Auto-Captions"}
+                    </span>
+                  </>
+                )}
+              </Button>
             </div>
           </CardContent>
         </Card>
+
+        {clipsCaptionsResult && (
+          <Card className="border-indigo-500/30 bg-indigo-500/5 shadow-sm">
+            <CardHeader className="pb-2.5">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <Zap className="h-4 w-4 text-indigo-500" />
+                <span>
+                  {language === "my"
+                    ? "Smart Clip Finder & Auto-Captions"
+                    : "Smart Clip Finder & Auto-Captions"}
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {clipsCaptionsResult.clips.length > 0 && (
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-muted-foreground">
+                    {language === "my"
+                      ? "Viral ဖြစ်နိုင်သော 30s Highlight အပိုင်းများ"
+                      : "Viral 30s Highlight Timestamps"}
+                  </Label>
+                  <div className="space-y-2">
+                    {clipsCaptionsResult.clips.map((clip, idx) => (
+                      <div
+                        key={idx}
+                        className="rounded-lg border border-border/60 bg-background/80 p-2.5 space-y-1"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <Badge variant="secondary" className="text-[11px] font-mono">
+                            {clip.startTime} - {clip.endTime}
+                          </Badge>
+                          <Badge variant="outline" className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                            Hook {clip.hookScore}/100
+                          </Badge>
+                        </div>
+                        <p className="text-xs font-semibold font-myanmar">{clip.title}</p>
+                        <p className="text-[11px] text-muted-foreground font-myanmar">{clip.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {clipsCaptionsResult.captions.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs font-semibold text-muted-foreground">
+                      {language === "my"
+                        ? "Auto-Captions (မြန်မာ/အင်္ဂလိပ် စာတန်း)"
+                        : "Timestamped Auto-Captions"}
+                    </Label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        const text = clipsCaptionsResult.captions
+                          .map((c) => `[${c.startTime} - ${c.endTime}] ${c.text}`)
+                          .join("\n")
+                        void navigator.clipboard?.writeText(text)
+                        toast.success(language === "my" ? "Captions Copy ကူးပြီးပါပြီ" : "Captions copied!")
+                      }}
+                      className="h-7 px-2.5 text-[11px]"
+                    >
+                      <Copy className="h-3 w-3 mr-1" />
+                      {language === "my" ? "Copy Captions" : "Copy Captions"}
+                    </Button>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto rounded-lg border border-border/60 bg-background/80 p-2.5 space-y-1.5">
+                    {clipsCaptionsResult.captions.map((cap, idx) => (
+                      <div key={idx} className="text-xs font-myanmar leading-relaxed">
+                        <span className="font-mono text-[11px] text-indigo-600 dark:text-indigo-400 mr-2">
+                          [{cap.startTime} - {cap.endTime}]
+                        </span>
+                        <span>{cap.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <div

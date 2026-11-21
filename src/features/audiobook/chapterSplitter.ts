@@ -120,3 +120,55 @@ export function formatDurationLabel(totalSeconds: number): string {
   return `${mins}m ${secs.toString().padStart(2, "0")}s`
 }
 
+/**
+ * Split long text at sentence boundaries (။ / . / ! / ?) into 500-800 character
+ * chunks for smooth Pre-Fetch Auto-Queue audiobook playback.
+ */
+export function splitTextIntoSmartChunks(
+  rawText: string,
+  minChars = 500,
+  maxChars = 800
+): string[] {
+  const normalized = rawText.replace(/\r\n/g, "\n").trim()
+  if (!normalized) return []
+  if (normalized.length <= maxChars) return [normalized]
+
+  const sentences = normalized
+    .split(/(?<=[။.!?])\s+|\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  const chunks: string[] = []
+  let current = ""
+
+  for (const sentence of sentences) {
+    if (sentence.length > maxChars) {
+      if (current) {
+        chunks.push(current)
+        current = ""
+      }
+      const chars = Array.from(sentence)
+      for (let i = 0; i < chars.length; i += maxChars) {
+        chunks.push(chars.slice(i, i + maxChars).join(""))
+      }
+      continue
+    }
+
+    const nextLen = current ? current.length + 1 + sentence.length : sentence.length
+    if (current && nextLen > maxChars && current.length >= minChars) {
+      chunks.push(current)
+      current = sentence
+    } else if (current && nextLen > maxChars) {
+      chunks.push(current)
+      current = sentence
+    } else {
+      current = current ? `${current} ${sentence}` : sentence
+    }
+  }
+
+  if (current) {
+    chunks.push(current)
+  }
+  return chunks
+}
+
