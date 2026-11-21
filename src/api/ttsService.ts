@@ -939,7 +939,7 @@ async function synthesizeGeminiChunk(
   | { kind: "blob"; blob: Blob; mimeType: string; fileExtension: "wav" | "mp3" }
 > {
   const cleanKey = apiKey.trim()
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TTS_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
+  const standardUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TTS_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
   const tonePreset = VOICE_DELIVERY_PRESETS[deliveryTone]
 
   const prompt = [
@@ -951,26 +951,48 @@ async function synthesizeGeminiChunk(
     chunkText,
   ].join("\n")
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": cleanKey,
-    },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName: preset.geminiVoice,
-            },
+  const headers = {
+    "Content-Type": "application/json",
+    "x-goog-api-key": cleanKey,
+  }
+  const requestBody = JSON.stringify({
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: {
+            voiceName: preset.geminiVoice,
           },
         },
       },
-    }),
+    },
   })
+
+  let response: Response | null = null
+  if (cleanKey.startsWith("AQ.")) {
+    const vertexUrl = `https://aiplatform.googleapis.com/v1/publishers/google/models/${GEMINI_TTS_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
+    try {
+      const vertexRes = await fetch(vertexUrl, {
+        method: "POST",
+        headers,
+        body: requestBody,
+      })
+      if (vertexRes.ok) {
+        response = vertexRes
+      }
+    } catch {
+      // Fall back to generativelanguage.googleapis.com
+    }
+  }
+
+  if (!response) {
+    response = await fetch(standardUrl, {
+      method: "POST",
+      headers,
+      body: requestBody,
+    })
+  }
 
   if (!response.ok) {
     const errText = await response.text().catch(() => "")

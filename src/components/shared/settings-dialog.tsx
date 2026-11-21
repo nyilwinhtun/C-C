@@ -38,10 +38,8 @@ import { Separator } from "@/components/ui/separator"
 
 const PRESET_MODELS: Record<AIProvider, string[]> = {
   gemini: [
-    "gemini-3.5-flash-lite",
     "gemini-2.5-flash",
     "gemini-2.0-flash",
-    "gemini-1.5-pro",
   ],
   groq: [
     "llama-3.3-70b-versatile",
@@ -446,7 +444,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 onChange={(e) => setModelInput(e.target.value)}
                 placeholder={
                   selectedProvider === "gemini"
-                    ? "Enter model (e.g. gemini-3.5-flash-lite)"
+                    ? "Enter model (e.g. gemini-2.5-flash)"
                     : "Enter custom model name"
                 }
                 className="mt-2"

@@ -54,7 +54,7 @@ export const MODEL_STORAGE_KEYS: Record<AIProvider, string> = {
 }
 
 export const DEFAULT_MODELS: ProviderMap = {
-  gemini: "gemini-3.5-flash-lite",
+  gemini: "gemini-2.5-flash",
   groq: "llama-3.3-70b-versatile",
   openrouter: "google/gemma-3-27b-it:free",
 }
@@ -88,11 +88,21 @@ function writeLocalKey(storageKey: string, value: string): void {
   }
 }
 
+const DEPRECATED_GEMINI_MODELS = new Set([
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  "gemini-pro",
+  "gemini-pro-vision",
+  "gemini-2.5-flash-lite",
+  "gemini-3.5-flash-lite",
+])
+
 function migrateGeminiModel(model: string | undefined): string {
-  if (!model || !model.trim() || model.trim() === "gemini-2.5-flash-lite") {
+  const trimmed = model?.trim()
+  if (!trimmed || DEPRECATED_GEMINI_MODELS.has(trimmed)) {
     return DEFAULT_MODELS.gemini
   }
-  return model.trim()
+  return trimmed
 }
 
 function migrateOpenRouterModel(model: string | undefined): string {
@@ -318,7 +328,7 @@ export const useUIStore = create<UIState>()(
         }
       },
       onRehydrateStorage: () => (state) => {
-        if (state && state.models?.gemini === "gemini-2.5-flash-lite") {
+        if (state && DEPRECATED_GEMINI_MODELS.has(state.models?.gemini ?? "")) {
           state.setProviderModel("gemini", DEFAULT_MODELS.gemini)
         }
         if (state && state.models?.openrouter === "openrouter/auto") {

@@ -6,9 +6,18 @@ import {
   type SalesAngle,
 } from "@/types"
 
-export const GEMINI_MODEL = "gemini-3.5-flash-lite"
+export const GEMINI_MODEL = "gemini-2.5-flash"
 export const GEMINI_VISION_MODEL = "gemini-2.5-flash"
-export const GEMINI_FALLBACK_MODEL = "gemini-3.5-flash-lite"
+export const GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
+
+const DEPRECATED_GEMINI_MODELS = new Set([
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  "gemini-pro",
+  "gemini-pro-vision",
+  "gemini-2.5-flash-lite",
+  "gemini-3.5-flash-lite",
+])
 export const QUOTA_EXCEEDED_MESSAGE =
   "Daily/minute API quota exceeded. Please switch model in Settings or wait a moment."
 export const OPENROUTER_BUSY_MESSAGE =
@@ -555,8 +564,8 @@ function getAiConfig() {
 
   const rawModel = models[aiProvider]?.trim() || ""
   const resolvedModel =
-    aiProvider === "gemini" && rawModel === "gemini-2.5-flash-lite"
-      ? GEMINI_FALLBACK_MODEL
+    aiProvider === "gemini" && DEPRECATED_GEMINI_MODELS.has(rawModel)
+      ? GEMINI_MODEL
       : rawModel || DEFAULT_MODELS[aiProvider]
 
   return {
@@ -571,15 +580,51 @@ function getAiConfig() {
   }
 }
 
-function getGeminiRequestConfig(model: string, apiKey: string) {
+async function fetchGeminiGenerateContent(
+  model: string,
+  apiKey: string,
+  body: unknown
+): Promise<Response> {
   const cleanKey = apiKey.trim()
-  return {
-    url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`,
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": cleanKey,
-    },
+  const trimmedModel = model.trim()
+  const resolvedModel =
+    !trimmedModel || DEPRECATED_GEMINI_MODELS.has(trimmedModel)
+      ? GEMINI_MODEL
+      : trimmedModel
+  const headers = {
+    "Content-Type": "application/json",
+    "x-goog-api-key": cleanKey,
   }
+  const payload = JSON.stringify(body)
+  const standardUrl = `https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel}:generateContent?key=${encodeURIComponent(cleanKey)}`
+
+  if (cleanKey.startsWith("AQ.")) {
+    const vertexUrl = `https://aiplatform.googleapis.com/v1/publishers/google/models/${resolvedModel}:generateContent?key=${encodeURIComponent(cleanKey)}`
+    try {
+      const vertexRes = await fetch(vertexUrl, {
+        method: "POST",
+        headers,
+        body: payload,
+      })
+      if (vertexRes.ok) {
+        return vertexRes
+      }
+      console.warn(
+        `Vertex AI Express endpoint returned ${vertexRes.status} for "${resolvedModel}". Falling back to generativelanguage.googleapis.com...`
+      )
+    } catch (err) {
+      console.warn(
+        `Vertex AI Express endpoint request failed for "${resolvedModel}". Falling back to generativelanguage.googleapis.com...`,
+        err
+      )
+    }
+  }
+
+  return fetch(standardUrl, {
+    method: "POST",
+    headers,
+    body: payload,
+  })
 }
 
 async function generateWithGemini(
@@ -587,18 +632,13 @@ async function generateWithGemini(
   apiKey: string,
   model: string
 ): Promise<GeneratedContent> {
-  const { url, headers } = getGeminiRequestConfig(model, apiKey)
   const body = {
     systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
     contents: [{ parts: [{ text: buildUserPrompt(request) }] }],
     generationConfig: { temperature: 0.7, topP: 0.95, maxOutputTokens: 4096 },
   }
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  })
+  const res = await fetchGeminiGenerateContent(model, apiKey, body)
 
   if (!res.ok) {
     const text = await res.text().catch(() => "")
@@ -899,7 +939,6 @@ async function suggestPhotoWithGemini(
   model: string
 ): Promise<PhotoSuggestionResult> {
   const base64Data = request.imageBase64.replace(/^data:[^;]+;base64,/, "")
-  const { url, headers } = getGeminiRequestConfig(model, apiKey)
   const body = {
     contents: [
       {
@@ -922,11 +961,7 @@ async function suggestPhotoWithGemini(
     },
   }
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  })
+  const res = await fetchGeminiGenerateContent(model, apiKey, body)
 
   if (!res.ok) {
     const text = await res.text().catch(() => "")
@@ -1564,7 +1599,6 @@ async function generateVideoWithGemini(
   frameCount?: number,
   brandSignature?: string
 ): Promise<VideoContentResult> {
-  const { url, headers } = getGeminiRequestConfig(model, apiKey)
   const body = {
     contents: [
       {
@@ -1579,11 +1613,7 @@ async function generateVideoWithGemini(
     },
   }
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  })
+  const res = await fetchGeminiGenerateContent(model, apiKey, body)
 
   if (!res.ok) {
     const text = await res.text().catch(() => "")
@@ -1961,7 +1991,6 @@ async function callGeminiMultimodalText(params: {
     )
   }
 
-  const { url, headers } = getGeminiRequestConfig(GEMINI_VISION_MODEL, geminiKey)
   const body = {
     contents: [
       {
@@ -1983,11 +2012,7 @@ async function callGeminiMultimodalText(params: {
     },
   }
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  })
+  const res = await fetchGeminiGenerateContent(GEMINI_VISION_MODEL, geminiKey, body)
 
   if (!res.ok) {
     const text = await res.text().catch(() => "")
