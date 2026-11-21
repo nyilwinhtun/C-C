@@ -210,14 +210,15 @@ export function GeneratorPage() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          noiseSuppression: true,
+          noiseSuppression: false,
+          autoGainControl: false,
           echoCancellation: true,
-          autoGainControl: true,
         },
       })
       streamRef.current = stream
       wavRecorderRef.current = createWavAudioRecorder(stream, {
         audioContext: recorderCtx,
+        micFilterMode: useContentStore.getState().micFilterMode,
       })
 
       setRecordingSeconds(0)

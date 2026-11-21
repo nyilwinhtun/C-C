@@ -262,30 +262,8 @@ export interface WavAudioRecorderHandle {
   cancel: () => void
 }
 
-const WAV_RECORDER_TARGET_SAMPLE_RATE = 16000
-
-function resampleTo16kMono(samples: Float32Array, sourceRate: number): Float32Array {
-  if (sourceRate === WAV_RECORDER_TARGET_SAMPLE_RATE || samples.length === 0) {
-    return samples
-  }
-  const targetLength = Math.max(
-    1,
-    Math.round((samples.length * WAV_RECORDER_TARGET_SAMPLE_RATE) / sourceRate)
-  )
-  const resampled = new Float32Array(targetLength)
-  const ratio = sourceRate / WAV_RECORDER_TARGET_SAMPLE_RATE
-  for (let i = 0; i < targetLength; i += 1) {
-    const srcPos = i * ratio
-    const idx0 = Math.min(samples.length - 1, Math.floor(srcPos))
-    const idx1 = Math.min(samples.length - 1, idx0 + 1)
-    const frac = srcPos - idx0
-    resampled[i] = samples[idx0] * (1 - frac) + samples[idx1] * frac
-  }
-  return resampled
-}
-
 /**
- * Direct Web Audio API 16kHz mono 16-bit PCM-to-WAV recorder.
+ * Direct Web Audio API native sample-rate (44.1kHz / 48kHz) mono 16-bit PCM-to-WAV recorder.
  * Works identically on iPhone (Safari + Home Screen PWA), Android, and Desktop
  * without MediaRecorder MIME/empty-blob issues.
  */
@@ -293,6 +271,7 @@ export function createWavAudioRecorder(
   stream: MediaStream,
   options?: {
     audioContext?: AudioContext | null
+    micFilterMode?: "raw" | "light"
     onBars?: (bars: number[]) => void
     barCount?: number
   }
@@ -312,6 +291,18 @@ export function createWavAudioRecorder(
   }
 
   const source = ctx.createMediaStreamSource(stream)
+  let highpassFilter: BiquadFilterNode | null = null
+  let captureNode: AudioNode = source
+
+  if (options?.micFilterMode === "light") {
+    highpassFilter = ctx.createBiquadFilter()
+    highpassFilter.type = "highpass"
+    highpassFilter.frequency.value = 85
+    highpassFilter.Q.value = 0.7
+    source.connect(highpassFilter)
+    captureNode = highpassFilter
+  }
+
   const processor = ctx.createScriptProcessor(4096, 1, 1)
   const silentGain = ctx.createGain()
   silentGain.gain.value = 0
@@ -330,26 +321,33 @@ export function createWavAudioRecorder(
     totalSamples += copy.length
   }
 
-  source.connect(processor)
+  captureNode.connect(processor)
   processor.connect(silentGain)
   silentGain.connect(ctx.destination)
 
   let rafId = 0
   let analyser: AnalyserNode | null = null
   if (options?.onBars) {
-    const barCount = options.barCount ?? 16
+    const barCount = options.barCount ?? 28
     analyser = ctx.createAnalyser()
-    analyser.fftSize = 64
-    source.connect(analyser)
+    analyser.fftSize = 128
+    analyser.smoothingTimeConstant = 0.75
+    captureNode.connect(analyser)
     const freqData = new Uint8Array(analyser.frequencyBinCount)
+    // Focus on lower/mid vocal spectrum bins (up to ~12kHz) for responsive voice bars
+    const activeBinCount = Math.min(freqData.length, Math.max(barCount, 36))
 
     const tick = () => {
       if (stopped || !analyser) return
       analyser.getByteFrequencyData(freqData)
       const bars: number[] = []
       for (let i = 0; i < barCount; i += 1) {
-        const val = freqData[i % freqData.length] ?? 0
-        bars.push(Math.max(14, Math.min(100, Math.round((val / 255) * 100))))
+        const binIndex = Math.min(
+          activeBinCount - 1,
+          Math.floor((i * activeBinCount) / barCount)
+        )
+        const val = freqData[binIndex] ?? 0
+        bars.push(Math.max(8, Math.min(100, Math.round((val / 255) * 100))))
       }
       options.onBars?.(bars)
       rafId = requestAnimationFrame(tick)
@@ -367,6 +365,7 @@ export function createWavAudioRecorder(
     try {
       processor.onaudioprocess = null
       source.disconnect()
+      highpassFilter?.disconnect()
       processor.disconnect()
       silentGain.disconnect()
       analyser?.disconnect()
@@ -388,9 +387,8 @@ export function createWavAudioRecorder(
         offset += chunk.length
       }
 
-      const samples16k = resampleTo16kMono(merged, sampleRate)
-      const blob = encodeMonoWav16Bit(samples16k, WAV_RECORDER_TARGET_SAMPLE_RATE)
-      const durationSeconds = samples16k.length / WAV_RECORDER_TARGET_SAMPLE_RATE
+      const blob = encodeMonoWav16Bit(merged, sampleRate)
+      const durationSeconds = merged.length / sampleRate
 
       return {
         blob,

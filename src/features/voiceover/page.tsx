@@ -48,6 +48,8 @@ interface StudioAudioResult {
   title: string
 }
 
+const WAVEFORM_BAR_COUNT = 28
+
 const SCRIPT_PLACEHOLDER =
   "အသံဖတ်ခိုင်းမယ့် စာသား ဒါမှမဟုတ် ကိုယ်တိုင်ဖတ်မယ့် စာသားကို ဒီမှာ ရေးပါ (အလွတ်စကားပြောသွင်းလိုပါက ဒီအတိုင်း အသံဖမ်းနိုင်ပါသည်)..."
 
@@ -81,15 +83,23 @@ function triggerBlobDownload(url: string, filename: string) {
 }
 
 export function VoiceoverPage() {
-  const { voiceoverDraftScript, setVoiceoverDraftScript, customPronunciations, addAudioSession } =
-    useContentStore(
-      useShallow((state) => ({
-        voiceoverDraftScript: state.voiceoverDraftScript,
-        setVoiceoverDraftScript: state.setVoiceoverDraftScript,
-        customPronunciations: state.customPronunciations,
-        addAudioSession: state.addAudioSession,
-      }))
-    )
+  const {
+    voiceoverDraftScript,
+    setVoiceoverDraftScript,
+    customPronunciations,
+    addAudioSession,
+    micFilterMode,
+    setMicFilterMode,
+  } = useContentStore(
+    useShallow((state) => ({
+      voiceoverDraftScript: state.voiceoverDraftScript,
+      setVoiceoverDraftScript: state.setVoiceoverDraftScript,
+      customPronunciations: state.customPronunciations,
+      addAudioSession: state.addAudioSession,
+      micFilterMode: state.micFilterMode,
+      setMicFilterMode: state.setMicFilterMode,
+    }))
+  )
 
   // Core studio mode
   const [voiceChoice, setVoiceChoice] = useState<VoiceChoice>("my_voice")
@@ -104,7 +114,9 @@ export function VoiceoverPage() {
   // Recording state
   const [isRecordingVoice, setIsRecordingVoice] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
-  const [acousticLevel, setAcousticLevel] = useState(0)
+  const [waveformBars, setWaveformBars] = useState<number[]>(() =>
+    Array(WAVEFORM_BAR_COUNT).fill(14)
+  )
 
   // Teleprompter state (auto-activates when recording in My Voice with script)
   const [teleprompterScrolling, setTeleprompterScrolling] = useState(true)
@@ -142,7 +154,7 @@ export function VoiceoverPage() {
       streamRef.current.getTracks().forEach((track) => track.stop())
       streamRef.current = null
     }
-    setAcousticLevel(0)
+    setWaveformBars(Array(WAVEFORM_BAR_COUNT).fill(14))
   }, [])
 
   useEffect(() => {
@@ -249,21 +261,18 @@ export function VoiceoverPage() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          noiseSuppression: true,
+          noiseSuppression: false,
+          autoGainControl: false,
           echoCancellation: true,
-          autoGainControl: true,
         },
       })
       streamRef.current = stream
 
       wavRecorderRef.current = createWavAudioRecorder(stream, {
         audioContext: recorderCtx,
-        barCount: 8,
-        onBars: (bars) => {
-          if (bars.length === 0) return
-          const avg = bars.reduce((sum, v) => sum + v, 0) / bars.length
-          setAcousticLevel(Math.min(100, Math.max(4, Math.round(avg))))
-        },
+        micFilterMode,
+        barCount: WAVEFORM_BAR_COUNT,
+        onBars: setWaveformBars,
       })
 
       recordingSecondsRef.current = 0
@@ -622,56 +631,99 @@ export function VoiceoverPage() {
       {/* 3. Dynamic Single Primary Action Control */}
       <div className="rounded-[20px] border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] px-5 py-6">
         {voiceChoice === "my_voice" ? (
-          <div className="flex flex-col items-center space-y-4">
-            {/* Crisp Tabular Timer */}
-            <div className="text-3xl font-light tracking-tight tabular-nums text-[#1C1917] dark:text-[#F5F5F4]">
-              {formatRecordTimer(recordingSeconds)}
-            </div>
-
-            {/* Minimalist Hairline Acoustic Level Meter */}
-            <div
-              className="w-full max-w-[220px] h-[2px] rounded-full bg-[#E7E5E4] dark:bg-[#3F3F46] overflow-hidden"
-              aria-hidden="true"
-            >
-              <div
+          <div className="space-y-4">
+            {/* Compact Side-by-Side Record Control + Live Reactive Waveform + Tabular Timer */}
+            <div className="flex items-center gap-3.5 sm:gap-4">
+              {/* Tactile iPhone Voice Memos-Style Compact Record/Stop Button */}
+              <button
+                type="button"
+                onTouchStart={() => unlockIosAudio()}
+                onClick={isRecordingVoice ? stopRecording : startRecording}
+                disabled={isTranscribing || isGeneratingVoice}
+                aria-label={isRecordingVoice ? "Stop recording" : "Start recording"}
                 className={cn(
-                  "h-full mx-auto rounded-full transition-[width] duration-75",
-                  isRecordingVoice ? "bg-[#E11D48]" : "bg-transparent"
-                )}
-                style={{ width: isRecordingVoice ? `${acousticLevel}%` : "0%" }}
-              />
-            </div>
-
-            {/* Tactile iPhone Voice Memos-Style Circular Red Record/Stop Button */}
-            <button
-              type="button"
-              onTouchStart={() => unlockIosAudio()}
-              onClick={isRecordingVoice ? stopRecording : startRecording}
-              disabled={isTranscribing || isGeneratingVoice}
-              aria-label={isRecordingVoice ? "Stop recording" : "Start recording"}
-              className={cn(
-                "relative flex h-[72px] w-[72px] items-center justify-center rounded-full border-2 transition-all active:scale-95 cursor-pointer disabled:opacity-50",
-                isRecordingVoice
-                  ? "border-[#E11D48]/45"
-                  : "border-[#D6D3D1] dark:border-[#52525B]"
-              )}
-            >
-              <span
-                className={cn(
-                  "transition-all duration-200 bg-[#E11D48]",
+                  "relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 transition-all active:scale-95 cursor-pointer disabled:opacity-50",
                   isRecordingVoice
-                    ? "h-6 w-6 rounded-[6px]"
-                    : "h-14 w-14 rounded-full hover:bg-[#BE123C]"
+                    ? "border-[#E11D48]/45 bg-[#E11D48]/5"
+                    : "border-[#D6D3D1] dark:border-[#52525B]"
                 )}
-              />
-            </button>
+              >
+                <span
+                  className={cn(
+                    "transition-all duration-200 bg-[#E11D48]",
+                    isRecordingVoice
+                      ? "h-5 w-5 rounded-[5px]"
+                      : "h-10 w-10 rounded-full hover:bg-[#BE123C]"
+                  )}
+                />
+              </button>
 
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
-                {isRecordingVoice
-                  ? "အသံဖမ်းနေပါသည် — ရပ်ရန် နှိပ်ပါ"
-                  : "အသံဖမ်းရန် အနီရောင်ခလုတ်ကို နှိပ်ပါ"}
-              </span>
+              {/* Real-Time 28-Bar Hairline Audio Waveform */}
+              <div
+                className="flex flex-1 items-center justify-between gap-[2px] h-11 min-w-0 px-1"
+                aria-hidden="true"
+              >
+                {waveformBars.map((heightPct, idx) => (
+                  <div
+                    key={idx}
+                    className={cn(
+                      "w-[2px] rounded-full transition-[height,background-color] duration-75 ease-out",
+                      isRecordingVoice
+                        ? "bg-[#E11D48]"
+                        : "bg-[#D6D3D1] dark:bg-[#3F3F46]"
+                    )}
+                    style={{ height: isRecordingVoice ? `${heightPct}%` : "14%" }}
+                  />
+                ))}
+              </div>
+
+              {/* Crisp Tabular Timer */}
+              <div className="shrink-0 text-xl sm:text-2xl font-light tracking-tight tabular-nums text-[#1C1917] dark:text-[#F5F5F4] min-w-[60px] text-right">
+                {formatRecordTimer(recordingSeconds)}
+              </div>
+            </div>
+
+            {/* Subtle Mic Filter Mode Pill + Upload Action */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-[#E7E5E4]/70 dark:border-[#3F3F46]/70">
+              {!isRecordingVoice ? (
+                <div
+                  role="group"
+                  aria-label="Mic filter mode"
+                  className="inline-flex items-center rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#F0EDE8]/70 dark:bg-[#27272A] p-0.5"
+                >
+                  {(
+                    [
+                      { id: "raw", label: "Studio Raw (ကြည်လင်ပြတ်သား)" },
+                      { id: "light", label: "Light Filter" },
+                    ] as const
+                  ).map((mode) => {
+                    const active = micFilterMode === mode.id
+                    return (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic(6)
+                          setMicFilterMode(mode.id)
+                        }}
+                        className={cn(
+                          "rounded-full px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer font-myanmar",
+                          active
+                            ? "bg-white dark:bg-[#18181B] text-[#1C1917] dark:text-[#F5F5F4] shadow-2xs"
+                            : "text-[#57534E] dark:text-[#A1A1AA] hover:text-[#1C1917] dark:hover:text-[#F5F5F4]"
+                        )}
+                      >
+                        {mode.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-xs text-[#E11D48] font-medium font-myanmar">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#E11D48] animate-pulse" />
+                  အသံဖမ်းနေပါသည် — ရပ်ရန် နှိပ်ပါ
+                </span>
+              )}
 
               {!isRecordingVoice && (
                 <>

@@ -81,6 +81,8 @@ export type EditorialTone =
 
 export type EditorialLength = "short" | "medium" | "detailed"
 
+export type MicFilterMode = "raw" | "light"
+
 export interface ShopProfile {
   name: string
   phone: string
@@ -133,6 +135,7 @@ interface ContentState {
   editorialLength: EditorialLength
   editorialFormat: EditorialFormat
   editorialResult: EditorialResult | null
+  micFilterMode: MicFilterMode
   isSyncing: boolean
   setDraftInput: (input: Partial<GeneratorFormValues>) => void
   setTextPostResult: (result: GeneratedContent | null) => void
@@ -163,6 +166,7 @@ interface ContentState {
   setEditorialLength: (length: EditorialLength) => void
   setEditorialFormat: (format: EditorialFormat) => void
   setEditorialResult: (result: EditorialResult | null) => void
+  setMicFilterMode: (mode: MicFilterMode) => void
   clearUploadedVideo: () => void
   saveToVault: (
     item: Omit<SavedVaultItem, "id" | "status"> & {
@@ -223,6 +227,7 @@ export const useContentStore = create<ContentState>()(
       editorialLength: "medium",
       editorialFormat: "fb_sales",
       editorialResult: null,
+      micFilterMode: "raw",
       isSyncing: false,
 
       setDraftInput: (input) =>
@@ -316,6 +321,7 @@ export const useContentStore = create<ContentState>()(
       setEditorialLength: (editorialLength) => set({ editorialLength }),
       setEditorialFormat: (editorialFormat) => set({ editorialFormat }),
       setEditorialResult: (editorialResult) => set({ editorialResult }),
+      setMicFilterMode: (micFilterMode) => set({ micFilterMode }),
       addCustomPronunciation: (word, phonetic) =>
         set((state) => {
           const cleanWord = word.trim()
@@ -491,6 +497,7 @@ export const useContentStore = create<ContentState>()(
         editorialLength: state.editorialLength ?? "medium",
         editorialFormat: state.editorialFormat ?? "fb_sales",
         editorialResult: state.editorialResult ?? null,
+        micFilterMode: state.micFilterMode ?? "raw",
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState as Partial<ContentState> | undefined) ?? {}

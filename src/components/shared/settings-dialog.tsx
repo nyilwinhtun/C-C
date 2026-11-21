@@ -8,19 +8,37 @@ import {
   isValidGeminiApiKey,
   type AIProvider,
 } from "@/store/useUIStore"
-import { useContentStore, type ContentBackupData } from "@/store/useContentStore"
 import {
-  BUSINESS_CATEGORIES,
-  DEFAULT_ONLINE_SHOP_CTA_MY,
-  isShoppingCategory,
+  useContentStore,
+  type ContentBackupData,
+  type MicFilterMode,
+  type ShopProfile,
+} from "@/store/useContentStore"
+import {
   normalizeBusinessCategory,
-  type BusinessCategory,
 } from "@/types"
 import { useShallow } from "zustand/react/shallow"
-import { Download, Eye, EyeOff, Globe, Link, LogOut, Moon, Settings, ShieldAlert, Sun, Upload } from "lucide-react"
+import {
+  ChevronDown,
+  Download,
+  Eye,
+  EyeOff,
+  Globe,
+  Link,
+  LogOut,
+  Mic,
+  Moon,
+  Plus,
+  RefreshCw,
+  Settings,
+  ShieldAlert,
+  Sun,
+  Trash2,
+  Upload,
+} from "lucide-react"
 import { toast } from "@/components/ui/sonner"
 import { SquircleIcon } from "@/components/shared/squircle-icon"
-import { triggerHaptic } from "@/lib/utils"
+import { cn, triggerHaptic } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 
 import { Button } from "@/components/ui/button"
@@ -32,17 +50,17 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-
 import { Select } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 
-const PRESET_MODELS: Record<AIProvider, string[]> = {
-  gemini: [
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash-lite",
-    "gemini-2.0-flash",
-  ],
+const GEMINI_PRESET_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+] as const
+
+const PRESET_MODELS: Record<AIProvider, readonly string[]> = {
+  gemini: GEMINI_PRESET_MODELS,
   groq: [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
@@ -139,10 +157,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     autoAppendShopCta,
     savedVault,
     generatedHistory,
-    setBrandSignature,
-    setBusinessCategory,
-    setCustomNiche,
-    setAutoAppendShopCta,
+    micFilterMode,
+    voiceDnaSamples,
+    shopProfile,
+    setMicFilterMode,
+    setVoiceDnaSamples,
+    setShopProfile,
     importBackup,
   } = useContentStore(
     useShallow((state) => ({
@@ -152,26 +172,73 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       autoAppendShopCta: state.autoAppendShopCta,
       savedVault: state.savedVault,
       generatedHistory: state.generatedHistory,
-      setBrandSignature: state.setBrandSignature,
-      setBusinessCategory: state.setBusinessCategory,
-      setCustomNiche: state.setCustomNiche,
-      setAutoAppendShopCta: state.setAutoAppendShopCta,
+      micFilterMode: state.micFilterMode,
+      voiceDnaSamples: state.voiceDnaSamples,
+      shopProfile: state.shopProfile,
+      setMicFilterMode: state.setMicFilterMode,
+      setVoiceDnaSamples: state.setVoiceDnaSamples,
+      setShopProfile: state.setShopProfile,
       importBackup: state.importBackup,
     }))
   )
 
+  // Group 1: API & Model state
   const [selectedProvider, setSelectedProvider] = useState<AIProvider>(aiProvider)
-  const [apiKeyInput, setApiKeyInput] = useState(apiKeys[aiProvider] ?? "")
-  const [modelInput, setModelInput] = useState(models[aiProvider] || DEFAULT_MODELS[aiProvider])
-  const [signature, setSignature] = useState(brandSignature)
-  const [categoryInput, setCategoryInput] = useState<BusinessCategory>(businessCategory)
-  const [customNicheInput, setCustomNicheInput] = useState(customNiche)
-  const [autoCtaInput, setAutoCtaInput] = useState<boolean>(autoAppendShopCta)
-  const [showKey, setShowKey] = useState(false)
+  const [geminiKeyInput, setGeminiKeyInput] = useState(apiKeys.gemini ?? "")
+  const [geminiModelInput, setGeminiModelInput] = useState(
+    models.gemini || DEFAULT_MODELS.gemini
+  )
+  const [geminiCustomMode, setGeminiCustomMode] = useState(false)
+  const [openrouterKeyInput, setOpenrouterKeyInput] = useState(apiKeys.openrouter ?? "")
+  const [openrouterModelInput, setOpenrouterModelInput] = useState(
+    models.openrouter || DEFAULT_MODELS.openrouter
+  )
+  const [groqKeyInput, setGroqKeyInput] = useState(apiKeys.groq ?? "")
+  const [groqModelInput, setGroqModelInput] = useState(
+    models.groq || DEFAULT_MODELS.groq
+  )
+  const [showGeminiKey, setShowGeminiKey] = useState(false)
+  const [showAdvancedApi, setShowAdvancedApi] = useState(false)
+
+  // Group 2: Studio Preferences state
+  const [micModeInput, setMicModeInput] = useState<MicFilterMode>(micFilterMode)
+
+  // Group 3: Brand & Voice DNA state
+  const [dnaSamplesInput, setDnaSamplesInput] = useState<string[]>(voiceDnaSamples)
+  const [shopProfileInput, setShopProfileInput] = useState<ShopProfile>(shopProfile)
+
   const [loading, setLoading] = useState(false)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (open) {
+      const initialGeminiModel = models.gemini || DEFAULT_MODELS.gemini
+      const isGeminiCustom =
+        !GEMINI_PRESET_MODELS.includes(
+          initialGeminiModel as (typeof GEMINI_PRESET_MODELS)[number]
+        ) && Boolean(initialGeminiModel)
+
+      setSelectedProvider(aiProvider)
+      setGeminiKeyInput(apiKeys.gemini ?? "")
+      setGeminiModelInput(initialGeminiModel)
+      setGeminiCustomMode(isGeminiCustom)
+      setOpenrouterKeyInput(apiKeys.openrouter ?? "")
+      setOpenrouterModelInput(models.openrouter || DEFAULT_MODELS.openrouter)
+      setGroqKeyInput(apiKeys.groq ?? "")
+      setGroqModelInput(models.groq || DEFAULT_MODELS.groq)
+      setShowGeminiKey(false)
+      setShowAdvancedApi(aiProvider !== "gemini" || isGeminiCustom)
+      setMicModeInput(micFilterMode)
+      setDnaSamplesInput(
+        voiceDnaSamples.length > 0 ? [...voiceDnaSamples] : ["", "", ""]
+      )
+      setShopProfileInput({ ...shopProfile })
+    }
+    // Re-sync local form state only when the dialog opens
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   const handleSignOut = async () => {
     setLoggingOut(true)
@@ -188,57 +255,42 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     }
   }
 
-  const currentPresets = PRESET_MODELS[selectedProvider]
-  const isPreset = currentPresets.includes(modelInput)
-  const [isCustomMode, setIsCustomMode] = useState(!isPreset && Boolean(modelInput))
-
-  useEffect(() => {
-    if (open) {
-      const initialKey = apiKeys[aiProvider] ?? ""
-      const initialModel = models[aiProvider] || DEFAULT_MODELS[aiProvider]
-      setSelectedProvider(aiProvider)
-      setApiKeyInput(initialKey)
-      setModelInput(initialModel)
-      setSignature(brandSignature)
-      setCategoryInput(businessCategory)
-      setCustomNicheInput(customNiche)
-      setAutoCtaInput(autoAppendShopCta)
-      setShowKey(false)
-      setIsCustomMode(!PRESET_MODELS[aiProvider].includes(initialModel) && Boolean(initialModel))
-    }
-    // Only re-sync local form state when the dialog opens
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
-
-  const handleProviderChange = (provider: AIProvider) => {
-    setSelectedProvider(provider)
-    const providerKey = apiKeys[provider] ?? ""
-    const providerModel = models[provider] || DEFAULT_MODELS[provider]
-    setApiKeyInput(providerKey)
-    setModelInput(providerModel)
-    setShowKey(false)
-    setIsCustomMode(!PRESET_MODELS[provider].includes(providerModel) && Boolean(providerModel))
-  }
-
-  const handleModelSelect = (val: string) => {
+  const handleGeminiModelSelect = (val: string) => {
     if (val === "custom") {
-      setIsCustomMode(true)
+      setGeminiCustomMode(true)
+      setShowAdvancedApi(true)
     } else {
-      setIsCustomMode(false)
-      setModelInput(val)
+      setGeminiCustomMode(false)
+      setGeminiModelInput(val)
     }
   }
 
-  const selectedModelValue = isCustomMode ? "custom" : isPreset ? modelInput : "custom"
+  const isGeminiPreset = GEMINI_PRESET_MODELS.includes(
+    geminiModelInput as (typeof GEMINI_PRESET_MODELS)[number]
+  )
+  const selectedGeminiModelValue =
+    geminiCustomMode || !isGeminiPreset ? "custom" : geminiModelInput
+
+  const visibleDnaCount = Math.min(
+    3,
+    Math.max(1, dnaSamplesInput.filter((s) => s.trim().length > 0).length + 1)
+  )
+
+  const handleDnaSampleChange = (idx: number, val: string) => {
+    const next = [...dnaSamplesInput]
+    while (next.length <= idx) next.push("")
+    next[idx] = val
+    setDnaSamplesInput(next.slice(0, 3))
+  }
 
   const handleExportBackup = () => {
     const payload: ContentBackupData = {
       version: 1,
       exportedAt: new Date().toISOString(),
-      brandSignature: signature,
-      businessCategory: categoryInput,
-      customNiche: customNicheInput.trim(),
-      autoAppendShopCta: autoCtaInput,
+      brandSignature,
+      businessCategory,
+      customNiche,
+      autoAppendShopCta,
       savedVault,
       generatedHistory,
     }
@@ -275,19 +327,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         return
       }
 
-      importBackup(parsed)
-      if (typeof parsed.brandSignature === "string") {
-        setSignature(parsed.brandSignature)
-      }
-      if (parsed.businessCategory) {
-        setCategoryInput(normalizeBusinessCategory(parsed.businessCategory))
-      }
-      if (typeof parsed.customNiche === "string") {
-        setCustomNicheInput(parsed.customNiche)
-      }
-      if (typeof parsed.autoAppendShopCta === "boolean") {
-        setAutoCtaInput(parsed.autoAppendShopCta)
-      }
+      importBackup({
+        ...parsed,
+        businessCategory: parsed.businessCategory
+          ? normalizeBusinessCategory(parsed.businessCategory)
+          : undefined,
+      })
       toast.success(t(language, "settings.restoreSuccess"))
     } catch {
       toast.error(t(language, "settings.restoreError"))
@@ -328,315 +373,596 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     }
   }
 
+  const handleSaveSettings = () => {
+    const trimmedGeminiKey = geminiKeyInput.trim()
+    if (trimmedGeminiKey && !isValidGeminiApiKey(trimmedGeminiKey)) {
+      toast.error(
+        "Invalid Gemini API key. Key must start with AIza or AQ. and be at least 20 characters."
+      )
+      return
+    }
+
+    const normalizedGeminiModel = geminiModelInput.trim() || DEFAULT_MODELS.gemini
+    const normalizedOpenrouterModel =
+      openrouterModelInput.trim() || DEFAULT_MODELS.openrouter
+    const normalizedGroqModel = groqModelInput.trim() || DEFAULT_MODELS.groq
+
+    setAIProvider(selectedProvider)
+    setProviderApiKey("gemini", trimmedGeminiKey)
+    setProviderModel("gemini", normalizedGeminiModel)
+    setProviderApiKey("openrouter", openrouterKeyInput.trim())
+    setProviderModel("openrouter", normalizedOpenrouterModel)
+    setProviderApiKey("groq", groqKeyInput.trim())
+    setProviderModel("groq", normalizedGroqModel)
+
+    setMicFilterMode(micModeInput)
+    setVoiceDnaSamples(dnaSamplesInput)
+    setShopProfile({
+      name: shopProfileInput.name.trim(),
+      phone: shopProfileInput.phone.trim(),
+      address: shopProfileInput.address.trim(),
+      autoAppend: shopProfileInput.autoAppend,
+    })
+
+    setLoading(true)
+    setTimeout(() => {
+      setLoading(false)
+      toast.success(t(language, "settings.saveSuccess"))
+      onOpenChange(false)
+    }, 350)
+  }
+
+  const isGeminiSaved = Boolean(apiKeys.gemini?.trim())
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md max-h-[90dvh] overflow-y-auto">
-        <div className="flex items-center gap-2.5 pr-8">
+      <DialogContent className="sm:max-w-lg max-h-[90dvh] overflow-y-auto bg-[#FAF8F5] dark:bg-[#18181B] border-[#E7E5E4] dark:border-[#3F3F46] p-5 sm:p-6">
+        <div className="flex items-center gap-3 pr-8">
           <SquircleIcon icon={Settings} tone="slate" size="md" />
           <div className="min-w-0">
-            <DialogTitle>{t(language, "settings.title")}</DialogTitle>
-            <DialogDescription>{t(language, "settings.description")}</DialogDescription>
+            <DialogTitle className="text-base sm:text-lg font-semibold text-[#1C1917] dark:text-[#F5F5F4]">
+              {t(language, "settings.title")}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-[#57534E] dark:text-[#A1A1AA]">
+              {t(language, "settings.description")}
+            </DialogDescription>
           </div>
         </div>
+
         <div className="space-y-5 pt-2">
-          {/* Quick iOS App Preferences & Account */}
-          <div className="rounded-[16px] border-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-[#F2F2F7]/70 dark:bg-[#2C2C2E]/70 p-3 space-y-2.5">
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  triggerHaptic(8)
-                  setLanguage(language === "en" ? "my" : "en")
-                }}
-                className="flex-1 h-9 text-xs font-medium gap-1.5 bg-white/80 dark:bg-[#1C1C1E]/80"
-                aria-label="Toggle language"
-              >
-                <Globe className="h-4 w-4 text-muted-foreground shrink-0" strokeWidth={1.75} aria-hidden="true" />
-                <span>{language === "en" ? "EN (English)" : "MY (မြန်မာ)"}</span>
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  triggerHaptic(8)
-                  toggleTheme()
-                }}
-                className="flex-1 h-9 text-xs font-medium gap-1.5 bg-white/80 dark:bg-[#1C1C1E]/80"
-                aria-label="Toggle dark mode"
-              >
-                {theme === "dark" ? (
-                  <>
-                    <Sun className="h-4 w-4 text-amber-500 shrink-0" strokeWidth={1.75} aria-hidden="true" />
-                    <span>Light Mode</span>
-                  </>
-                ) : (
-                  <>
-                    <Moon className="h-4 w-4 text-muted-foreground shrink-0" strokeWidth={1.75} aria-hidden="true" />
-                    <span>OLED Dark</span>
-                  </>
+          {/* 1. ချိတ်ဆက်မှု (API & Model) */}
+          <section className="space-y-4">
+            <h3 className="px-1 text-xs font-semibold tracking-wide text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+              ချိတ်ဆက်မှု (API & Model)
+            </h3>
+
+            <div className="rounded-[20px] border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-4 space-y-4">
+              {/* Primary Gemini API Key */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <label
+                      htmlFor="api-key-gemini"
+                      className="text-sm font-medium text-[#1C1917] dark:text-[#F5F5F4]"
+                    >
+                      Gemini API Key
+                    </label>
+                    {isGeminiSaved && (
+                      <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                        Saved ✓
+                      </span>
+                    )}
+                  </div>
+                  <a
+                    href={PROVIDER_INFO.gemini.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-[#57534E] dark:text-[#A1A1AA] underline underline-offset-4 hover:text-[#1C1917] dark:hover:text-[#F5F5F4]"
+                  >
+                    <Link className="h-3 w-3 shrink-0 opacity-70" aria-hidden="true" />
+                    <span>{PROVIDER_INFO.gemini.linkLabel}</span>
+                  </a>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    id="api-key-gemini"
+                    type={showGeminiKey ? "text" : "password"}
+                    value={geminiKeyInput}
+                    onChange={(e) => setGeminiKeyInput(e.target.value)}
+                    placeholder={`${t(language, "settings.apiKeyPlaceholder")} (${PROVIDER_INFO.gemini.placeholder})`}
+                    disabled={loading}
+                    className="rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] border-[#E7E5E4] dark:border-[#3F3F46]"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setShowGeminiKey((prev) => !prev)}
+                    aria-label={showGeminiKey ? "Hide Gemini key" : "Show Gemini key"}
+                    className="shrink-0 rounded-xl"
+                  >
+                    {showGeminiKey ? (
+                      <EyeOff className="h-4 w-4" aria-hidden="true" />
+                    ) : (
+                      <Eye className="h-4 w-4" aria-hidden="true" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Primary Model Selector */}
+              <div className="space-y-2 pt-3 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80">
+                <label
+                  htmlFor="gemini-model-select"
+                  className="text-sm font-medium text-[#1C1917] dark:text-[#F5F5F4]"
+                >
+                  {t(language, "settings.model")}
+                </label>
+                <Select
+                  id="gemini-model-select"
+                  value={selectedGeminiModelValue}
+                  onChange={(e) =>
+                    handleGeminiModelSelect((e.target as HTMLSelectElement).value)
+                  }
+                  className="rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] border-[#E7E5E4] dark:border-[#3F3F46]"
+                >
+                  {GEMINI_PRESET_MODELS.map((preset) => (
+                    <option key={preset} value={preset}>
+                      {MODEL_LABELS[preset] ?? preset}
+                    </option>
+                  ))}
+                  <option value="custom">Custom Model (ကိုယ်တိုင်ရိုက်ထည့်ရန်)</option>
+                </Select>
+              </div>
+
+              {/* Collapsible Advanced Accordion */}
+              <div className="pt-2 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedApi((prev) => !prev)}
+                  aria-expanded={showAdvancedApi}
+                  className="flex w-full items-center justify-between py-1 text-xs font-medium text-[#57534E] dark:text-[#A1A1AA] hover:text-[#1C1917] dark:hover:text-[#F5F5F4] transition-colors cursor-pointer font-myanmar"
+                >
+                  <span>အဆင့်မြင့် ချိတ်ဆက်မှု (Advanced)</span>
+                  <ChevronDown
+                    className={cn(
+                      "h-4 w-4 transition-transform duration-200",
+                      showAdvancedApi && "rotate-180"
+                    )}
+                  />
+                </button>
+
+                {showAdvancedApi && (
+                  <div className="mt-3 space-y-4 pt-3 border-t border-[#E7E5E4]/60 dark:border-[#3F3F46]/60">
+                    {/* Custom Gemini Model ID */}
+                    {(geminiCustomMode || !isGeminiPreset) && (
+                      <div className="space-y-1.5">
+                        <label
+                          htmlFor="custom-gemini-model"
+                          className="text-xs font-medium text-[#57534E] dark:text-[#A1A1AA]"
+                        >
+                          Custom Gemini Model ID
+                        </label>
+                        <Input
+                          id="custom-gemini-model"
+                          type="text"
+                          value={geminiModelInput}
+                          onChange={(e) => setGeminiModelInput(e.target.value)}
+                          placeholder="e.g. gemini-2.5-flash"
+                          className="h-9 rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] text-xs"
+                        />
+                      </div>
+                    )}
+
+                    {/* Active Provider Switcher */}
+                    <div className="space-y-1.5">
+                      <label
+                        htmlFor="active-provider-select"
+                        className="text-xs font-medium text-[#57534E] dark:text-[#A1A1AA]"
+                      >
+                        {t(language, "settings.aiProvider")}
+                      </label>
+                      <Select
+                        id="active-provider-select"
+                        value={selectedProvider}
+                        onChange={(e) =>
+                          setSelectedProvider(
+                            (e.target as HTMLSelectElement).value as AIProvider
+                          )
+                        }
+                        className="h-9 rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] text-xs"
+                      >
+                        <option value="gemini">Google Gemini (Default)</option>
+                        <option value="openrouter">OpenRouter</option>
+                        <option value="groq">Groq</option>
+                      </Select>
+                    </div>
+
+                    {/* Fallback Keys: OpenRouter & Groq */}
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <label
+                            htmlFor="api-key-openrouter"
+                            className="text-xs font-medium text-[#57534E] dark:text-[#A1A1AA]"
+                          >
+                            OpenRouter API Key (Fallback)
+                          </label>
+                          <a
+                            href={PROVIDER_INFO.openrouter.link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] underline underline-offset-2"
+                          >
+                            Get key
+                          </a>
+                        </div>
+                        <Input
+                          id="api-key-openrouter"
+                          type="password"
+                          value={openrouterKeyInput}
+                          onChange={(e) => setOpenrouterKeyInput(e.target.value)}
+                          placeholder={PROVIDER_INFO.openrouter.placeholder}
+                          className="h-9 rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] text-xs"
+                        />
+                        {selectedProvider === "openrouter" && (
+                          <Select
+                            value={
+                              PRESET_MODELS.openrouter.includes(openrouterModelInput)
+                                ? openrouterModelInput
+                                : "custom"
+                            }
+                            onChange={(e) => {
+                              const v = (e.target as HTMLSelectElement).value
+                              if (v !== "custom") setOpenrouterModelInput(v)
+                            }}
+                            className="h-9 rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] text-xs mt-1.5"
+                          >
+                            {PRESET_MODELS.openrouter.map((m) => (
+                              <option key={m} value={m}>
+                                {MODEL_LABELS[m] ?? m}
+                              </option>
+                            ))}
+                          </Select>
+                        )}
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <label
+                            htmlFor="api-key-groq"
+                            className="text-xs font-medium text-[#57534E] dark:text-[#A1A1AA]"
+                          >
+                            Groq API Key (Fallback)
+                          </label>
+                          <a
+                            href={PROVIDER_INFO.groq.link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] underline underline-offset-2"
+                          >
+                            Get key
+                          </a>
+                        </div>
+                        <Input
+                          id="api-key-groq"
+                          type="password"
+                          value={groqKeyInput}
+                          onChange={(e) => setGroqKeyInput(e.target.value)}
+                          placeholder={PROVIDER_INFO.groq.placeholder}
+                          className="h-9 rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] text-xs"
+                        />
+                        {selectedProvider === "groq" && (
+                          <Select
+                            value={
+                              PRESET_MODELS.groq.includes(groqModelInput)
+                                ? groqModelInput
+                                : "custom"
+                            }
+                            onChange={(e) => {
+                              const v = (e.target as HTMLSelectElement).value
+                              if (v !== "custom") setGroqModelInput(v)
+                            }}
+                            className="h-9 rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] text-xs mt-1.5"
+                          >
+                            {PRESET_MODELS.groq.map((m) => (
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
+                            ))}
+                          </Select>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2 text-[11px] text-[#57534E] dark:text-[#A1A1AA]">
+                      <ShieldAlert className="h-3.5 w-3.5 shrink-0 mt-0.5" aria-hidden="true" />
+                      <span>{t(language, "settings.apiKeyStored")}</span>
+                    </div>
+                  </div>
                 )}
-              </Button>
+              </div>
             </div>
-            {user && (
-              <div className="flex items-center justify-between gap-2 pt-1 border-t-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)]">
-                <span className="text-xs text-muted-foreground truncate px-1">
-                  {user.email || "Signed in"}
-                </span>
+          </section>
+
+          {/* 2. ဖန်တီးမှု ပုံစံ (Studio Preferences) */}
+          <section className="space-y-4">
+            <h3 className="px-1 text-xs font-semibold tracking-wide text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+              ဖန်တီးမှု ပုံစံ (Studio Preferences)
+            </h3>
+
+            <div className="rounded-[20px] border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-4 space-y-4">
+              {/* Appearance (Light / Dark Mode) */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                    အသွင်အပြင် (Appearance)
+                  </p>
+                  <p className="text-xs text-[#57534E] dark:text-[#A1A1AA]">
+                    {theme === "dark" ? "Soft Studio Charcoal" : "Warm Paper Light"}
+                  </p>
+                </div>
+
+                <div className="inline-flex rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (theme !== "light") {
+                        triggerHaptic(8)
+                        toggleTheme()
+                      }
+                    }}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all cursor-pointer",
+                      theme === "light"
+                        ? "bg-white text-[#1C1917] shadow-2xs"
+                        : "text-[#A1A1AA] hover:text-[#F5F5F4]"
+                    )}
+                  >
+                    <Sun className="h-3.5 w-3.5 text-amber-500" />
+                    <span>Light</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (theme !== "dark") {
+                        triggerHaptic(8)
+                        toggleTheme()
+                      }
+                    }}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all cursor-pointer",
+                      theme === "dark"
+                        ? "bg-[#27272A] text-[#F5F5F4] shadow-2xs"
+                        : "text-[#57534E] hover:text-[#1C1917]"
+                    )}
+                  >
+                    <Moon className="h-3.5 w-3.5" />
+                    <span>Dark</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* အသံဖမ်း ကြည်လင်မှု (Studio Raw / Light Filter) */}
+              <div className="pt-3 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <Mic className="h-4 w-4 text-[#57534E] dark:text-[#A1A1AA]" />
+                  <p className="text-sm font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                    အသံဖမ်း ကြည်လင်မှု
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      {
+                        id: "raw",
+                        title: "Studio Raw",
+                        sub: "ကြည်လင်ပြတ်သား",
+                      },
+                      {
+                        id: "light",
+                        title: "Light Filter",
+                        sub: "ဆူညံသံအနည်းငယ်လျှော့",
+                      },
+                    ] as const
+                  ).map((opt) => {
+                    const active = micModeInput === opt.id
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic(6)
+                          setMicModeInput(opt.id)
+                        }}
+                        className={cn(
+                          "flex flex-col items-start rounded-xl border p-2.5 text-left transition-all cursor-pointer",
+                          active
+                            ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#FAF8F5] dark:bg-[#18181B]"
+                            : "border-[#E7E5E4] dark:border-[#3F3F46] bg-transparent hover:bg-[#FAF8F5]/60 dark:hover:bg-[#18181B]/60"
+                        )}
+                      >
+                        <span className="text-xs font-semibold text-[#1C1917] dark:text-[#F5F5F4]">
+                          {opt.title}
+                        </span>
+                        <span className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                          {opt.sub}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Language Row */}
+              <div className="flex items-center justify-between gap-3 pt-3 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-[#57534E] dark:text-[#A1A1AA]" />
+                  <span className="text-sm font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                    ဘာသာစကား (Language)
+                  </span>
+                </div>
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
-                  onClick={handleSignOut}
-                  disabled={loggingOut}
-                  className="h-8 px-2.5 text-xs font-medium text-destructive hover:text-destructive hover:bg-destructive/10 gap-1.5 shrink-0"
+                  onClick={() => {
+                    triggerHaptic(8)
+                    setLanguage(language === "en" ? "my" : "en")
+                  }}
+                  className="h-8 rounded-xl text-xs font-medium bg-[#FAF8F5] dark:bg-[#18181B] border-[#E7E5E4] dark:border-[#3F3F46]"
                 >
-                  <LogOut className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
-                  <span>{t(language, "header.signOut")}</span>
+                  {language === "en" ? "EN (English)" : "MY (မြန်မာ)"}
                 </Button>
               </div>
-            )}
-          </div>
+            </div>
+          </section>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium">{t(language, "settings.aiProvider")}</label>
-            <Select
-              value={selectedProvider}
-              onChange={(e) => handleProviderChange((e.target as HTMLSelectElement).value as AIProvider)}
-            >
-              <option value="gemini">Google Gemini</option>
-              <option value="openrouter">OpenRouter</option>
-              <option value="groq">Groq</option>
-            </Select>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground pt-0.5">
-              {(["gemini", "openrouter", "groq"] as const).map((p, idx) => {
-                const isSaved = Boolean(apiKeys[p]?.trim())
-                return (
-                  <span key={p} className="inline-flex items-center gap-1">
-                    {idx > 0 && <span aria-hidden="true" className="mr-1 opacity-50">•</span>}
-                    <span className="font-medium text-foreground/80">
-                      {PROVIDER_INFO[p].shortLabel}:
-                    </span>
-                    <span
-                      className={
-                        isSaved
-                          ? "text-emerald-600 dark:text-emerald-400 font-medium"
-                          : "text-muted-foreground"
-                      }
-                    >
-                      {isSaved ? "Saved ✓" : "Empty"}
-                    </span>
+          {/* 3. ကိုယ်ပိုင် အချက်အလက် (Brand & Voice DNA) */}
+          <section className="space-y-4">
+            <h3 className="px-1 text-xs font-semibold tracking-wide text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+              ကိုယ်ပိုင် အချက်အလက် (Brand & Voice DNA)
+            </h3>
+
+            <div className="rounded-[20px] border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-4 space-y-4">
+              {/* Personal Voice DNA Samples */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                    Personal Voice DNA (ကိုယ်ပိုင် အရေးအသား)
+                  </p>
+                  <span className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                    နမူနာ ၁–၃ ခု
                   </span>
-                )
-              })}
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium">{t(language, "settings.model")}</label>
-            <Select value={selectedModelValue} onChange={(e) => handleModelSelect((e.target as HTMLSelectElement).value)}>
-              {currentPresets.map((preset) => (
-                <option key={preset} value={preset}>
-                  {MODEL_LABELS[preset] ?? preset}
-                </option>
-              ))}
-              <option value="custom">Custom Model (ကိုယ်တိုင်ရိုက်ထည့်ရန်)</option>
-            </Select>
-            {(isCustomMode || !isPreset) && (
-              <Input
-                type="text"
-                value={modelInput}
-                onChange={(e) => setModelInput(e.target.value)}
-                placeholder={
-                  selectedProvider === "gemini"
-                    ? "Enter model (e.g. gemini-2.5-flash)"
-                    : "Enter custom model name"
-                }
-                className="mt-2"
-              />
-            )}
-          </div>
-          <div className="space-y-1.5">
-            {(() => {
-              const info = PROVIDER_INFO[selectedProvider]
-              const isSaved = Boolean(apiKeys[selectedProvider]?.trim())
-              return (
-                <>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <label htmlFor={`api-key-${selectedProvider}`} className="text-sm font-medium">
-                        {info.label} {t(language, "settings.apiKey")}
-                      </label>
-                      {isSaved && (
-                        <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                          Saved ✓
-                        </span>
-                      )}
-                    </div>
-                    <a
-                      href={info.link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-primary underline underline-offset-4 hover:text-primary/80"
-                    >
-                      <Link className="h-3 w-3 shrink-0 opacity-70" aria-hidden="true" />
-                      <span>{info.linkLabel}</span>
-                    </a>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Input
-                      id={`api-key-${selectedProvider}`}
-                      type={showKey ? "text" : "password"}
-                      value={apiKeyInput}
-                      onChange={(e) => setApiKeyInput(e.target.value)}
-                      placeholder={`${t(language, "settings.apiKeyPlaceholder")} (${info.placeholder})`}
-                      disabled={loading}
-                    />
-                    <Button
+                </div>
+
+                <div className="space-y-2">
+                  {Array.from({ length: visibleDnaCount }).map((_, idx) => {
+                    const val = dnaSamplesInput[idx] ?? ""
+                    return (
+                      <div key={idx} className="relative">
+                        <Textarea
+                          value={val}
+                          onChange={(e) => handleDnaSampleChange(idx, e.target.value)}
+                          rows={2}
+                          placeholder={`နမူနာပို့စ် ${idx + 1} (သင်အရင်က ရေးဖူးတဲ့ စာသားပုံစံ...)`}
+                          className="min-h-[68px] resize-y rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] border-[#E7E5E4] dark:border-[#3F3F46] pr-9 text-xs leading-relaxed font-myanmar"
+                          disabled={loading}
+                        />
+                        {val.trim().length > 0 && (
+                          <button
+                            type="button"
+                            aria-label="နမူနာ ဖျက်မည်"
+                            onClick={() => handleDnaSampleChange(idx, "")}
+                            className="absolute right-2.5 top-2 rounded-md p-1 text-[#57534E] hover:text-[#1C1917] dark:text-[#A1A1AA] dark:hover:text-[#F5F5F4] cursor-pointer"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+
+                  {visibleDnaCount < 3 && (
+                    <button
                       type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setShowKey((prev) => !prev)}
-                      aria-label={showKey ? `Hide ${info.label} key` : `Show ${info.label} key`}
+                      onClick={() => {
+                        const next = [...dnaSamplesInput]
+                        while (next.length < visibleDnaCount + 1) next.push("")
+                        setDnaSamplesInput(next)
+                      }}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-[#57534E] hover:text-[#1C1917] dark:text-[#A1A1AA] dark:hover:text-[#F5F5F4] cursor-pointer font-myanmar"
                     >
-                      {showKey ? (
-                        <EyeOff className="h-4 w-4" aria-hidden="true" />
-                      ) : (
-                        <Eye className="h-4 w-4" aria-hidden="true" />
-                      )}
-                    </Button>
-                  </div>
-                </>
-              )
-            })()}
-          </div>
-          <div className="space-y-1 pt-2 border-t border-border">
-            <div className="flex items-start gap-2 text-xs text-muted-foreground">
-              <ShieldAlert className="h-3 w-3 shrink-0 mt-0.5" aria-hidden="true" />
-              <span>{t(language, "settings.apiKeyStored")}</span>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label htmlFor="business-category" className="text-sm font-medium font-myanmar">
-              {t(language, "settings.businessCategory")}
-            </label>
-            <Select
-              id="business-category"
-              value={categoryInput}
-              onChange={(e) => {
-                const nextCat = (e.target as HTMLSelectElement).value as BusinessCategory
-                setCategoryInput(nextCat)
-                setAutoCtaInput(isShoppingCategory(nextCat))
-              }}
-              disabled={loading}
-            >
-              {BUSINESS_CATEGORIES.map((cat) => (
-                <option key={cat.value} value={cat.value}>
-                  {language === "my" ? `${cat.labelMy} (${cat.label})` : cat.label}
-                </option>
-              ))}
-            </Select>
-            {categoryInput === "custom" && (
-              <Input
-                id="custom-niche"
-                type="text"
-                value={customNicheInput}
-                onChange={(e) => setCustomNicheInput(e.target.value)}
-                placeholder={t(language, "settings.customNichePlaceholder")}
-                className="mt-2 font-myanmar text-sm"
-                disabled={loading}
-              />
-            )}
-            <p className="text-xs text-muted-foreground font-myanmar">
-              {t(language, "settings.businessCategoryHint")}
-            </p>
-          </div>
-          <div className="space-y-2">
-            <label htmlFor="brand-signature" className="text-sm font-medium font-myanmar">
-              {t(language, "settings.brandSignature")}
-            </label>
-            <Textarea
-              id="brand-signature"
-              rows={3}
-              value={signature}
-              onChange={(e) => setSignature(e.target.value)}
-              placeholder={t(language, "settings.brandSignaturePlaceholder")}
-              className="font-myanmar text-sm resize-y px-3 py-2.5 leading-relaxed"
-              disabled={loading}
-            />
-            <p className="text-xs text-muted-foreground font-myanmar">
-              {t(language, "settings.brandSignatureHint")}
-            </p>
-          </div>
-          <div className="rounded-[16px] border-[0.5px] border-[rgba(60,60,67,0.12)] dark:border-[rgba(84,84,88,0.36)] bg-[#F2F2F7]/70 dark:bg-[#2C2C2E]/70 p-3.5 space-y-2.5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="space-y-0.5">
-                <p className="text-sm font-medium font-myanmar">
-                  {t(language, "settings.autoAppendCta")}
-                </p>
-                <p className="text-xs text-muted-foreground font-myanmar">
-                  {t(language, "settings.autoAppendCtaHint")}
-                </p>
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>နမူနာ ထပ်ထည့်မည်</span>
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* Shop / Page Contact Footer */}
+              <div className="space-y-2.5 pt-3 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80">
+                <p className="text-sm font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                  ဆိုင် / Page ဆက်သွယ်ရန် (Contact Footer)
+                </p>
+
+                <div className="space-y-2">
+                  <Input
+                    value={shopProfileInput.name}
+                    onChange={(e) =>
+                      setShopProfileInput((prev) => ({ ...prev, name: e.target.value }))
+                    }
+                    placeholder="ဆိုင် / Page အမည်"
+                    className="h-9 rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] border-[#E7E5E4] dark:border-[#3F3F46] text-xs sm:text-sm font-myanmar"
+                    disabled={loading}
+                  />
+                  <Input
+                    value={shopProfileInput.phone}
+                    onChange={(e) =>
+                      setShopProfileInput((prev) => ({ ...prev, phone: e.target.value }))
+                    }
+                    placeholder="ဖုန်းနံပါတ် (ဥပမာ - 09-7xx-xxx-xxx)"
+                    className="h-9 rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] border-[#E7E5E4] dark:border-[#3F3F46] text-xs sm:text-sm"
+                    disabled={loading}
+                  />
+                  <Textarea
+                    value={shopProfileInput.address}
+                    onChange={(e) =>
+                      setShopProfileInput((prev) => ({
+                        ...prev,
+                        address: e.target.value,
+                      }))
+                    }
+                    rows={2}
+                    placeholder="လိပ်စာ / မှာယူရန် အချက်အလက်"
+                    className="min-h-[60px] rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] border-[#E7E5E4] dark:border-[#3F3F46] text-xs sm:text-sm font-myanmar"
+                    disabled={loading}
+                  />
+                </div>
+
+                <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] px-3 py-2.5">
+                  <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                    ပို့စ်အောက်ခြေတွင် အလိုအလျောက် ထည့်မည်
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={shopProfileInput.autoAppend}
+                    onChange={(e) =>
+                      setShopProfileInput((prev) => ({
+                        ...prev,
+                        autoAppend: e.target.checked,
+                      }))
+                    }
+                    className="h-4 w-4 accent-[#1C1917] dark:accent-[#F5F5F4]"
+                  />
+                </label>
+              </div>
+            </div>
+          </section>
+
+          {/* Compact Utility Row (Backup, Update, Account) */}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1 pt-1 text-xs text-[#57534E] dark:text-[#A1A1AA]">
+            <div className="flex items-center gap-3">
               <button
                 type="button"
-                role="switch"
-                aria-checked={autoCtaInput}
-                aria-label={t(language, "settings.autoAppendCta")}
-                onClick={() => {
-                  triggerHaptic(10)
-                  setAutoCtaInput((prev) => !prev)
-                }}
-                disabled={loading}
-                className={`relative inline-flex h-[30px] w-[50px] shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                  autoCtaInput ? "bg-[#34C759]" : "bg-neutral-300 dark:bg-neutral-600"
-                }`}
-              >
-                <span
-                  className={`pointer-events-none inline-block h-[26px] w-[26px] transform rounded-full bg-white shadow-md transition-transform duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] ${
-                    autoCtaInput ? "translate-x-5" : "translate-x-0"
-                  }`}
-                />
-              </button>
-            </div>
-            <p className="text-[11px] text-muted-foreground font-myanmar rounded-[12px] bg-white/80 dark:bg-[#1C1C1E]/80 px-3 py-2 border-[0.5px] border-[rgba(60,60,67,0.1)] dark:border-[rgba(84,84,88,0.3)]">
-              {DEFAULT_ONLINE_SHOP_CTA_MY}
-            </p>
-          </div>
-          <Separator />
-          <div className="space-y-2.5">
-            <div>
-              <p className="text-sm font-medium font-myanmar">
-                {t(language, "settings.backupTitle")}
-              </p>
-              <p className="text-xs text-muted-foreground font-myanmar leading-relaxed">
-                {t(language, "settings.backupDesc")}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
                 onClick={handleExportBackup}
                 disabled={loading}
-                className="font-myanmar"
+                className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#F5F5F4] cursor-pointer font-myanmar"
               >
-                <Download className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                {t(language, "settings.exportBackup")}
-              </Button>
-              <Button
+                <Download className="h-3.5 w-3.5" />
+                <span>Backup</span>
+              </button>
+              <button
                 type="button"
-                variant="outline"
-                size="sm"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={loading}
-                className="font-myanmar"
+                className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#F5F5F4] cursor-pointer font-myanmar"
               >
-                <Upload className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                {t(language, "settings.restoreBackup")}
-              </Button>
+                <Upload className="h-3.5 w-3.5" />
+                <span>Restore</span>
+              </button>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -645,61 +971,45 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 className="hidden"
                 aria-label={t(language, "settings.restoreBackup")}
               />
+              <button
+                type="button"
+                onClick={handleCheckForUpdate}
+                disabled={loading || checkingUpdate}
+                className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#F5F5F4] cursor-pointer font-myanmar"
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", checkingUpdate && "animate-spin")} />
+                <span>{checkingUpdate ? "Updating..." : "Update"}</span>
+              </button>
             </div>
+
+            {user && (
+              <button
+                type="button"
+                onClick={handleSignOut}
+                disabled={loggingOut}
+                className="inline-flex items-center gap-1 text-destructive hover:opacity-80 cursor-pointer"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span>{t(language, "header.signOut")}</span>
+              </button>
+            )}
           </div>
-          <Separator />
-          <div className="space-y-2">
+
+          {/* Primary Footer Actions */}
+          <div className="flex gap-2.5 pt-1">
             <Button
               type="button"
               variant="outline"
-              size="sm"
-              onClick={handleCheckForUpdate}
-              disabled={loading || checkingUpdate}
-              className="w-full font-myanmar"
+              onClick={() => onOpenChange(false)}
+              className="flex-1 rounded-xl border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A]"
             >
-              {checkingUpdate ? "စစ်ဆေးနေပါသည်..." : "🔄 ဗားရှင်းအသစ် စစ်ဆေးမည်"}
-            </Button>
-          </div>
-          <Separator />
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
               {t(language, "settings.cancel")}
             </Button>
             <Button
-              onClick={() => {
-                const trimmedKey = apiKeyInput.trim()
-                if (selectedProvider === "gemini" && trimmedKey && !isValidGeminiApiKey(trimmedKey)) {
-                  toast.error(
-                    "Invalid Gemini API key. Key must start with AIza or AQ. and be at least 20 characters."
-                  )
-                  return
-                }
-                const normalizedModel = modelInput.trim() || DEFAULT_MODELS[selectedProvider]
-                setAIProvider(selectedProvider)
-                setProviderApiKey(selectedProvider, trimmedKey)
-                setProviderModel(selectedProvider, normalizedModel)
-                setBrandSignature(signature)
-                setBusinessCategory(categoryInput)
-                setCustomNiche(customNicheInput.trim())
-                setAutoAppendShopCta(autoCtaInput)
-                setLoading(true)
-                setTimeout(() => {
-                  setLoading(false)
-                  toast.success(t(language, "settings.saveSuccess"))
-                  onOpenChange(false)
-                }, 600)
-              }}
-              disabled={
-                loading ||
-                (selectedProvider === aiProvider &&
-                  apiKeyInput.trim() === (apiKeys[selectedProvider] ?? "") &&
-                  (modelInput.trim() || DEFAULT_MODELS[selectedProvider]) ===
-                    (models[selectedProvider] || DEFAULT_MODELS[selectedProvider]) &&
-                  signature === brandSignature &&
-                  categoryInput === businessCategory &&
-                  customNicheInput.trim() === customNiche &&
-                  autoCtaInput === autoAppendShopCta)
-              }
+              type="button"
+              onClick={handleSaveSettings}
+              disabled={loading}
+              className="flex-1 rounded-xl bg-[#1C1917] hover:bg-[#292524] dark:bg-[#F5F5F4] dark:hover:bg-[#E7E5E4] text-[#FAF8F5] dark:text-[#18181B] font-medium"
             >
               {loading ? t(language, "settings.saveSaving") : t(language, "settings.save")}
             </Button>
