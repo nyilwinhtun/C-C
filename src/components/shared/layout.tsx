@@ -88,7 +88,7 @@ export function Layout() {
   const Page = pages[activePageKey] ?? GeneratorPage
 
   return (
-    <div className="flex h-screen bg-background text-foreground">
+    <div className="flex h-[100dvh] bg-background text-foreground">
       <Sidebar />
       <div
         className={cn(

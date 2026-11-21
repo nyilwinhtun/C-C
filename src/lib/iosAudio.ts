@@ -401,3 +401,61 @@ export function createWavAudioRecorder(
     },
   }
 }
+
+/**
+ * Share an audio Blob via the native iOS/Android Share Sheet (navigator.share),
+ * falling back to a standard <a download> on desktop or unsupported browsers.
+ */
+export async function shareAudioFile(params: {
+  blob?: Blob | null
+  url: string
+  title?: string
+  fileExtension?: string
+}): Promise<void> {
+  const ext = params.fileExtension || "wav"
+  const safeName = (params.title || "audio")
+    .replace(/[^a-zA-Z0-9\u1000-\u109F_-]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "audio"
+  const filename = `${safeName}.${ext}`
+
+  const triggerFallbackDownload = () => {
+    const link = document.createElement("a")
+    link.href = params.url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  try {
+    let blob = params.blob ?? null
+    if (!blob && params.url) {
+      const res = await fetch(params.url)
+      blob = await res.blob()
+    }
+    if (!blob || typeof navigator === "undefined" || typeof navigator.share !== "function") {
+      triggerFallbackDownload()
+      return
+    }
+
+    const mimeType =
+      blob.type ||
+      (ext === "mp3" ? "audio/mpeg" : ext === "m4a" ? "audio/mp4" : "audio/wav")
+    const file = new File([blob], filename, { type: mimeType })
+
+    if (typeof navigator.canShare === "function" && !navigator.canShare({ files: [file] })) {
+      triggerFallbackDownload()
+      return
+    }
+
+    await navigator.share({
+      files: [file],
+      title: params.title || "Content Creator Studio",
+    })
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return
+    }
+    triggerFallbackDownload()
+  }
+}

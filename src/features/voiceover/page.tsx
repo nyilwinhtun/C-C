@@ -21,6 +21,7 @@ import {
   createWavAudioRecorder,
   getAudioContextConstructor,
   setIosAudioSessionPlayback,
+  shareAudioFile,
   unlockIosAudio,
   type WavAudioRecorderHandle,
 } from "@/lib/iosAudio"
@@ -291,9 +292,30 @@ export function VoiceoverPage() {
 
   const wavRecorderRef = useRef<WavAudioRecorderHandle | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null)
   const recordTimerRef = useRef<number | null>(null)
   const recordingSecondsRef = useRef(0)
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
+
+  const acquireWakeLock = useCallback(async () => {
+    if (typeof navigator === "undefined" || !("wakeLock" in navigator)) return
+    try {
+      wakeLockRef.current = await navigator.wakeLock.request("screen")
+    } catch {
+      // Ignore if unsupported or blocked by battery saver
+    }
+  }, [])
+
+  const releaseWakeLock = useCallback(async () => {
+    if (!wakeLockRef.current) return
+    try {
+      await wakeLockRef.current.release()
+    } catch {
+      // Ignore release errors
+    } finally {
+      wakeLockRef.current = null
+    }
+  }, [])
 
   const stopRecorderResources = useCallback(() => {
     if (recordTimerRef.current !== null) {
@@ -304,8 +326,9 @@ export function VoiceoverPage() {
       streamRef.current.getTracks().forEach((track) => track.stop())
       streamRef.current = null
     }
+    void releaseWakeLock()
     setWaveformBars(Array(WAVEFORM_BAR_COUNT).fill(14))
-  }, [])
+  }, [releaseWakeLock])
 
   // Only stop active mic stream on unmount; never revoke generatedAudioUrl here
   useEffect(() => {
@@ -427,6 +450,7 @@ export function VoiceoverPage() {
         teleprompterRef.current.scrollTop = 0
       }
       setIsRecordingVoice(true)
+      void acquireWakeLock()
 
       recordTimerRef.current = window.setInterval(() => {
         recordingSecondsRef.current += 1
@@ -566,6 +590,18 @@ export function VoiceoverPage() {
     const timestamp = new Date().toISOString().slice(0, 10)
     const prefix = generatedAudioSource === "my_voice" ? "my-voice" : selectedVoice
     triggerBlobDownload(generatedAudioUrl, `${prefix}-${timestamp}.${generatedAudioExtension}`)
+  }
+
+  const handleShareActiveAudio = () => {
+    if (!generatedAudioUrl) return
+    const timestamp = new Date().toISOString().slice(0, 10)
+    const prefix = generatedAudioSource === "my_voice" ? "my-voice" : selectedVoice
+    void shareAudioFile({
+      blob: generatedAudioBlob,
+      url: generatedAudioUrl,
+      title: generatedAudioTitle || `${prefix}-${timestamp}`,
+      fileExtension: generatedAudioExtension,
+    })
   }
 
   const narratorButtonLabel = voiceDialogueMode
@@ -1017,7 +1053,9 @@ export function VoiceoverPage() {
             initialDuration={generatedAudioDuration}
             fileExtension={generatedAudioExtension}
             onDownload={handleDownloadActiveAudio}
+            onShare={handleShareActiveAudio}
             downloadLabel={generatedAudioExtension.toUpperCase()}
+            shareLabel="Share"
           />
 
           {generatedAudioSource === "my_voice" && (

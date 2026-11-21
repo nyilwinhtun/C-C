@@ -123,6 +123,8 @@ export function GeneratorPage() {
     setEditorialResult,
     clearEditorialResult,
     setVoiceoverDraftScript,
+    saveToVault,
+    addGeneratedItem,
   } = useContentStore(
     useShallow((state) => ({
       draftInput: state.draftInput,
@@ -142,6 +144,8 @@ export function GeneratorPage() {
       setEditorialResult: state.setEditorialResult,
       clearEditorialResult: state.clearEditorialResult,
       setVoiceoverDraftScript: state.setVoiceoverDraftScript,
+      saveToVault: state.saveToVault,
+      addGeneratedItem: state.addGeneratedItem,
     }))
   )
 
@@ -194,6 +198,7 @@ export function GeneratorPage() {
   const handleClearCanvas = () => {
     setRawNotes("")
     clearTextPostDraft()
+    clearEditorialResult()
   }
 
   const handleNotesChange = (value: string) => {
@@ -324,6 +329,14 @@ export function GeneratorPage() {
         hooks: [],
         createdAt: new Date().toISOString(),
       })
+
+      addGeneratedItem({
+        topic: trimmed,
+        platform: editorialFormat === "tiktok_script" ? "tiktok" : "facebook",
+        contentType: editorialFormat,
+        tone: editorialTone,
+        content: dual.optionA,
+      })
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "စာသားပြန်ချောရာတွင် အမှားဖြစ်ပွားပါသည်"
@@ -443,6 +456,25 @@ export function GeneratorPage() {
       toast.error("စာသား ကူးယူ၍ မရပါ")
     }
   }
+
+  const handleSaveToVault = () => {
+    if (!editorialResult || !activeText.trim()) return
+    saveToVault({
+      title: editorialResult.topic.slice(0, 60) || "Post Writer Draft",
+      content: activeText,
+      platform: editorialResult.format === "tiktok_script" ? "tiktok" : "facebook",
+      tags: [editorialResult.format, editorialTone],
+      status: "draft",
+    })
+    toast.success("Vault တွင် သိမ်းဆည်းပြီးပါပြီ")
+  }
+
+  const hookPreviewText = (() => {
+    const trimmed = activeText.trim()
+    if (!trimmed) return ""
+    const lines = trimmed.split("\n").slice(0, 3).join("\n")
+    return lines.length > 135 ? `${lines.slice(0, 135).trimEnd()}...` : lines
+  })()
 
   const handleVoiceSampleChange = (index: number, value: string) => {
     const next = [...voiceDnaSamples]
@@ -654,6 +686,21 @@ export function GeneratorPage() {
               </div>
             </div>
 
+            {hookPreviewText && (
+              <div className="border-b border-border/40 bg-[#FAF8F5]/75 dark:bg-[#18181B]/45 px-4 pt-3 pb-2.5 sm:px-5">
+                <p className="text-[13px] leading-[1.65] text-foreground/85 whitespace-pre-wrap line-clamp-3 font-myanmar">
+                  {hookPreviewText}
+                </p>
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="h-px flex-1 border-t border-dashed border-[#D6D3D1] dark:border-[#3F3F46]" />
+                  <span className="shrink-0 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-2.5 py-0.5 text-[10px] font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                    Facebook &apos;See More...&apos; အဖွင့်မျဉ်း
+                  </span>
+                  <span className="h-px flex-1 border-t border-dashed border-[#D6D3D1] dark:border-[#3F3F46]" />
+                </div>
+              </div>
+            )}
+
             <Textarea
               value={activeText}
               onChange={(e) => updateActiveText(e.target.value)}
@@ -685,12 +732,19 @@ export function GeneratorPage() {
               </div>
             )}
 
-            {/* Prominent Copy Button */}
-            <div className="border-t border-border/50 px-4 py-3">
+            {/* Prominent Copy & Save to Vault Footer */}
+            <div className="flex flex-wrap items-center gap-2 border-t border-border/50 px-4 py-3">
+              <button
+                type="button"
+                onClick={handleSaveToVault}
+                className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#27272A] px-4 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] transition-all hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] active:scale-95 cursor-pointer font-myanmar"
+              >
+                <span>📌 Vault တွင် သိမ်းမည်</span>
+              </button>
               <Button
                 type="button"
                 onClick={handleCopy}
-                className="h-10 w-full rounded-xl bg-neutral-900 text-sm font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+                className="h-10 flex-1 rounded-xl bg-neutral-900 text-sm font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
               >
                 {copied ? (
                   <>

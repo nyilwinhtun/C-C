@@ -21,7 +21,7 @@ interface IosAudioPlayerProps {
 }
 
 const BAR_COUNT = 42
-const PLAYBACK_SPEEDS = [1.0, 1.2] as const
+const PLAYBACK_SPEEDS = [0.8, 1.0, 1.2, 1.5] as const
 
 function generateWaveformHeights(seedSource: string): number[] {
   let hash = 2166136261
@@ -61,7 +61,6 @@ export function IosAudioPlayer({
   className,
 }: IosAudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const prevSrcRef = useRef<string>("")
   const playbackSpeedRef = useRef<number>(1.0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -87,17 +86,13 @@ export function IosAudioPlayer({
     const audio = audioRef.current
     if (!audio) return
 
-    // Reset player state & revoke previous blob URL before loading new audio
-    // so sample-rate changes (e.g. 44.1kHz mic -> 24kHz TTS) never cause silent playback.
+    // Reset player state before loading new audio so sample-rate changes
+    // (e.g. 44.1kHz mic -> 24kHz TTS) never cause silent playback.
+    // Parent/store actions manage blob URL revocation when replacing audio.
     audio.pause()
     audio.currentTime = 0
-    const prevSrc = prevSrcRef.current
-    if (prevSrc && prevSrc !== src && prevSrc.startsWith("blob:")) {
-      URL.revokeObjectURL(prevSrc)
-    }
     audio.removeAttribute("src")
     audio.load()
-    prevSrcRef.current = src
 
     const syncDuration = () => {
       if (Number.isFinite(audio.duration) && audio.duration > 0) {
@@ -143,6 +138,65 @@ export function IosAudioPlayer({
     }
   }, [src])
 
+  // Register Lock Screen / Control Center MediaSession controls
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("mediaSession" in navigator) || !src) return
+
+    const ms = navigator.mediaSession
+    if (typeof MediaMetadata !== "undefined") {
+      ms.metadata = new MediaMetadata({
+        title: title || "Audio",
+        artist: "Content Creator Studio",
+        album: subtitle || "Audio Studio",
+      })
+    }
+    ms.playbackState = isPlaying ? "playing" : "paused"
+
+    const handlePlay = () => {
+      const audio = audioRef.current
+      if (!audio) return
+      setIosAudioSessionPlayback()
+      unlockIosAudio()
+      audio.playbackRate = playbackSpeedRef.current
+      void audio.play().catch(() => setIsPlaying(false))
+    }
+    const handlePause = () => {
+      audioRef.current?.pause()
+    }
+    const handleSeekBy = (delta: number) => {
+      const audio = audioRef.current
+      if (!audio) return
+      const maxDur = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : duration
+      const next = Math.max(0, Math.min(maxDur || 0, audio.currentTime + delta))
+      audio.currentTime = next
+      setCurrentTime(next)
+    }
+
+    try {
+      ms.setActionHandler("play", handlePlay)
+      ms.setActionHandler("pause", handlePause)
+      ms.setActionHandler("seekbackward", (details) =>
+        handleSeekBy(-(details.seekOffset ?? 15))
+      )
+      ms.setActionHandler("seekforward", (details) =>
+        handleSeekBy(details.seekOffset ?? 15)
+      )
+    } catch {
+      // Ignore unsupported MediaSession actions
+    }
+
+    return () => {
+      try {
+        ms.setActionHandler("play", null)
+        ms.setActionHandler("pause", null)
+        ms.setActionHandler("seekbackward", null)
+        ms.setActionHandler("seekforward", null)
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }, [src, title, subtitle, isPlaying, duration])
+
   const togglePlay = async () => {
     const audio = audioRef.current
     if (!audio) return
@@ -174,7 +228,10 @@ export function IosAudioPlayer({
 
   const toggleSpeed = () => {
     triggerHaptic(6)
-    setPlaybackSpeed((prev) => (prev === PLAYBACK_SPEEDS[0] ? PLAYBACK_SPEEDS[1] : PLAYBACK_SPEEDS[0]))
+    setPlaybackSpeed((prev) => {
+      const idx = PLAYBACK_SPEEDS.indexOf(prev as (typeof PLAYBACK_SPEEDS)[number])
+      return PLAYBACK_SPEEDS[(idx + 1) % PLAYBACK_SPEEDS.length]
+    })
   }
 
   const handleSeekBarClick = (index: number) => {

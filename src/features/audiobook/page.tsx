@@ -17,8 +17,17 @@ import {
   Upload,
 } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
-import { extractTextFromDocument, rewriteChapterAsRecap } from "@/api/aiService"
-import { unlockIosAudio } from "@/lib/iosAudio"
+import {
+  extractCleanUnicodeFromPdfImages,
+  extractTextFromDocument,
+  rewriteChapterAsRecap,
+} from "@/api/aiService"
+import {
+  setIosAudioSessionPlayback,
+  shareAudioFile,
+  unlockIosAudio,
+} from "@/lib/iosAudio"
+import { getPdfPageCount, renderPdfPagesToImages } from "@/lib/pdfVision"
 import {
   BURMESE_VOICE_PRESETS,
   TTS_BYTE_RATE,
@@ -69,6 +78,10 @@ export function AudiobookPage() {
   const [rawText, setRawText] = useState("")
   const [sourceFileName, setSourceFileName] = useState<string | null>(null)
   const [isExtracting, setIsExtracting] = useState(false)
+  const [pendingPdfFile, setPendingPdfFile] = useState<File | null>(null)
+  const [pdfTotalPages, setPdfTotalPages] = useState(0)
+  const [pdfStartPage, setPdfStartPage] = useState(1)
+  const [pdfEndPage, setPdfEndPage] = useState(5)
   const [audiobookMode, setAudiobookMode] = useState<"direct" | "recap">("direct")
   const [isRewritingRecap, setIsRewritingRecap] = useState(false)
 
@@ -96,6 +109,7 @@ export function AudiobookPage() {
   const queueAudioRef = useRef<HTMLAudioElement | null>(null)
   const queueCacheRef = useRef<Map<number, Promise<string>>>(new Map())
   const queueRunIdRef = useRef(0)
+  const chunkRefs = useRef<(HTMLButtonElement | null)[]>([])
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const activeUrlsRef = useRef<string[]>([])
@@ -189,6 +203,7 @@ export function AudiobookPage() {
 
       const audio = queueAudioRef.current
       if (!audio) return
+      setIosAudioSessionPlayback()
       audio.src = url
       audio.currentTime = 0
       setQueueLoadingChunk(false)
@@ -214,6 +229,7 @@ export function AudiobookPage() {
   }
 
   const handleToggleQueuePlayPause = async () => {
+    setIosAudioSessionPlayback()
     unlockIosAudio()
     const audio = queueAudioRef.current
     if (!audio) return
@@ -222,6 +238,7 @@ export function AudiobookPage() {
       setQueuePlaying(false)
     } else {
       try {
+        setIosAudioSessionPlayback()
         await audio.play()
         setQueuePlaying(true)
       } catch {
@@ -229,6 +246,72 @@ export function AudiobookPage() {
       }
     }
   }
+
+  // Smoothly auto-scroll to active chunk during Auto-Queue playback
+  useEffect(() => {
+    if (!queueActive) return
+    chunkRefs.current[queueIndex]?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+    })
+  }, [queueActive, queueIndex])
+
+  // Register MediaSession lock-screen controls for Auto-Queue playback
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("mediaSession" in navigator) || !queueActive) {
+      return
+    }
+    const ms = navigator.mediaSession
+    if (typeof MediaMetadata !== "undefined") {
+      const baseTitle = sourceFileName
+        ? sourceFileName.replace(/\.(txt|pdf|md|epub)$/i, "")
+        : isMy
+          ? "စာအုပ် အသံဖတ်စက်"
+          : "Audiobook"
+      ms.metadata = new MediaMetadata({
+        title: `${baseTitle} (${queueIndex + 1}/${Math.max(1, smartChunks.length)})`,
+        artist: "Content Creator Studio",
+        album: "Audiobook Reader",
+      })
+    }
+    ms.playbackState = queuePlaying ? "playing" : "paused"
+
+    const handleSeekBy = (delta: number) => {
+      const audio = queueAudioRef.current
+      if (!audio) return
+      const maxDur = Number.isFinite(audio.duration) ? audio.duration : 0
+      audio.currentTime = Math.max(0, Math.min(maxDur || audio.currentTime + delta, audio.currentTime + delta))
+    }
+
+    try {
+      ms.setActionHandler("play", () => {
+        const audio = queueAudioRef.current
+        if (!audio) return
+        setIosAudioSessionPlayback()
+        unlockIosAudio()
+        void audio.play().then(() => setQueuePlaying(true)).catch(() => setQueuePlaying(false))
+      })
+      ms.setActionHandler("pause", () => {
+        queueAudioRef.current?.pause()
+        setQueuePlaying(false)
+      })
+      ms.setActionHandler("seekbackward", (d) => handleSeekBy(-(d.seekOffset ?? 15)))
+      ms.setActionHandler("seekforward", (d) => handleSeekBy(d.seekOffset ?? 15))
+    } catch {
+      // Ignore unsupported MediaSession actions
+    }
+
+    return () => {
+      try {
+        ms.setActionHandler("play", null)
+        ms.setActionHandler("pause", null)
+        ms.setActionHandler("seekbackward", null)
+        ms.setActionHandler("seekforward", null)
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }, [queueActive, queuePlaying, queueIndex, smartChunks.length, sourceFileName, isMy])
 
   const handleRewriteAsRecap = async () => {
     if (!rawText.trim()) return
@@ -252,11 +335,76 @@ export function AudiobookPage() {
     }
   }
 
+  const handleExtractPdfRange = async () => {
+    if (!pendingPdfFile || pdfTotalPages <= 0) return
+    const safeStart = Math.max(1, Math.min(pdfTotalPages, Math.floor(pdfStartPage || 1)))
+    const safeEnd = Math.max(safeStart, Math.min(pdfTotalPages, Math.floor(pdfEndPage || safeStart)))
+    setPdfStartPage(safeStart)
+    setPdfEndPage(safeEnd)
+
+    setIsExtracting(true)
+    try {
+      const pageImages = await renderPdfPagesToImages(pendingPdfFile, safeStart, safeEnd)
+      const extracted = await extractCleanUnicodeFromPdfImages(pageImages)
+      const clean = extracted.trim()
+      if (!clean) {
+        throw new Error(
+          isMy
+            ? "ရွေးချယ်ထားသော စာမျက်နှာများမှ စာသားထုတ်ယူ၍ မရပါ။"
+            : "Could not extract text from the selected pages."
+        )
+      }
+      clearGeneratedAudio()
+      setRawText(clean)
+      setSourceFileName(
+        `${pendingPdfFile.name} (${safeStart === safeEnd ? `p.${safeStart}` : `p.${safeStart}-${safeEnd}`})`
+      )
+      setSelectedChapterId(null)
+      toast.success(
+        isMy
+          ? `စာမျက်နှာ ${toBurmeseDigits(safeStart)}-${toBurmeseDigits(safeEnd)} မှ Unicode စာသား ထုတ်ယူပြီးပါပြီ`
+          : `Extracted clean Unicode from pages ${safeStart}-${safeEnd}`
+      )
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to extract PDF pages."
+      toast.error(msg)
+    } finally {
+      setIsExtracting(false)
+    }
+  }
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     e.target.value = ""
     if (!file) return
 
+    const isPdf =
+      file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+
+    if (isPdf) {
+      setIsExtracting(true)
+      try {
+        const total = await getPdfPageCount(file)
+        setPendingPdfFile(file)
+        setPdfTotalPages(total)
+        setPdfStartPage(1)
+        setPdfEndPage(Math.min(5, total))
+        toast.info(
+          isMy
+            ? `PDF စာမျက်နှာ ${toBurmeseDigits(total)} မျက်နှာ တွေ့ရှိပါသည် — ဖတ်လိုသည့် စာမျက်နှာကို ရွေးချယ်ပါ။`
+            : `Loaded PDF (${total} pages) — select page range to extract.`
+        )
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to read PDF page count."
+        toast.error(msg)
+      } finally {
+        setIsExtracting(false)
+      }
+      return
+    }
+
+    setPendingPdfFile(null)
+    setPdfTotalPages(0)
     setIsExtracting(true)
     try {
       const extracted = await extractTextFromDocument(file)
@@ -429,12 +577,12 @@ export function AudiobookPage() {
 
   return (
     <div className="space-y-4">
-      <Card className="border-border/60 shadow-sm">
+      <Card className="border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] shadow-xs">
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-                <BookOpen className="h-5 w-5 text-blue-500 shrink-0" />
+              <CardTitle className="flex items-center gap-2 text-base sm:text-lg text-[#1C1917] dark:text-[#F5F5F4]">
+                <BookOpen className="h-5 w-5 text-[#1C1917] dark:text-[#F5F5F4] shrink-0" />
                 <span>{isMy ? "စာအုပ်နှင့် စာရွက်စာတမ်း အသံပြောင်းစက်" : "Book & Document to Audio"}</span>
               </CardTitle>
               <CardDescription className="mt-1 text-xs sm:text-sm">
@@ -504,6 +652,8 @@ export function AudiobookPage() {
                   setRawText("")
                   setSourceFileName(null)
                   setSelectedChapterId(null)
+                  setPendingPdfFile(null)
+                  setPdfTotalPages(0)
                 }}
                 className="ml-auto text-xs text-muted-foreground hover:text-destructive gap-1"
               >
@@ -512,6 +662,77 @@ export function AudiobookPage() {
               </Button>
             )}
           </div>
+
+          {/* PDF Vision OCR Page Range Selector */}
+          {pendingPdfFile && pdfTotalPages > 0 && (
+            <div className="rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-3 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <FileText className="h-4 w-4 shrink-0 text-[#57534E] dark:text-[#A1A1AA]" />
+                  <span className="text-xs font-semibold text-[#1C1917] dark:text-[#F5F5F4] truncate">
+                    {pendingPdfFile.name}
+                  </span>
+                </div>
+                <Badge variant="secondary" className="text-[11px] tabular-nums">
+                  {isMy
+                    ? `စုစုပေါင်း ${toBurmeseDigits(pdfTotalPages)} မျက်နှာ`
+                    : `${pdfTotalPages} pages`}
+                </Badge>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Label className="text-xs font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                  {isMy ? "စာမျက်နှာ (မှ - အထိ)" : "Pages (From - To)"}
+                </Label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={1}
+                    max={pdfTotalPages}
+                    value={pdfStartPage}
+                    onChange={(e) => setPdfStartPage(Math.max(1, Number(e.target.value) || 1))}
+                    aria-label="Start page"
+                    className="h-8 w-16 rounded-lg border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] px-2 text-center text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] tabular-nums"
+                  />
+                  <span className="text-xs text-[#57534E] dark:text-[#A1A1AA]">-</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={pdfTotalPages}
+                    value={pdfEndPage}
+                    onChange={(e) =>
+                      setPdfEndPage(Math.min(pdfTotalPages, Math.max(1, Number(e.target.value) || 1)))
+                    }
+                    aria-label="End page"
+                    className="h-8 w-16 rounded-lg border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] px-2 text-center text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] tabular-nums"
+                  />
+                </div>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={isExtracting || isGenerating}
+                  onClick={handleExtractPdfRange}
+                  className="ml-auto h-8 rounded-lg bg-[#1C1917] hover:bg-[#292524] dark:bg-[#F5F5F4] dark:hover:bg-[#E7E5E4] text-[#FAF8F5] dark:text-[#18181B] text-xs font-medium gap-1.5"
+                >
+                  {isExtracting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <BookOpen className="h-3.5 w-3.5" />
+                  )}
+                  <span>
+                    {isExtracting
+                      ? isMy
+                        ? "Unicode ပြောင်းနေသည်..."
+                        : "Extracting..."
+                      : isMy
+                        ? "PDF မှ စာသားထုတ်မည်"
+                        : "Extract Pages"}
+                  </span>
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Textarea */}
           <div className="space-y-1.5">
@@ -659,13 +880,19 @@ export function AudiobookPage() {
                       onClick={() => setSelectedChapterId(ch.id)}
                       className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
                         isSelected
-                          ? "border-blue-500 bg-blue-500/15 text-blue-600 dark:text-blue-400"
-                          : "border-border/60 bg-background hover:bg-accent"
+                          ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B]"
+                          : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46]"
                       }`}
                     >
                       <span className="max-w-[140px] truncate">{ch.title}</span>
-                      <span className="text-[10px] text-muted-foreground">({formatDurationLabel(est)})</span>
-                      {isDone && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+                      <span className="text-[10px] opacity-75">({formatDurationLabel(est)})</span>
+                      {isDone && (
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            isSelected ? "bg-[#FAF8F5] dark:bg-[#18181B]" : "bg-amber-600 dark:bg-amber-400"
+                          }`}
+                        />
+                      )}
                     </button>
                   )
                 })}
@@ -681,7 +908,7 @@ export function AudiobookPage() {
               disabled={smartChunks.length === 0 || isGenerating || isExtracting}
               onTouchStart={() => unlockIosAudio()}
               onClick={handleStartAutoQueue}
-              className="flex-1 gap-2 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
+              className="flex-1 gap-2 border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46]"
             >
               <Headphones className="h-4 w-4" />
               <span>
@@ -778,11 +1005,11 @@ export function AudiobookPage() {
       />
 
       {queueActive && smartChunks.length > 0 && (
-        <Card className="border-blue-500/30 bg-blue-500/5 shadow-sm">
+        <Card className="border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] shadow-xs">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between gap-2">
-              <CardTitle className="flex items-center gap-2 text-sm sm:text-base">
-                <Headphones className="h-4 w-4 text-blue-500" />
+              <CardTitle className="flex items-center gap-2 text-sm sm:text-base text-[#1C1917] dark:text-[#F5F5F4]">
+                <Headphones className="h-4 w-4 text-[#1C1917] dark:text-[#F5F5F4]" />
                 <span>
                   {isMy ? "Pre-Fetch Auto-Queue Player" : "Pre-Fetch Auto-Queue Player"}
                 </span>
@@ -795,9 +1022,44 @@ export function AudiobookPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground line-clamp-2 font-myanmar bg-background/60 rounded-lg p-2.5 border border-border/60">
-              {smartChunks[queueIndex]}
-            </p>
+            {/* Synced Active Chunk Reader */}
+            <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+              {smartChunks.map((chunkText, idx) => {
+                const isActiveChunk = idx === queueIndex
+                return (
+                  <button
+                    key={idx}
+                    ref={(el) => {
+                      chunkRefs.current[idx] = el
+                    }}
+                    type="button"
+                    onClick={() => {
+                      unlockIosAudio()
+                      void playQueueChunkAt(idx, queueRunIdRef.current)
+                    }}
+                    className={`w-full text-left rounded-xl border p-2.5 transition-all cursor-pointer ${
+                      isActiveChunk
+                        ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#F0EDE8] dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4] shadow-2xs"
+                        : "border-[#E7E5E4]/80 dark:border-[#3F3F46]/70 bg-white/70 dark:bg-[#27272A]/40 text-[#57534E] dark:text-[#A1A1AA] hover:bg-white dark:hover:bg-[#27272A]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider tabular-nums opacity-75">
+                        {isMy ? `အပိုင်း ${toBurmeseDigits(idx + 1)}` : `Chunk ${idx + 1}`}
+                      </span>
+                      {isActiveChunk && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[#1C1917] dark:bg-[#F5F5F4] px-2 py-0.5 text-[10px] font-semibold text-[#FAF8F5] dark:text-[#18181B]">
+                          {isMy ? "ဖတ်နေသည်" : "Playing"}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs leading-relaxed font-myanmar line-clamp-3">
+                      {chunkText}
+                    </p>
+                  </button>
+                )
+              })}
+            </div>
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5">
                 <Button
@@ -817,7 +1079,7 @@ export function AudiobookPage() {
                   size="sm"
                   disabled={queueLoadingChunk}
                   onClick={handleToggleQueuePlayPause}
-                  className="gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
+                  className="gap-1.5 bg-[#1C1917] hover:bg-[#292524] dark:bg-[#F5F5F4] dark:hover:bg-[#E7E5E4] text-[#FAF8F5] dark:text-[#18181B]"
                 >
                   {queueLoadingChunk ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -870,11 +1132,11 @@ export function AudiobookPage() {
 
       {/* Audio Player & Download */}
       {fullAudio && (
-        <Card className="border-emerald-500/30 bg-emerald-500/5 shadow-sm">
+        <Card className="border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] shadow-xs">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between gap-2">
-              <CardTitle className="flex items-center gap-2 text-sm sm:text-base">
-                <Headphones className="h-4 w-4 text-emerald-500" />
+              <CardTitle className="flex items-center gap-2 text-sm sm:text-base text-[#1C1917] dark:text-[#F5F5F4]">
+                <Headphones className="h-4 w-4 text-[#1C1917] dark:text-[#F5F5F4]" />
                 <span className="truncate">{fullAudio.title}</span>
               </CardTitle>
               <Badge variant="secondary" className="text-xs shrink-0">
@@ -898,8 +1160,16 @@ export function AudiobookPage() {
               onDownload={() =>
                 handleDownload(fullAudio.audioUrl, fullAudio.title, fullAudio.fileExtension)
               }
+              onShare={() =>
+                void shareAudioFile({
+                  blob: fullAudio.blob,
+                  url: fullAudio.audioUrl,
+                  title: fullAudio.title,
+                  fileExtension: fullAudio.fileExtension,
+                })
+              }
               downloadLabel={isMy ? "အသံဖိုင် ဒေါင်းလုဒ်" : "Download Audio"}
-              accentColor="emerald"
+              shareLabel="Share"
             />
           </CardContent>
         </Card>
