@@ -705,5 +705,19 @@
   "presenter3d.photoLoadError": "Could not load the background photo.",
   "presenter3d.noAudioError": "Please record or upload an audio track first.",
   "presenter3d.renderFailed": "Could not render the 3D video on this browser.",
-  "presenter3d.renderSuccess": "3D presenter video rendered!"
+  "presenter3d.renderSuccess": "3D presenter video rendered!",
+  "presenter3d.modeTitle": "Character Mode",
+  "presenter3d.mode3d": "3D Avatar (.vrm / .glb)",
+  "presenter3d.modePhoto": "🖼️ Talking Photo",
+  "presenter3d.photoUpload": "Upload Character Photo (.jpg / .png / .webp)",
+  "presenter3d.photoHint": "Tap or drag the ring on the preview to place the mouth.",
+  "presenter3d.mouthWidth": "Mouth Width",
+  "presenter3d.jawOpenness": "Jaw Openness",
+  "presenter3d.photoInvalid": "Please select a .jpg, .png or .webp image.",
+  "presenter3d.photoLoaded": "Character photo loaded!",
+  "presenter3d.photoCharLoadError": "Could not load this character photo.",
+  "presenter3d.noPhotoError": "Please upload a character photo first.",
+  "presenter3d.captionToggle": "Show Live Captions",
+  "presenter3d.captionPlaceholder": "Subtitle text shown on the video...",
+  "presenter3d.uploadPhotoFirst": "Upload a character photo to start"
 }

@@ -705,5 +705,19 @@
   "presenter3d.photoLoadError": "နောက်ခံပုံ ဖွင့်မရပါ။",
   "presenter3d.noAudioError": "အသံဖိုင်ကို အရင်သွင်းပါ သို့မဟုတ် ထည့်သွင်းပါ။",
   "presenter3d.renderFailed": "ဤ Browser တွင် 3D ဗီဒီယို ထုတ်မရပါ။",
-  "presenter3d.renderSuccess": "3D တင်ဆက်သူ ဗီဒီယို ထုတ်ပြီးပါပြီ!"
+  "presenter3d.renderSuccess": "3D တင်ဆက်သူ ဗီဒီယို ထုတ်ပြီးပါပြီ!",
+  "presenter3d.modeTitle": "ဇာတ်ကောင် ပုံစံ",
+  "presenter3d.mode3d": "3D Model (.vrm/.glb)",
+  "presenter3d.modePhoto": "🖼️ Talking Photo (ဓာတ်ပုံ)",
+  "presenter3d.photoUpload": "ဇာတ်ကောင်ဓာတ်ပုံ တင်ရန် (.jpg / .png / .webp)",
+  "presenter3d.photoHint": "ပုံပေါ်ရှိ စက်ဝိုင်းကို နှိပ်ပါ သို့မဟုတ် ဖိဆွဲ၍ ပါးစပ်နေရာ ချိန်ပါ။",
+  "presenter3d.mouthWidth": "ပါးစပ် အကျယ်",
+  "presenter3d.jawOpenness": "မေးရိုး ဟပမာဏ",
+  "presenter3d.photoInvalid": "ကျေးဇူးပြု၍ .jpg, .png သို့မဟုတ် .webp ပုံ ရွေးပါ။",
+  "presenter3d.photoLoaded": "ဇာတ်ကောင်ဓာတ်ပုံ တင်ပြီးပါပြီ!",
+  "presenter3d.photoCharLoadError": "ဤဓာတ်ပုံကို ဖွင့်မရပါ။",
+  "presenter3d.noPhotoError": "ဇာတ်ကောင်ဓာတ်ပုံ အရင်တင်ပါ။",
+  "presenter3d.captionToggle": "စာတန်းထိုး ပြမည်",
+  "presenter3d.captionPlaceholder": "ဗီဒီယိုပေါ်တွင် ပြမည့် စာတန်း...",
+  "presenter3d.uploadPhotoFirst": "စတင်ရန် ဇာတ်ကောင်ဓာတ်ပုံ တင်ပါ"
 }

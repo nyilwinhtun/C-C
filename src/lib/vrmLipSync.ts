@@ -791,3 +791,166 @@ export function disposeObject3D(root: THREE.Object3D): void {
     }
   })
 }
+
+/* ------------------------------------------------------------------ */
+/* Talking Photo (2.5D) — pure Canvas2D renderer, 0 external API cost  */
+/* ------------------------------------------------------------------ */
+
+export interface TalkingPhotoParams {
+  /** Mouth centre, 0–1 in image space */
+  mouthX: number
+  mouthY: number
+  /** Mouth width as a fraction of the image width */
+  mouthWidth: number
+  /** Jaw openness multiplier (0.2–2) */
+  jawOpenness: number
+}
+
+/** Contain-fit rect of the photo inside the canvas, in 0–1 canvas fractions. */
+export function getTalkingPhotoRect(
+  canvasW: number,
+  canvasH: number,
+  imgW: number,
+  imgH: number
+): { x: number; y: number; w: number; h: number } {
+  const scale = Math.min(canvasW / imgW, canvasH / imgH)
+  const w = (imgW * scale) / canvasW
+  const h = (imgH * scale) / canvasH
+  return { x: (1 - w) / 2, y: (1 - h) / 2, w, h }
+}
+
+export function drawTalkingPhotoFrame(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  canvasW: number,
+  canvasH: number,
+  params: TalkingPhotoParams,
+  lip: LipSyncWeights,
+  elapsed: number
+): void {
+  const rect = getTalkingPhotoRect(canvasW, canvasH, img.width, img.height)
+  const dw = rect.w * canvasW
+  const dh = rect.h * canvasH
+  const dx = rect.x * canvasW
+  const dy = rect.y * canvasH
+
+  const energy = Math.min(1, Math.max(0, lip.energy))
+  const open = Math.min(1, Math.max(lip.aa, lip.oh * 0.85, lip.ee * 0.55, energy * 0.7))
+
+  // Head motion: breathing + vocal nod, pivoting around bottom-centre of the photo
+  const breathe = Math.sin(elapsed * 1.6) * 0.5 + 0.5
+  const bobY = (breathe * 0.004 + energy * 0.006) * dh
+  const rot =
+    (Math.sin(elapsed * 0.9) * 0.006 + Math.sin(elapsed * 2.3) * energy * 0.012) // radians
+  const sc = 1 + breathe * 0.004 + energy * 0.006
+
+  ctx.save()
+  ctx.translate(dx + dw / 2, dy + dh)
+  ctx.rotate(rot)
+  ctx.scale(sc, sc)
+  ctx.translate(-(dx + dw / 2), -(dy + dh) + bobY)
+
+  ctx.drawImage(img, dx, dy, dw, dh)
+
+  const mx = dx + params.mouthX * dw
+  const my = dy + params.mouthY * dh
+  const mw = Math.max(8, params.mouthWidth * dw)
+  const jaw = Math.min(2, Math.max(0.1, params.jawOpenness))
+  const drop = mw * 0.55 * jaw * open
+
+  if (drop > 0.8) {
+    // 1. Lower-jaw warp: re-draw the lower-face patch shifted down
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(0, my, canvasW, canvasH) // only below the mouth line
+    ctx.clip()
+    ctx.beginPath()
+    ctx.ellipse(mx, my + mw * 0.55, mw * 1.05, mw * 0.95, 0, 0, Math.PI * 2)
+    ctx.clip()
+    ctx.drawImage(img, dx, dy + drop * 0.85, dw, dh)
+    ctx.restore()
+
+    // 2. Shaded organic mouth cavity covering the gap
+    const wScale = 1 + lip.ee * 0.18 - lip.oh * 0.22
+    const rx = (mw / 2) * Math.max(0.6, wScale)
+    const ry = drop * 0.62 + 1
+    const cy = my + drop * 0.45
+    const grad = ctx.createRadialGradient(mx, cy, 1, mx, cy, Math.max(rx, ry))
+    grad.addColorStop(0, "#2a0c10")
+    grad.addColorStop(0.7, "#4a1519")
+    grad.addColorStop(1, "#6b2a2a")
+    ctx.fillStyle = grad
+    ctx.beginPath()
+    ctx.ellipse(mx, cy, rx, ry, 0, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Upper teeth hint
+    if (open > 0.25) {
+      ctx.save()
+      ctx.beginPath()
+      ctx.ellipse(mx, cy, rx, ry, 0, 0, Math.PI * 2)
+      ctx.clip()
+      ctx.fillStyle = "rgba(250,246,240,0.9)"
+      ctx.fillRect(mx - rx * 0.7, cy - ry, rx * 1.4, ry * 0.32)
+      // Tongue
+      ctx.fillStyle = "rgba(196,92,96,0.9)"
+      ctx.beginPath()
+      ctx.ellipse(mx, cy + ry * 0.7, rx * 0.55, ry * 0.45, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
+
+    // Soft lip outline
+    ctx.strokeStyle = "rgba(90,30,36,0.55)"
+    ctx.lineWidth = Math.max(1.5, mw * 0.03)
+    ctx.beginPath()
+    ctx.ellipse(mx, cy, rx, ry, 0, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+
+  ctx.restore()
+}
+
+export function drawCaptionBar(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  canvasW: number,
+  canvasH: number
+): void {
+  const clean = text.trim()
+  if (!clean) return
+  const fontSize = Math.round(canvasW * 0.045)
+  ctx.save()
+  ctx.font = `600 ${fontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
+  const maxW = canvasW * 0.86
+  const lines: string[] = []
+  let line = ""
+  const tokens = clean.includes(" ") ? clean.split(/(\s+)/) : Array.from(clean)
+  for (const tok of tokens) {
+    const pieces = ctx.measureText(tok).width > maxW ? Array.from(tok) : [tok]
+    for (const p of pieces) {
+      if (line && ctx.measureText(line + p).width > maxW) {
+        lines.push(line.trim())
+        line = p.trimStart()
+      } else {
+        line += p
+      }
+    }
+  }
+  if (line.trim()) lines.push(line.trim())
+  const shown = lines.slice(-4)
+  const lh = fontSize * 1.5
+  const boxH = shown.length * lh + fontSize * 0.6
+  const boxY = canvasH - boxH - canvasH * 0.06
+  ctx.fillStyle = "rgba(24,24,27,0.72)"
+  ctx.beginPath()
+  ctx.roundRect(canvasW * 0.05, boxY, canvasW * 0.9, boxH, fontSize * 0.6)
+  ctx.fill()
+  ctx.fillStyle = "#FAF8F5"
+  ctx.textAlign = "center"
+  ctx.textBaseline = "middle"
+  shown.forEach((l, i) => {
+    ctx.fillText(l, canvasW / 2, boxY + fontSize * 0.3 + lh * (i + 0.5), maxW)
+  })
+  ctx.restore()
+}

@@ -34,12 +34,16 @@ import {
 import {
   createBuiltinPresenterController,
   createLipSyncAnalyzer,
+  drawCaptionBar,
+  drawTalkingPhotoFrame,
+  getTalkingPhotoRect,
   loadCustomAvatarFromFile,
   type AvatarController,
   type BuiltinPresenterId,
   type LipSyncAnalyzer,
 } from "@/lib/vrmLipSync"
 
+type CharacterKind = "model" | "photo"
 type AspectPreset = "9:16" | "1:1"
 type FramingPreset = "upper_body" | "close_up"
 type BackdropPreset = "warm_paper" | "soft_charcoal" | "solid_color" | "photo"
@@ -139,6 +143,19 @@ export function Presenter3DPage() {
   }, [selectedVoice])
 
   // Character & Scene state
+  const [characterKind, setCharacterKind] = useState<CharacterKind>("model")
+  const [photoDims, setPhotoDims] = useState<{ w: number; h: number } | null>(null)
+  const [photoName, setPhotoName] = useState("")
+  const [mouthX, setMouthX] = useState(0.5)
+  const [mouthY, setMouthY] = useState(0.42)
+  const [mouthWidth, setMouthWidth] = useState(0.12)
+  const [jawOpenness, setJawOpenness] = useState(1)
+  const [captionsOn, setCaptionsOn] = useState(false)
+  const [captionText, setCaptionText] = useState("")
+  const characterPhotoRef = useRef<HTMLImageElement | null>(null)
+  const characterPhotoUrlRef = useRef<string | null>(null)
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const draggingMouthRef = useRef(false)
   const [avatarMode, setAvatarMode] = useState<"preset" | "custom">("preset")
   const [presetId, setPresetId] = useState<BuiltinPresenterId>(defaultPreset)
   const [customAvatarName, setCustomAvatarName] = useState<string>("")
@@ -195,6 +212,13 @@ export function Presenter3DPage() {
     blurPhotoBackdrop,
     showShopBadge,
     badgeText,
+    characterKind,
+    mouthX,
+    mouthY,
+    mouthWidth,
+    jawOpenness,
+    captionsOn,
+    captionText,
   })
   sceneSettingsRef.current = {
     aspectRatio,
@@ -204,6 +228,13 @@ export function Presenter3DPage() {
     blurPhotoBackdrop,
     showShopBadge,
     badgeText,
+    characterKind,
+    mouthX,
+    mouthY,
+    mouthWidth,
+    jawOpenness,
+    captionsOn,
+    captionText,
   }
 
   const activeAudioSource = useMemo(() => {
@@ -456,8 +487,28 @@ export function Presenter3DPage() {
         ctx.fillRect(0, 0, dims.width, dims.height)
       }
 
-      // 2. Draw 3D Character WebGL layer
-      ctx.drawImage(glCanvas, 0, 0, dims.width, dims.height)
+      // 2. Draw character layer: 2.5D Talking Photo or 3D WebGL
+      if (settings.characterKind === "photo") {
+        const photo = characterPhotoRef.current
+        if (photo) {
+          drawTalkingPhotoFrame(
+            ctx,
+            photo,
+            dims.width,
+            dims.height,
+            {
+              mouthX: settings.mouthX,
+              mouthY: settings.mouthY,
+              mouthWidth: settings.mouthWidth,
+              jawOpenness: settings.jawOpenness,
+            },
+            lip,
+            elapsed
+          )
+        }
+      } else {
+        ctx.drawImage(glCanvas, 0, 0, dims.width, dims.height)
+      }
 
       // 3. Draw optional Shop Name Badge Overlay
       const cleanBadge = settings.badgeText.trim()
@@ -484,6 +535,11 @@ export function Presenter3DPage() {
         ctx.fillText(cleanBadge, pillX + paddingX, pillY + badgeHeight / 2 + 1, pillWidth - paddingX * 2)
         ctx.restore()
       }
+
+      // 4. Optional live captions (Talking Photo mode)
+      if (settings.characterKind === "photo" && settings.captionsOn) {
+        drawCaptionBar(ctx, settings.captionText, dims.width, dims.height)
+      }
     }
 
     rafId = requestAnimationFrame(renderFrame)
@@ -503,6 +559,10 @@ export function Presenter3DPage() {
       if (backdropImageUrlRef.current) {
         URL.revokeObjectURL(backdropImageUrlRef.current)
         backdropImageUrlRef.current = null
+      }
+      if (characterPhotoUrlRef.current) {
+        URL.revokeObjectURL(characterPhotoUrlRef.current)
+        characterPhotoUrlRef.current = null
       }
       if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
         void audioCtxRef.current.close()
@@ -564,6 +624,45 @@ export function Presenter3DPage() {
     } finally {
       setIsLoadingAvatar(false)
     }
+  }
+
+  const handleUploadCharacterPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) && !/\.(jpe?g|png|webp)$/i.test(file.name)) {
+      toast.error(t(language, "presenter3d.photoInvalid"))
+      return
+    }
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      if (characterPhotoUrlRef.current) URL.revokeObjectURL(characterPhotoUrlRef.current)
+      characterPhotoUrlRef.current = url
+      characterPhotoRef.current = img
+      setPhotoDims({ w: img.width, h: img.height })
+      setPhotoName(file.name)
+      setMouthX(0.5)
+      setMouthY(0.42)
+      toast.success(t(language, "presenter3d.photoLoaded"))
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      toast.error(t(language, "presenter3d.photoCharLoadError"))
+    }
+    img.src = url
+  }
+
+  const placeMouthFromPointer = (clientX: number, clientY: number) => {
+    const stage = stageRef.current
+    if (!stage || !photoDims) return
+    const box = stage.getBoundingClientRect()
+    const dims = CANVAS_DIMENSIONS[aspectRatio]
+    const rect = getTalkingPhotoRect(dims.width, dims.height, photoDims.w, photoDims.h)
+    const cx = (clientX - box.left) / box.width
+    const cy = (clientY - box.top) / box.height
+    setMouthX(Math.min(1, Math.max(0, (cx - rect.x) / rect.w)))
+    setMouthY(Math.min(1, Math.max(0, (cy - rect.y) / rect.h)))
   }
 
   const handleUploadBackdropPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -656,6 +755,11 @@ export function Presenter3DPage() {
       return
     }
 
+    if (characterKind === "photo" && !characterPhotoRef.current) {
+      toast.error(t(language, "presenter3d.noPhotoError"))
+      return
+    }
+
     if (!audioBufferRef.current || !displayCanvasRef.current) {
       toast.error(t(language, "presenter3d.noAudioError"))
       return
@@ -740,7 +844,7 @@ export function Presenter3DPage() {
             blob,
             mimeType: finalMime,
             extension,
-            fileName: `${baseName}-3d.${extension}`,
+            fileName: `${baseName}-${characterKind === "photo" ? "photo" : "3d"}.${extension}`,
           }
         })
         toast.success(t(language, "presenter3d.renderSuccess"))
@@ -848,7 +952,24 @@ export function Presenter3DPage() {
           {/* Canvas Preview Container */}
           <div className="flex items-center justify-center rounded-2xl bg-[#EFEAE1]/70 dark:bg-[#09090B]/70 p-3 border border-[#E7E5E4]/80 dark:border-[#27272A]">
             <div
+              ref={stageRef}
+              onPointerDown={(e) => {
+                if (characterKind !== "photo" || !photoDims || isRenderingVideo) return
+                draggingMouthRef.current = true
+                e.currentTarget.setPointerCapture(e.pointerId)
+                placeMouthFromPointer(e.clientX, e.clientY)
+              }}
+              onPointerMove={(e) => {
+                if (draggingMouthRef.current) placeMouthFromPointer(e.clientX, e.clientY)
+              }}
+              onPointerUp={() => {
+                draggingMouthRef.current = false
+              }}
+              onPointerCancel={() => {
+                draggingMouthRef.current = false
+              }}
               className={cn(
+                characterKind === "photo" && photoDims && "touch-none cursor-crosshair",
                 "relative overflow-hidden rounded-2xl shadow-md border border-black/10 dark:border-white/10 w-full",
                 aspectRatio === "9:16" ? "max-w-[300px] aspect-[9/16]" : "max-w-[380px] aspect-square"
               )}
@@ -857,6 +978,28 @@ export function Presenter3DPage() {
                 ref={displayCanvasRef}
                 className="w-full h-full block object-contain"
               />
+              {characterKind === "photo" && photoDims && !isRenderingVideo && (() => {
+                const dims = CANVAS_DIMENSIONS[aspectRatio]
+                const rect = getTalkingPhotoRect(dims.width, dims.height, photoDims.w, photoDims.h)
+                const diameter = Math.max(18, mouthWidth * rect.w * 100)
+                return (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-amber-400 shadow-[0_0_0_2px_rgba(0,0,0,0.45)] bg-amber-400/15"
+                    style={{
+                      left: `${(rect.x + mouthX * rect.w) * 100}%`,
+                      top: `${(rect.y + mouthY * rect.h) * 100}%`,
+                      width: `${diameter}%`,
+                      aspectRatio: "1 / 1",
+                    }}
+                  />
+                )
+              })()}
+              {characterKind === "photo" && !photoDims && (
+                <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                  {t(language, "presenter3d.uploadPhotoFirst")}
+                </div>
+              )}
               {isLoadingAvatar && (
                 <div className="absolute inset-0 bg-black/45 backdrop-blur-xs flex flex-col items-center justify-center gap-2 text-white text-xs font-myanmar">
                   <Loader2 className="h-6 w-6 animate-spin" />
@@ -923,7 +1066,7 @@ export function Presenter3DPage() {
             <Button
               type="button"
               onClick={handleRenderVideo}
-              disabled={!activeAudioSource || isLoadingAvatar}
+              disabled={!activeAudioSource || isLoadingAvatar || (characterKind === "photo" && !photoDims)}
               className={cn(
                 "w-full h-12 rounded-2xl text-sm font-semibold transition-all font-myanmar cursor-pointer",
                 isRenderingVideo
@@ -1008,13 +1151,134 @@ export function Presenter3DPage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
                 {t(language, "presenter3d.characterTitle")}
               </Label>
-              {avatarMode === "custom" && customAvatarName && (
+              {characterKind === "model" && avatarMode === "custom" && customAvatarName && (
                 <span className="text-[11px] text-amber-700 dark:text-amber-300 truncate max-w-[180px]">
                   {customAvatarName}
                 </span>
               )}
+              {characterKind === "photo" && photoName && (
+                <span className="text-[11px] text-amber-700 dark:text-amber-300 truncate max-w-[180px]">
+                  {photoName}
+                </span>
+              )}
             </div>
 
+            <div
+              role="tablist"
+              aria-label={t(language, "presenter3d.modeTitle")}
+              className="grid grid-cols-2 gap-1 rounded-2xl bg-[#EFEAE1] dark:bg-[#27272A] p-1"
+            >
+              {(
+                [
+                  { id: "model", labelKey: "presenter3d.mode3d" },
+                  { id: "photo", labelKey: "presenter3d.modePhoto" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={characterKind === opt.id}
+                  onClick={() => {
+                    triggerHaptic(6)
+                    if (isRenderingVideo) return
+                    setCharacterKind(opt.id)
+                  }}
+                  className={cn(
+                    "rounded-xl py-2 px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer font-myanmar",
+                    characterKind === opt.id
+                      ? "bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B] shadow-xs"
+                      : "text-[#57534E] dark:text-[#A1A1AA]"
+                  )}
+                >
+                  {t(language, opt.labelKey)}
+                </button>
+              ))}
+            </div>
+
+            {characterKind === "photo" && (
+              <div className="space-y-3">
+                <label className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-white/70 dark:bg-[#27272A]/70 py-2.5 px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
+                  <ImagePlus className="h-3.5 w-3.5" />
+                  <span>{t(language, "presenter3d.photoUpload")}</span>
+                  <input
+                    type="file"
+                    accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                    onChange={handleUploadCharacterPhoto}
+                    className="hidden"
+                  />
+                </label>
+
+                {photoDims && (
+                  <div className="space-y-2.5 rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-3">
+                    <p className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                      {t(language, "presenter3d.photoHint")}
+                    </p>
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[11px] font-medium font-myanmar">
+                        <span>{t(language, "presenter3d.mouthWidth")}</span>
+                        <span className="tabular-nums">{Math.round(mouthWidth * 100)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0.04}
+                        max={0.3}
+                        step={0.005}
+                        value={mouthWidth}
+                        onChange={(e) => setMouthWidth(Number(e.target.value))}
+                        className="w-full accent-amber-600"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[11px] font-medium font-myanmar">
+                        <span>{t(language, "presenter3d.jawOpenness")}</span>
+                        <span className="tabular-nums">{jawOpenness.toFixed(1)}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0.2}
+                        max={2}
+                        step={0.05}
+                        value={jawOpenness}
+                        onChange={(e) => setJawOpenness(Number(e.target.value))}
+                        className="w-full accent-amber-600"
+                      />
+                    </div>
+
+                    <div className="pt-2 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium font-myanmar">
+                          {t(language, "presenter3d.captionToggle")}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setCaptionsOn((v) => !v)}
+                          className={cn(
+                            "rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer transition-colors",
+                            captionsOn
+                              ? "bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                              : "bg-[#EFEAE1] text-[#57534E] dark:bg-[#18181B] dark:text-[#A1A1AA]"
+                          )}
+                        >
+                          {captionsOn ? "ON" : "OFF"}
+                        </button>
+                      </div>
+                      {captionsOn && (
+                        <Input
+                          value={captionText}
+                          onChange={(e) => setCaptionText(e.target.value)}
+                          placeholder={t(language, "presenter3d.captionPlaceholder")}
+                          className="h-9 rounded-xl bg-white dark:bg-[#27272A] border-[#E7E5E4] dark:border-[#3F3F46] text-xs font-myanmar"
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {characterKind === "model" && (
+            <>
             <div className="grid grid-cols-2 gap-2.5">
               <button
                 type="button"
@@ -1065,6 +1329,8 @@ export function Presenter3DPage() {
                 className="hidden"
               />
             </label>
+            </>
+            )}
           </div>
 
           {/* 2. Aspect Ratio & Framing */}
