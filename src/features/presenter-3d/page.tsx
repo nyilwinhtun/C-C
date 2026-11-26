@@ -13,9 +13,11 @@ import {
   Share2,
   Sparkles,
   Square,
+  Tag,
   Upload,
   User,
   Video,
+  X,
 } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
 import { toast } from "@/components/ui/sonner"
@@ -45,6 +47,7 @@ import {
   type AvatarController,
   type BuiltinPresenterId,
   type LipSyncAnalyzer,
+  type PresenterOutfitColor,
 } from "@/lib/vrmLipSync"
 
 type CharacterKind = "model" | "photo"
@@ -130,6 +133,10 @@ export function Presenter3DPage() {
     mascotPresets,
     saveMascotPreset,
     deleteMascotPreset,
+    presenterLogoDataUrl,
+    presenterOutfitColor,
+    setPresenterLogoDataUrl,
+    setPresenterOutfitColor,
   } = useContentStore(
     useShallow((state) => ({
       generatedAudioUrl: state.generatedAudioUrl,
@@ -141,6 +148,10 @@ export function Presenter3DPage() {
       mascotPresets: state.mascotPresets,
       saveMascotPreset: state.saveMascotPreset,
       deleteMascotPreset: state.deleteMascotPreset,
+      presenterLogoDataUrl: state.presenterLogoDataUrl,
+      presenterOutfitColor: state.presenterOutfitColor,
+      setPresenterLogoDataUrl: state.setPresenterLogoDataUrl,
+      setPresenterOutfitColor: state.setPresenterOutfitColor,
     }))
   )
 
@@ -392,27 +403,38 @@ export function Presenter3DPage() {
     const scene = new THREE.Scene()
     sceneRef.current = scene
 
-    // Warm 3-point Studio Lighting
-    const ambientLight = new THREE.AmbientLight(0xfffaf3, 1.25)
+    // Balanced 3-Point Studio Lighting (warm key, cool fill, soft back rim)
+    const hemiLight = new THREE.HemisphereLight(0xfffaf3, 0xd6d3d1, 0.65)
+    scene.add(hemiLight)
+
+    const ambientLight = new THREE.AmbientLight(0xfffaf3, 0.28)
     scene.add(ambientLight)
 
-    const keyLight = new THREE.DirectionalLight(0xfff4e6, 1.85)
-    keyLight.position.set(1.5, 2.4, 2.2)
+    const keyLight = new THREE.DirectionalLight(0xfff2e0, 2.1)
+    keyLight.position.set(1.6, 2.2, 2.4)
     scene.add(keyLight)
 
-    const fillLight = new THREE.DirectionalLight(0xe4e4e7, 0.75)
-    fillLight.position.set(-1.8, 1.6, 1.4)
+    const fillLight = new THREE.DirectionalLight(0xdbeafe, 0.9)
+    fillLight.position.set(-1.9, 1.5, 1.6)
     scene.add(fillLight)
 
-    const rimLight = new THREE.DirectionalLight(0xfef3c7, 0.85)
-    rimLight.position.set(0, 2.0, -2.0)
+    const rimLight = new THREE.DirectionalLight(0xfde68a, 1.35)
+    rimLight.position.set(-0.4, 2.1, -2.1)
     scene.add(rimLight)
+
+    const hairRimLight = new THREE.DirectionalLight(0xe0f2fe, 0.55)
+    hairRimLight.position.set(1.1, 1.9, -1.8)
+    scene.add(hairRimLight)
 
     const camera = new THREE.PerspectiveCamera(32, 9 / 16, 0.1, 30)
     cameraRef.current = camera
 
-    // Load initial preset avatar
-    const initialAvatar = createBuiltinPresenterController(defaultPreset)
+    // Load initial preset avatar with persisted uniform & logo
+    const storeSnapshot = useContentStore.getState()
+    const initialAvatar = createBuiltinPresenterController(defaultPreset, {
+      outfitColor: storeSnapshot.presenterOutfitColor,
+      logoDataUrl: storeSnapshot.presenterLogoDataUrl,
+    })
     scene.add(initialAvatar.object)
     avatarRef.current = initialAvatar
 
@@ -619,12 +641,63 @@ export function Presenter3DPage() {
     avatarRef.current = next
   }, [])
 
+  // Sync persisted outfit color & chest logo to active built-in preset
+  useEffect(() => {
+    avatarRef.current?.setOutfitColor?.(presenterOutfitColor)
+  }, [presenterOutfitColor])
+
+  useEffect(() => {
+    avatarRef.current?.setLogoDataUrl?.(presenterLogoDataUrl)
+  }, [presenterLogoDataUrl])
+
   const handleSelectPreset = (id: BuiltinPresenterId) => {
     triggerHaptic(8)
     setPresetId(id)
     setAvatarMode("preset")
     setCustomAvatarName("")
-    swapAvatarController(createBuiltinPresenterController(id))
+    swapAvatarController(
+      createBuiltinPresenterController(id, {
+        outfitColor: presenterOutfitColor,
+        logoDataUrl: presenterLogoDataUrl,
+      })
+    )
+  }
+
+  const handleUploadUniformLogo = (e: React.ChangeEvent<HTMLInputElement> | File) => {
+    const file = e instanceof File ? e : e.target.files?.[0]
+    if (!(e instanceof File)) e.target.value = ""
+    if (!file) return
+
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) && !/\.(jpe?g|png|webp)$/i.test(file.name)) {
+      toast.error(t(language, "presenter3d.logoInvalid"))
+      return
+    }
+
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const max = 256
+        const scale = Math.min(1, max / Math.max(img.width, img.height))
+        const canvas = document.createElement("canvas")
+        canvas.width = Math.max(1, Math.round(img.width * scale))
+        canvas.height = Math.max(1, Math.round(img.height * scale))
+        const ctx = canvas.getContext("2d")
+        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height)
+        const dataUrl = canvas.toDataURL("image/png")
+        setPresenterLogoDataUrl(dataUrl)
+        toast.success(t(language, "presenter3d.logoLoaded"))
+      } catch {
+        toast.error(t(language, "presenter3d.logoInvalid"))
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      toast.error(t(language, "presenter3d.logoInvalid"))
+    }
+    img.src = url
   }
 
   const handleUploadAvatarFile = async (e: React.ChangeEvent<HTMLInputElement> | File) => {
@@ -1540,6 +1613,98 @@ export function Presenter3DPage() {
                 />
               </label>
             </FileDropzone>
+
+            {avatarMode === "preset" && (
+              <div className="rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white/80 dark:bg-[#27272A]/80 p-3 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] flex items-center gap-1.5 font-myanmar">
+                    <Tag className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                    <span>{t(language, "presenter3d.uniformTitle")}</span>
+                  </span>
+                  {presenterLogoDataUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic(6)
+                        setPresenterLogoDataUrl(null)
+                      }}
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 dark:text-rose-400 hover:underline cursor-pointer font-myanmar"
+                    >
+                      <X className="h-3 w-3" />
+                      <span>{t(language, "presenter3d.clearLogo")}</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* 4 Outfit Color Swatches */}
+                <div className="grid grid-cols-4 gap-1.5">
+                  {(
+                    [
+                      { id: "navy", hex: "#1e293b", labelKey: "presenter3d.colorNavy" },
+                      { id: "charcoal", hex: "#27272a", labelKey: "presenter3d.colorCharcoal" },
+                      { id: "emerald", hex: "#115e59", labelKey: "presenter3d.colorEmerald" },
+                      { id: "cream", hex: "#e7dfd3", labelKey: "presenter3d.colorCream" },
+                    ] as const satisfies readonly {
+                      id: PresenterOutfitColor
+                      hex: string
+                      labelKey: string
+                    }[]
+                  ).map((swatch) => (
+                    <button
+                      key={swatch.id}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic(6)
+                        setPresenterOutfitColor(swatch.id)
+                      }}
+                      className={cn(
+                        "flex items-center justify-center gap-1.5 rounded-xl border py-1.5 px-2 text-[11px] font-medium transition-all cursor-pointer font-myanmar",
+                        presenterOutfitColor === swatch.id
+                          ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#EFEAE1] dark:bg-[#18181B] text-[#1C1917] dark:text-[#F5F5F4] shadow-xs"
+                          : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#57534E] dark:text-[#A1A1AA]"
+                      )}
+                    >
+                      <span
+                        className="h-3 w-3 rounded-full border border-black/15 dark:border-white/20 shrink-0"
+                        style={{ backgroundColor: swatch.hex }}
+                        aria-hidden="true"
+                      />
+                      <span className="truncate">{t(language, swatch.labelKey)}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Chest Logo Upload / Drop Button */}
+                <FileDropzone
+                  accept={[".png", ".jpg", ".jpeg", ".webp"]}
+                  onFiles={(f) => handleUploadUniformLogo(f[0])}
+                >
+                  <label className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-[#FAF8F5] dark:bg-[#18181B]/70 py-2 px-3 text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#18181B] cursor-pointer transition-colors font-myanmar">
+                    {presenterLogoDataUrl ? (
+                      <>
+                        <img
+                          src={presenterLogoDataUrl}
+                          alt="Shop logo"
+                          className="h-5 w-5 rounded-full object-contain bg-white border border-black/10"
+                        />
+                        <span>{t(language, "presenter3d.changeLogo")}</span>
+                      </>
+                    ) : (
+                      <>
+                        <ImagePlus className="h-3.5 w-3.5" />
+                        <span>{t(language, "presenter3d.uploadLogo")}</span>
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+                      onChange={handleUploadUniformLogo}
+                      className="hidden"
+                    />
+                  </label>
+                </FileDropzone>
+              </div>
+            )}
             </>
             )}
           </div>

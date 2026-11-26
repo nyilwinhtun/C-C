@@ -164,11 +164,15 @@ export function createLipSyncAnalyzer({
   }
 }
 
+export type PresenterOutfitColor = "navy" | "charcoal" | "emerald" | "cream"
+
 export interface AvatarController {
   object: THREE.Object3D
   kind: "preset" | "vrm" | "glb"
   update: (delta: number, elapsed: number, lip: LipSyncWeights) => void
   dispose: () => void
+  setOutfitColor?: (color: PresenterOutfitColor) => void
+  setLogoDataUrl?: (dataUrl: string | null) => void
 }
 
 interface BlinkState {
@@ -408,13 +412,69 @@ export function createGlbAvatarController(root: THREE.Object3D): AvatarControlle
 
 export type BuiltinPresenterId = "female_nilar" | "male_kokhant"
 
+export interface BuiltinPresenterOptions {
+  outfitColor?: PresenterOutfitColor
+  logoDataUrl?: string | null
+}
+
+interface OutfitPalette {
+  main: number
+  lapel: number
+  trim: number
+  inner: number
+}
+
+const OUTFIT_PALETTES: Record<PresenterOutfitColor, OutfitPalette> = {
+  navy: { main: 0x1e293b, lapel: 0x0f172a, trim: 0x334155, inner: 0xf8fafc },
+  charcoal: { main: 0x27272a, lapel: 0x18181b, trim: 0x3f3f46, inner: 0xf4f4f5 },
+  emerald: { main: 0x115e59, lapel: 0x0f4c48, trim: 0x0d9488, inner: 0xfafaf9 },
+  cream: { main: 0xe7dfd3, lapel: 0xd6cbb9, trim: 0xc4b5a0, inner: 0x292524 },
+}
+
+function createDefaultCrestTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas")
+  canvas.width = 256
+  canvas.height = 256
+  const ctx = canvas.getContext("2d")
+  if (ctx) {
+    // Deep studio crest background
+    const grad = ctx.createRadialGradient(128, 108, 18, 128, 128, 128)
+    grad.addColorStop(0, "#292524")
+    grad.addColorStop(1, "#0f172a")
+    ctx.fillStyle = grad
+    ctx.beginPath()
+    ctx.arc(128, 128, 124, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Gold inner ring
+    ctx.strokeStyle = "#d4af37"
+    ctx.lineWidth = 10
+    ctx.beginPath()
+    ctx.arc(128, 128, 110, 0, Math.PI * 2)
+    ctx.stroke()
+
+    // Sleek studio monogram crest
+    ctx.fillStyle = "#faf8f5"
+    ctx.font = "700 92px Georgia, serif"
+    ctx.textAlign = "center"
+    ctx.textBaseline = "middle"
+    ctx.fillText("S", 128, 134)
+  }
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.needsUpdate = true
+  return tex
+}
+
 /**
- * Builds a clean, expressive stylized 3D presenter mesh (Female Nilar or Male Ko Khant/Thiha)
- * with articulated jaw/lips, blinking eyelids, expressive brows, chest breathing, and vocal head nod.
+ * Builds a distinct, expressive stylized 3D presenter mesh (Female Nilar or Male Ko Khant)
+ * with sculpted facial geometry, layered hair, Bomber Jacket / Blazer outfits,
+ * dynamic left-chest shop logo emblem, articulated mouth interior, blinking, and vocal head nod.
  * Works 100% offline with zero external network dependencies.
  */
 export function createBuiltinPresenterController(
-  preset: BuiltinPresenterId
+  preset: BuiltinPresenterId,
+  options: BuiltinPresenterOptions = {}
 ): AvatarController {
   const isFemale = preset === "female_nilar"
   const root = new THREE.Group()
@@ -426,64 +486,117 @@ export function createBuiltinPresenterController(
     return item
   }
 
+  const initialPalette = OUTFIT_PALETTES[options.outfitColor ?? "navy"]
+
   // Materials matching warm studio aesthetic
   const skinMat = track(
     new THREE.MeshStandardMaterial({
-      color: isFemale ? 0xf3cbb1 : 0xe4b898,
-      roughness: 0.62,
-      metalness: 0.03,
+      color: isFemale ? 0xf2cab0 : 0xe0b18e,
+      roughness: 0.58,
+      metalness: 0.02,
     })
   )
   const hairMat = track(
     new THREE.MeshStandardMaterial({
-      color: isFemale ? 0x1e1b18 : 0x18181b,
-      roughness: 0.52,
+      color: isFemale ? 0x1c1714 : 0x17171a,
+      roughness: 0.48,
       metalness: 0.08,
     })
   )
   const outfitMat = track(
     new THREE.MeshStandardMaterial({
-      color: isFemale ? 0x9f3a3a : 0x27272a,
-      roughness: 0.7,
+      color: initialPalette.main,
+      roughness: 0.68,
       metalness: 0.05,
+    })
+  )
+  const lapelMat = track(
+    new THREE.MeshStandardMaterial({
+      color: initialPalette.lapel,
+      roughness: 0.62,
+      metalness: 0.06,
+    })
+  )
+  const trimMat = track(
+    new THREE.MeshStandardMaterial({
+      color: initialPalette.trim,
+      roughness: 0.72,
+      metalness: 0.04,
     })
   )
   const innerShirtMat = track(
     new THREE.MeshStandardMaterial({
-      color: isFemale ? 0xfaf8f5 : 0xf4f4f5,
-      roughness: 0.65,
+      color: initialPalette.inner,
+      roughness: 0.64,
       metalness: 0.02,
     })
   )
-  const accentMat = track(
+  const metalAccentMat = track(
     new THREE.MeshStandardMaterial({
-      color: isFemale ? 0xd97706 : 0x52525b,
-      roughness: 0.35,
-      metalness: 0.4,
+      color: isFemale ? 0xd4af37 : 0xd4d4d8,
+      roughness: 0.25,
+      metalness: 0.78,
     })
   )
   const eyeWhiteMat = track(
     new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.2,
+      color: 0xfefefe,
+      roughness: 0.18,
     })
   )
   const irisMat = track(
     new THREE.MeshStandardMaterial({
-      color: 0x291d16,
-      roughness: 0.15,
+      color: isFemale ? 0x2d1c14 : 0x221712,
+      roughness: 0.16,
+    })
+  )
+  const pupilMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0x09090b,
+      roughness: 0.12,
+    })
+  )
+  const catchlightMat = track(
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+    })
+  )
+  const lashMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0x111113,
+      roughness: 0.4,
+    })
+  )
+  const blushMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0xe68484,
+      roughness: 0.85,
+      transparent: true,
+      opacity: 0.36,
     })
   )
   const lipMat = track(
     new THREE.MeshStandardMaterial({
-      color: isFemale ? 0xc05258 : 0xa5665d,
-      roughness: 0.45,
+      color: isFemale ? 0xc2545c : 0xa3645b,
+      roughness: 0.42,
     })
   )
   const mouthCavityMat = track(
     new THREE.MeshStandardMaterial({
-      color: 0x3b1216,
+      color: 0x3f1217,
       roughness: 0.9,
+    })
+  )
+  const teethMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0xfaf7f2,
+      roughness: 0.28,
+    })
+  )
+  const tongueMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0xb64c56,
+      roughness: 0.65,
     })
   )
 
@@ -493,50 +606,177 @@ export function createBuiltinPresenterController(
   root.add(torsoGroup)
 
   const torsoGeo = track(
-    new THREE.CylinderGeometry(isFemale ? 0.145 : 0.175, isFemale ? 0.13 : 0.155, 0.38, 28)
+    new THREE.CylinderGeometry(isFemale ? 0.142 : 0.182, isFemale ? 0.126 : 0.16, 0.39, 28)
   )
   const torsoMesh = new THREE.Mesh(torsoGeo, outfitMat)
   torsoMesh.position.set(0, 0.03, 0)
-  torsoMesh.scale.set(1.22, 1, 0.72)
+  torsoMesh.scale.set(isFemale ? 1.18 : 1.26, 1, isFemale ? 0.70 : 0.74)
   torsoGroup.add(torsoMesh)
 
-  // Inner shirt V-neck / collar
-  const collarGeo = track(new THREE.CylinderGeometry(0.085, 0.06, 0.12, 20))
-  const collarMesh = new THREE.Mesh(collarGeo, innerShirtMat)
-  collarMesh.position.set(0, 0.18, 0.03)
-  collarMesh.scale.set(1.05, 1, 0.75)
-  torsoGroup.add(collarMesh)
+  // Inner shirt / tee
+  const innerTeeGeo = track(
+    new THREE.CylinderGeometry(isFemale ? 0.078 : 0.088, isFemale ? 0.056 : 0.068, 0.14, 20)
+  )
+  const innerTee = new THREE.Mesh(innerTeeGeo, innerShirtMat)
+  innerTee.position.set(0, 0.175, 0.032)
+  innerTee.scale.set(1.06, 1, 0.76)
+  torsoGroup.add(innerTee)
+
+  if (isFemale) {
+    // Nilar: Tailored Presenter Blazer with clean lapels & V-neck inner top
+    const lapelGeo = track(new THREE.BoxGeometry(0.038, 0.175, 0.014))
+    const leftLapel = new THREE.Mesh(lapelGeo, lapelMat)
+    leftLapel.position.set(-0.044, 0.138, 0.106)
+    leftLapel.rotation.z = -0.28
+    leftLapel.rotation.y = -0.18
+    torsoGroup.add(leftLapel)
+
+    const rightLapel = new THREE.Mesh(lapelGeo, lapelMat)
+    rightLapel.position.set(0.044, 0.138, 0.106)
+    rightLapel.rotation.z = 0.28
+    rightLapel.rotation.y = 0.18
+    torsoGroup.add(rightLapel)
+
+    // Blazer button accent
+    const buttonGeo = track(new THREE.CylinderGeometry(0.011, 0.011, 0.008, 14))
+    const blazerButton = new THREE.Mesh(buttonGeo, metalAccentMat)
+    blazerButton.rotation.x = Math.PI / 2
+    blazerButton.position.set(0, 0.02, 0.106)
+    torsoGroup.add(blazerButton)
+  } else {
+    // Ko Khant: Tailored zip-up Bomber Jacket with ribbed collar & metallic zipper
+    const crewNeckGeo = track(new THREE.TorusGeometry(0.056, 0.009, 10, 22))
+    const crewNeck = new THREE.Mesh(crewNeckGeo, innerShirtMat)
+    crewNeck.rotation.x = Math.PI / 2 - 0.12
+    crewNeck.position.set(0, 0.212, 0.012)
+    torsoGroup.add(crewNeck)
+
+    const bomberCollarGeo = track(new THREE.TorusGeometry(0.072, 0.017, 12, 24, Math.PI * 1.45))
+    const bomberCollar = new THREE.Mesh(bomberCollarGeo, trimMat)
+    bomberCollar.rotation.x = Math.PI / 2
+    bomberCollar.rotation.z = Math.PI * 0.78
+    bomberCollar.position.set(0, 0.218, 0.005)
+    torsoGroup.add(bomberCollar)
+
+    // Center metallic zipper track + pull tab
+    const zipperGeo = track(new THREE.BoxGeometry(0.010, 0.255, 0.012))
+    const zipperTrack = new THREE.Mesh(zipperGeo, metalAccentMat)
+    zipperTrack.position.set(0, 0.065, 0.129)
+    torsoGroup.add(zipperTrack)
+
+    const pullGeo = track(new THREE.BoxGeometry(0.014, 0.022, 0.010))
+    const zipperPull = new THREE.Mesh(pullGeo, metalAccentMat)
+    zipperPull.position.set(0, 0.175, 0.136)
+    torsoGroup.add(zipperPull)
+
+    // Subtle bomber pocket welt accents
+    const weltGeo = track(new THREE.BoxGeometry(0.055, 0.012, 0.010))
+    const leftWelt = new THREE.Mesh(weltGeo, lapelMat)
+    leftWelt.position.set(-0.095, -0.04, 0.118)
+    leftWelt.rotation.z = 0.22
+    leftWelt.rotation.y = -0.3
+    torsoGroup.add(leftWelt)
+
+    const rightWelt = new THREE.Mesh(weltGeo, lapelMat)
+    rightWelt.position.set(0.095, -0.04, 0.118)
+    rightWelt.rotation.z = -0.22
+    rightWelt.rotation.y = 0.3
+    torsoGroup.add(rightWelt)
+  }
 
   // Shoulders
-  const shoulderGeo = track(new THREE.SphereGeometry(isFemale ? 0.075 : 0.088, 20, 16))
+  const shoulderGeo = track(new THREE.SphereGeometry(isFemale ? 0.072 : 0.092, 20, 16))
   const leftShoulder = new THREE.Mesh(shoulderGeo, outfitMat)
-  leftShoulder.position.set(isFemale ? -0.19 : -0.225, 0.16, 0)
+  leftShoulder.position.set(isFemale ? -0.185 : -0.235, 0.16, 0)
   torsoGroup.add(leftShoulder)
 
   const rightShoulder = new THREE.Mesh(shoulderGeo, outfitMat)
-  rightShoulder.position.set(isFemale ? 0.19 : 0.225, 0.16, 0)
+  rightShoulder.position.set(isFemale ? 0.185 : 0.235, 0.16, 0)
   torsoGroup.add(rightShoulder)
 
   // Upper arms
-  const armGeo = track(new THREE.CylinderGeometry(0.048, 0.042, 0.28, 16))
+  const armGeo = track(
+    new THREE.CylinderGeometry(isFemale ? 0.045 : 0.054, isFemale ? 0.039 : 0.046, 0.28, 16)
+  )
   const leftArm = new THREE.Mesh(armGeo, outfitMat)
-  leftArm.position.set(isFemale ? -0.215 : -0.25, 0.02, 0)
+  leftArm.position.set(isFemale ? -0.208 : -0.26, 0.02, 0)
   leftArm.rotation.z = 0.08
   torsoGroup.add(leftArm)
 
   const rightArm = new THREE.Mesh(armGeo, outfitMat)
-  rightArm.position.set(isFemale ? 0.215 : 0.25, 0.02, 0)
+  rightArm.position.set(isFemale ? 0.208 : 0.26, 0.02, 0)
   rightArm.rotation.z = -0.08
   torsoGroup.add(rightArm)
 
-  // Lapel / Studio Mic Clip accent
-  const micClipGeo = track(new THREE.BoxGeometry(0.018, 0.032, 0.015))
-  const micClip = new THREE.Mesh(micClipGeo, accentMat)
-  micClip.position.set(0.065, 0.14, 0.115)
-  torsoGroup.add(micClip)
+  // Left-Chest Shop Logo Badge (dynamically renders uploaded shop logo or default monogram crest)
+  const defaultCrestTex = track(createDefaultCrestTexture())
+  let activeLogoTex: THREE.Texture | null = null
+  const logoFaceMat = track(
+    new THREE.MeshStandardMaterial({
+      map: defaultCrestTex,
+      roughness: 0.35,
+      metalness: 0.08,
+      transparent: true,
+    })
+  )
 
-  // Neck
-  const neckGeo = track(new THREE.CylinderGeometry(0.048, 0.056, 0.11, 20))
+  const badgeGroup = new THREE.Group()
+  badgeGroup.position.set(isFemale ? 0.074 : 0.086, 0.105, isFemale ? 0.104 : 0.122)
+  badgeGroup.rotation.y = 0.26
+  badgeGroup.rotation.x = -0.08
+  torsoGroup.add(badgeGroup)
+
+  const badgeRimGeo = track(new THREE.CylinderGeometry(0.026, 0.026, 0.005, 24))
+  const badgeRim = new THREE.Mesh(badgeRimGeo, metalAccentMat)
+  badgeRim.rotation.x = Math.PI / 2
+  badgeGroup.add(badgeRim)
+
+  const badgeFaceGeo = track(new THREE.CircleGeometry(0.0235, 24))
+  const badgeFace = new THREE.Mesh(badgeFaceGeo, logoFaceMat)
+  badgeFace.position.z = 0.0032
+  badgeGroup.add(badgeFace)
+
+  const applyLogoDataUrl = (dataUrl: string | null | undefined) => {
+    const clean = typeof dataUrl === "string" ? dataUrl.trim() : ""
+    if (!clean) {
+      if (activeLogoTex) {
+        activeLogoTex.dispose()
+        activeLogoTex = null
+      }
+      logoFaceMat.map = defaultCrestTex
+      logoFaceMat.needsUpdate = true
+      return
+    }
+    const loader = new THREE.TextureLoader()
+    loader.load(
+      clean,
+      (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace
+        tex.needsUpdate = true
+        if (activeLogoTex) {
+          activeLogoTex.dispose()
+        }
+        activeLogoTex = tex
+        logoFaceMat.map = tex
+        logoFaceMat.needsUpdate = true
+      },
+      undefined,
+      () => {
+        // Fallback to default crest if image fails to load
+        logoFaceMat.map = defaultCrestTex
+        logoFaceMat.needsUpdate = true
+      }
+    )
+  }
+
+  if (options.logoDataUrl) {
+    applyLogoDataUrl(options.logoDataUrl)
+  }
+
+  // Neck (broader for Ko Khant, graceful for Nilar)
+  const neckGeo = track(
+    new THREE.CylinderGeometry(isFemale ? 0.043 : 0.054, isFemale ? 0.050 : 0.062, 0.115, 20)
+  )
   const neckMesh = new THREE.Mesh(neckGeo, skinMat)
   neckMesh.position.set(0, 0.25, 0)
   torsoGroup.add(neckMesh)
@@ -546,97 +786,212 @@ export function createBuiltinPresenterController(
   headGroup.position.set(0, 0.34, 0.01)
   torsoGroup.add(headGroup)
 
-  // Cranium / Face
-  const headGeo = track(new THREE.SphereGeometry(0.135, 32, 28))
+  // Cranium + Distinct Facial Sculpting
+  const headGeo = track(new THREE.SphereGeometry(isFemale ? 0.128 : 0.132, 32, 28))
   const headMesh = new THREE.Mesh(headGeo, skinMat)
-  headMesh.position.set(0, 0.07, 0)
-  headMesh.scale.set(0.92, 1.08, 0.96)
+  headMesh.position.set(0, 0.074, 0)
+  headMesh.scale.set(isFemale ? 0.90 : 0.96, isFemale ? 1.04 : 1.04, isFemale ? 0.94 : 0.96)
   headGroup.add(headMesh)
 
+  if (isFemale) {
+    // Nilar: Softer, slender V-line lower face & chin + warm cheek blush
+    const vJawGeo = track(new THREE.SphereGeometry(0.088, 24, 20))
+    const vJawMesh = new THREE.Mesh(vJawGeo, skinMat)
+    vJawMesh.position.set(0, 0.018, 0.018)
+    vJawMesh.scale.set(0.84, 1.02, 0.86)
+    headGroup.add(vJawMesh)
+
+    const chinGeo = track(new THREE.SphereGeometry(0.032, 16, 14))
+    const chinMesh = new THREE.Mesh(chinGeo, skinMat)
+    chinMesh.position.set(0, -0.042, 0.054)
+    chinMesh.scale.set(0.95, 0.88, 0.9)
+    headGroup.add(chinMesh)
+
+    // Subtle warm cheek blush accents
+    const blushGeo = track(new THREE.SphereGeometry(0.024, 14, 12))
+    const leftBlush = new THREE.Mesh(blushGeo, blushMat)
+    leftBlush.position.set(-0.062, 0.042, 0.095)
+    leftBlush.scale.set(1.15, 0.65, 0.35)
+    headGroup.add(leftBlush)
+
+    const rightBlush = new THREE.Mesh(blushGeo, blushMat)
+    rightBlush.position.set(0.062, 0.042, 0.095)
+    rightBlush.scale.set(1.15, 0.65, 0.35)
+    headGroup.add(rightBlush)
+  } else {
+    // Ko Khant: Sculpted masculine jawline & defined chin
+    const jawGeo = track(new THREE.CylinderGeometry(0.102, 0.072, 0.088, 20))
+    const jawMesh = new THREE.Mesh(jawGeo, skinMat)
+    jawMesh.position.set(0, 0.010, 0.018)
+    jawMesh.scale.set(1.06, 1.0, 0.90)
+    headGroup.add(jawMesh)
+
+    const chinGeo = track(new THREE.BoxGeometry(0.058, 0.034, 0.042))
+    const chinMesh = new THREE.Mesh(chinGeo, skinMat)
+    chinMesh.position.set(0, -0.036, 0.056)
+    headGroup.add(chinMesh)
+  }
+
   // Ears
-  const earGeo = track(new THREE.SphereGeometry(0.026, 14, 12))
+  const earGeo = track(new THREE.SphereGeometry(0.025, 14, 12))
   const leftEar = new THREE.Mesh(earGeo, skinMat)
-  leftEar.position.set(-0.122, 0.065, -0.005)
+  leftEar.position.set(isFemale ? -0.116 : -0.125, 0.065, -0.005)
   leftEar.scale.set(0.55, 1, 0.7)
   headGroup.add(leftEar)
 
   const rightEar = new THREE.Mesh(earGeo, skinMat)
-  rightEar.position.set(0.122, 0.065, -0.005)
+  rightEar.position.set(isFemale ? 0.116 : 0.125, 0.065, -0.005)
   rightEar.scale.set(0.55, 1, 0.7)
   headGroup.add(rightEar)
 
   if (isFemale) {
-    const earringGeo = track(new THREE.SphereGeometry(0.01, 12, 10))
-    const leftEarring = new THREE.Mesh(earringGeo, accentMat)
-    leftEarring.position.set(-0.126, 0.035, 0.002)
+    const earringGeo = track(new THREE.SphereGeometry(0.009, 12, 10))
+    const leftEarring = new THREE.Mesh(earringGeo, metalAccentMat)
+    leftEarring.position.set(-0.12, 0.036, 0.004)
     headGroup.add(leftEarring)
 
-    const rightEarring = new THREE.Mesh(earringGeo, accentMat)
-    rightEarring.position.set(0.126, 0.035, 0.002)
+    const rightEarring = new THREE.Mesh(earringGeo, metalAccentMat)
+    rightEarring.position.set(0.12, 0.036, 0.004)
     headGroup.add(rightEarring)
   }
 
-  // Stylized Hair
-  const hairCapGeo = track(new THREE.SphereGeometry(0.143, 28, 24))
+  // Distinct Layered Hairstyles
+  let backHairGroup: THREE.Group | null = null
+  const hairCapGeo = track(new THREE.SphereGeometry(isFemale ? 0.136 : 0.138, 28, 24))
   const hairCap = new THREE.Mesh(hairCapGeo, hairMat)
-  hairCap.position.set(0, 0.095, -0.018)
-  hairCap.scale.set(0.96, 1.04, 1.0)
+  hairCap.position.set(0, 0.096, -0.018)
+  hairCap.scale.set(isFemale ? 0.95 : 0.99, 1.03, 1.0)
   headGroup.add(hairCap)
 
   if (isFemale) {
-    // Soft bob / side hair locks
-    const sideHairGeo = track(new THREE.CapsuleGeometry(0.038, 0.14, 8, 14))
-    const leftHair = new THREE.Mesh(sideHairGeo, hairMat)
-    leftHair.position.set(-0.105, 0.02, -0.015)
-    leftHair.rotation.z = -0.08
-    headGroup.add(leftHair)
+    // Soft front bangs
+    const bangGeo = track(new THREE.CapsuleGeometry(0.024, 0.055, 6, 12))
+    const leftBang = new THREE.Mesh(bangGeo, hairMat)
+    leftBang.position.set(-0.048, 0.145, 0.094)
+    leftBang.rotation.z = 0.55
+    leftBang.rotation.x = 0.35
+    headGroup.add(leftBang)
 
-    const rightHair = new THREE.Mesh(sideHairGeo, hairMat)
-    rightHair.position.set(0.105, 0.02, -0.015)
-    rightHair.rotation.z = 0.08
-    headGroup.add(rightHair)
+    const centerBang = new THREE.Mesh(bangGeo, hairMat)
+    centerBang.position.set(0.008, 0.152, 0.102)
+    centerBang.rotation.z = -0.35
+    centerBang.rotation.x = 0.38
+    headGroup.add(centerBang)
 
-    const backHairGeo = track(new THREE.CylinderGeometry(0.12, 0.135, 0.18, 20))
+    const rightBang = new THREE.Mesh(bangGeo, hairMat)
+    rightBang.position.set(0.055, 0.142, 0.090)
+    rightBang.rotation.z = -0.62
+    rightBang.rotation.x = 0.32
+    headGroup.add(rightBang)
+
+    // Face-framing side locks
+    const sideLockGeo = track(new THREE.CapsuleGeometry(0.030, 0.16, 8, 14))
+    const leftLock = new THREE.Mesh(sideLockGeo, hairMat)
+    leftLock.position.set(-0.102, 0.015, 0.012)
+    leftLock.rotation.z = -0.09
+    headGroup.add(leftLock)
+
+    const rightLock = new THREE.Mesh(sideLockGeo, hairMat)
+    rightLock.position.set(0.102, 0.015, 0.012)
+    rightLock.rotation.z = 0.09
+    headGroup.add(rightLock)
+
+    // Shoulder-length back hair group (gently sways with head rotation)
+    backHairGroup = new THREE.Group()
+    backHairGroup.position.set(0, 0.08, -0.04)
+    headGroup.add(backHairGroup)
+
+    const backHairGeo = track(new THREE.CylinderGeometry(0.116, 0.136, 0.22, 22))
     const backHair = new THREE.Mesh(backHairGeo, hairMat)
-    backHair.position.set(0, 0.01, -0.06)
-    headGroup.add(backHair)
+    backHair.position.set(0, -0.085, -0.025)
+    backHair.scale.set(1.02, 1, 0.72)
+    backHairGroup.add(backHair)
   } else {
-    // Clean swept top hair
-    const topHairGeo = track(new THREE.BoxGeometry(0.18, 0.055, 0.16))
-    const topHair = new THREE.Mesh(topHairGeo, hairMat)
-    topHair.position.set(0, 0.195, 0.015)
-    topHair.rotation.x = -0.18
-    headGroup.add(topHair)
+    // Ko Khant: Multi-layered modern side-parted / slightly wavy tapered male hair
+    const fadeGeo = track(new THREE.BoxGeometry(0.022, 0.095, 0.12))
+    const leftFade = new THREE.Mesh(fadeGeo, hairMat)
+    leftFade.position.set(-0.122, 0.105, -0.015)
+    leftFade.rotation.z = 0.08
+    headGroup.add(leftFade)
+
+    const rightFade = new THREE.Mesh(fadeGeo, hairMat)
+    rightFade.position.set(0.122, 0.105, -0.015)
+    rightFade.rotation.z = -0.08
+    headGroup.add(rightFade)
+
+    // Styled crown volume
+    const crownGeo = track(new THREE.SphereGeometry(0.118, 22, 18))
+    const crown = new THREE.Mesh(crownGeo, hairMat)
+    crown.position.set(-0.012, 0.168, -0.004)
+    crown.scale.set(1.05, 0.52, 1.05)
+    headGroup.add(crown)
+
+    // Side-parted wavy front volume
+    const waveMainGeo = track(new THREE.CapsuleGeometry(0.036, 0.11, 8, 14))
+    const waveMain = new THREE.Mesh(waveMainGeo, hairMat)
+    waveMain.position.set(0.018, 0.184, 0.056)
+    waveMain.rotation.z = Math.PI / 2 - 0.16
+    waveMain.rotation.y = 0.18
+    headGroup.add(waveMain)
+
+    const waveSubGeo = track(new THREE.CapsuleGeometry(0.026, 0.075, 8, 12))
+    const waveSub = new THREE.Mesh(waveSubGeo, hairMat)
+    waveSub.position.set(-0.055, 0.172, 0.062)
+    waveSub.rotation.z = Math.PI / 2 + 0.25
+    waveSub.rotation.y = -0.22
+    headGroup.add(waveSub)
   }
 
   // Nose
-  const noseGeo = track(new THREE.ConeGeometry(0.014, 0.035, 12))
+  const noseGeo = track(new THREE.ConeGeometry(isFemale ? 0.012 : 0.015, 0.034, 12))
   const noseMesh = new THREE.Mesh(noseGeo, skinMat)
-  noseMesh.position.set(0, 0.055, 0.128)
+  noseMesh.position.set(0, 0.052, isFemale ? 0.122 : 0.129)
   noseMesh.rotation.x = 0.35
   headGroup.add(noseMesh)
 
-  // Eyes + Eyelids (for blinking)
-  const eyeGeo = track(new THREE.SphereGeometry(0.021, 18, 14))
-  const irisGeo = track(new THREE.SphereGeometry(0.012, 14, 12))
-  const eyelidGeo = track(new THREE.SphereGeometry(0.023, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.55))
+  // Eyes + Iris + Pupil + Specular Catchlight + Eyelashes (Nilar) + Eyelids
+  const eyeRadius = isFemale ? 0.0225 : 0.0195
+  const eyeGeo = track(new THREE.SphereGeometry(eyeRadius, 18, 14))
+  const irisGeo = track(new THREE.SphereGeometry(eyeRadius * 0.58, 14, 12))
+  const pupilGeo = track(new THREE.SphereGeometry(eyeRadius * 0.32, 12, 10))
+  const catchGeo = track(new THREE.SphereGeometry(0.0032, 8, 8))
+  const eyelidGeo = track(
+    new THREE.SphereGeometry(eyeRadius + 0.0022, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.56)
+  )
+  const lashGeo = track(new THREE.TorusGeometry(eyeRadius + 0.001, 0.0026, 8, 16, Math.PI * 0.85))
 
   const createEye = (xPos: number) => {
     const eyeGroup = new THREE.Group()
-    eyeGroup.position.set(xPos, 0.082, 0.112)
+    eyeGroup.position.set(xPos, 0.082, isFemale ? 0.106 : 0.114)
 
     const white = new THREE.Mesh(eyeGeo, eyeWhiteMat)
-    white.scale.set(1, 0.88, 0.65)
+    white.scale.set(1, isFemale ? 0.92 : 0.84, 0.65)
     eyeGroup.add(white)
 
     const iris = new THREE.Mesh(irisGeo, irisMat)
-    iris.position.set(0, 0, 0.011)
-    iris.scale.set(1, 1, 0.6)
+    iris.position.set(0, 0, eyeRadius * 0.52)
+    iris.scale.set(1, 1, 0.55)
     eyeGroup.add(iris)
+
+    const pupil = new THREE.Mesh(pupilGeo, pupilMat)
+    pupil.position.set(0, 0, eyeRadius * 0.64)
+    pupil.scale.set(1, 1, 0.5)
+    eyeGroup.add(pupil)
+
+    const catchlight = new THREE.Mesh(catchGeo, catchlightMat)
+    catchlight.position.set(0.0045, 0.0045, eyeRadius * 0.74)
+    eyeGroup.add(catchlight)
+
+    if (isFemale) {
+      const lash = new THREE.Mesh(lashGeo, lashMat)
+      lash.position.set(0, 0.003, 0.005)
+      lash.rotation.z = Math.PI * 0.08
+      eyeGroup.add(lash)
+    }
 
     const lid = new THREE.Mesh(eyelidGeo, skinMat)
     lid.position.set(0, 0.002, 0.002)
-    lid.rotation.x = -0.6 // open position
+    lid.rotation.x = -0.62 // open position
     eyeGroup.add(lid)
 
     headGroup.add(eyeGroup)
@@ -646,38 +1001,52 @@ export function createBuiltinPresenterController(
   const leftEyelid = createEye(-0.044)
   const rightEyelid = createEye(0.044)
 
-  // Eyebrows
-  const browGeo = track(new THREE.BoxGeometry(0.038, 0.007, 0.012))
+  // Eyebrows (slender arched for Nilar, thicker confident for Ko Khant)
+  const browGeo = track(
+    new THREE.BoxGeometry(isFemale ? 0.036 : 0.044, isFemale ? 0.0055 : 0.010, 0.012)
+  )
+  const browBaseY = isFemale ? 0.116 : 0.113
   const leftBrow = new THREE.Mesh(browGeo, hairMat)
-  leftBrow.position.set(-0.044, 0.114, 0.115)
-  leftBrow.rotation.z = 0.06
+  leftBrow.position.set(-0.044, browBaseY, isFemale ? 0.108 : 0.118)
+  leftBrow.rotation.z = isFemale ? 0.11 : 0.05
   headGroup.add(leftBrow)
 
   const rightBrow = new THREE.Mesh(browGeo, hairMat)
-  rightBrow.position.set(0.044, 0.114, 0.115)
-  rightBrow.rotation.z = -0.06
+  rightBrow.position.set(0.044, browBaseY, isFemale ? 0.108 : 0.118)
+  rightBrow.rotation.z = isFemale ? -0.11 : -0.05
   headGroup.add(rightBrow)
 
-  // Articulated Mouth (cavity + upper lip + lower lip)
+  // Articulated Mouth (cavity + upper teeth hint + tongue + upper lip + lower lip)
   const mouthGroup = new THREE.Group()
-  mouthGroup.position.set(0, 0.014, 0.118)
+  mouthGroup.position.set(0, 0.012, isFemale ? 0.112 : 0.120)
   headGroup.add(mouthGroup)
 
   const cavityGeo = track(new THREE.SphereGeometry(0.024, 16, 12))
   const mouthCavity = new THREE.Mesh(cavityGeo, mouthCavityMat)
-  mouthCavity.scale.set(1.1, 0.15, 0.4)
+  mouthCavity.scale.set(1.1, 0.15, 0.42)
   mouthCavity.position.set(0, 0, -0.004)
   mouthGroup.add(mouthCavity)
 
-  const lipGeo = track(new THREE.CapsuleGeometry(0.0055, 0.032, 6, 12))
+  const teethGeo = track(new THREE.BoxGeometry(0.028, 0.0065, 0.008))
+  const upperTeeth = new THREE.Mesh(teethGeo, teethMat)
+  upperTeeth.position.set(0, 0.004, 0.001)
+  mouthGroup.add(upperTeeth)
+
+  const tongueGeo = track(new THREE.SphereGeometry(0.014, 12, 10))
+  const tongueMesh = new THREE.Mesh(tongueGeo, tongueMat)
+  tongueMesh.scale.set(1.05, 0.42, 0.78)
+  tongueMesh.position.set(0, -0.006, 0.000)
+  mouthGroup.add(tongueMesh)
+
+  const lipGeo = track(new THREE.CapsuleGeometry(isFemale ? 0.0052 : 0.0056, 0.030, 6, 12))
   const upperLip = new THREE.Mesh(lipGeo, lipMat)
   upperLip.rotation.z = Math.PI / 2
-  upperLip.position.set(0, 0.005, 0.004)
+  upperLip.position.set(0, 0.005, 0.0055)
   mouthGroup.add(upperLip)
 
   const lowerLip = new THREE.Mesh(lipGeo, lipMat)
   lowerLip.rotation.z = Math.PI / 2
-  lowerLip.position.set(0, -0.005, 0.004)
+  lowerLip.position.set(0, -0.005, 0.0055)
   mouthGroup.add(lowerLip)
 
   const blink = createBlinkState(0)
@@ -689,10 +1058,15 @@ export function createBuiltinPresenterController(
     const dt = Math.min(delta, 0.05)
 
     // 1. Lip-sync mouth articulation
-    const openness = clamp01(lip.aa * 0.95 + lip.oh * 0.4)
+    const openness = clamp01(lip.aa * 0.95 + lip.oh * 0.42)
     const spread = clamp01(1 + lip.ee * 0.45 + lip.ih * 0.25 - lip.oh * 0.25)
 
     mouthCavity.scale.set(1.05 * spread, 0.12 + openness * 0.95, 0.45)
+    upperTeeth.visible = openness > 0.08 || lip.ee > 0.15
+    upperTeeth.position.y = 0.003 + openness * 0.004
+    tongueMesh.visible = openness > 0.12
+    tongueMesh.position.y = -0.004 - openness * 0.011
+
     upperLip.position.y = 0.004 + openness * 0.006
     lowerLip.position.y = -0.004 - openness * 0.022
     upperLip.scale.set(1, spread, 1)
@@ -700,12 +1074,12 @@ export function createBuiltinPresenterController(
 
     // Subtle brow lift with vocal energy
     const browLift = lip.energy * 0.006
-    leftBrow.position.y = 0.114 + browLift
-    rightBrow.position.y = 0.114 + browLift
+    leftBrow.position.y = browBaseY + browLift
+    rightBrow.position.y = browBaseY + browLift
 
     // 2. Automatic eye blinking every 3–5 seconds
     const blinkWeight = sampleBlinkValue(blink, elapsed)
-    const lidRot = -0.6 + blinkWeight * 1.45
+    const lidRot = -0.62 + blinkWeight * 1.48
     leftEyelid.rotation.x = lidRot
     rightEyelid.rotation.x = lidRot
 
@@ -727,13 +1101,31 @@ export function createBuiltinPresenterController(
     headGroup.rotation.y = smoothYaw
     headGroup.rotation.z = smoothRoll
 
+    // Gentle back-hair sway on Nilar
+    if (backHairGroup) {
+      backHairGroup.rotation.z = -smoothRoll * 0.65
+      backHairGroup.rotation.x = -smoothPitch * 0.35
+    }
+
     // 4. Gentle idle chest breathing motion
     const breath = Math.sin(elapsed * 1.6)
     torsoGroup.position.y = 1.05 + breath * 0.004
     torsoGroup.rotation.x = breath * 0.014
   }
 
+  const setOutfitColor = (color: PresenterOutfitColor) => {
+    const pal = OUTFIT_PALETTES[color] ?? OUTFIT_PALETTES.navy
+    outfitMat.color.setHex(pal.main)
+    lapelMat.color.setHex(pal.lapel)
+    trimMat.color.setHex(pal.trim)
+    innerShirtMat.color.setHex(pal.inner)
+  }
+
   const dispose = () => {
+    if (activeLogoTex) {
+      activeLogoTex.dispose()
+      activeLogoTex = null
+    }
     for (const d of disposables) {
       d.dispose()
     }
@@ -744,6 +1136,8 @@ export function createBuiltinPresenterController(
     kind: "preset",
     update,
     dispose,
+    setOutfitColor,
+    setLogoDataUrl: applyLogoDataUrl,
   }
 }
 

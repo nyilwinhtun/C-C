@@ -123,6 +123,7 @@ export type EditorialTone =
 export type EditorialLength = "short" | "medium" | "detailed"
 
 export type MicFilterMode = "raw" | "light"
+export type PresenterOutfitColor = "navy" | "charcoal" | "emerald" | "cream"
 
 export interface ShopProfile {
   name: string
@@ -176,6 +177,8 @@ interface ContentState {
   customNiche: string
   autoAppendShopCta: boolean
   shopLogoDataUrl: string | null
+  presenterLogoDataUrl: string | null
+  presenterOutfitColor: PresenterOutfitColor
   posterDraft: PosterDraft | null
   uploadedVideoFile: File | null
   videoPreviewUrl: string | null
@@ -239,6 +242,8 @@ interface ContentState {
   setCustomNiche: (niche: string) => void
   setAutoAppendShopCta: (enabled: boolean) => void
   setShopLogoDataUrl: (dataUrl: string | null) => void
+  setPresenterLogoDataUrl: (dataUrl: string | null) => void
+  setPresenterOutfitColor: (color: PresenterOutfitColor) => void
   setPosterDraft: (draft: PosterDraft | null) => void
   setUploadedVideo: (file: File | null, previewUrl: string | null) => void
   setUploadedPhotos: (photos: UploadedPhotoItem[]) => void
@@ -335,6 +340,8 @@ export const useContentStore = create<ContentState>()(
       customNiche: "",
       autoAppendShopCta: false,
       shopLogoDataUrl: null,
+      presenterLogoDataUrl: null,
+      presenterOutfitColor: "navy",
       posterDraft: null,
       uploadedVideoFile: null,
       videoPreviewUrl: null,
@@ -576,6 +583,8 @@ export const useContentStore = create<ContentState>()(
       setCustomNiche: (customNiche) => set({ customNiche }),
       setAutoAppendShopCta: (autoAppendShopCta) => set({ autoAppendShopCta }),
       setShopLogoDataUrl: (shopLogoDataUrl) => set({ shopLogoDataUrl }),
+      setPresenterLogoDataUrl: (presenterLogoDataUrl) => set({ presenterLogoDataUrl }),
+      setPresenterOutfitColor: (presenterOutfitColor) => set({ presenterOutfitColor }),
       setPosterDraft: (posterDraft) => set({ posterDraft }),
       setUploadedVideo: (file, previewUrl) =>
         set((state) => {
@@ -1167,6 +1176,8 @@ export const useContentStore = create<ContentState>()(
         customNiche: state.customNiche ?? "",
         autoAppendShopCta: state.autoAppendShopCta ?? false,
         shopLogoDataUrl: state.shopLogoDataUrl ?? null,
+        presenterLogoDataUrl: state.presenterLogoDataUrl ?? null,
+        presenterOutfitColor: state.presenterOutfitColor ?? "navy",
         videoProductNote: state.videoProductNote ?? "",
         videoPlatform: state.videoPlatform ?? "TikTok / Reels",
         videoOutputLanguage: state.videoOutputLanguage ?? "my",
@@ -1211,6 +1222,17 @@ export const useContentStore = create<ContentState>()(
                 : false
               : normalizedCat === "online_shop",
           draftInput: normalizedDraft,
+          presenterLogoDataUrl:
+            typeof persisted.presenterLogoDataUrl === "string"
+              ? persisted.presenterLogoDataUrl
+              : null,
+          presenterOutfitColor:
+            persisted.presenterOutfitColor === "navy" ||
+            persisted.presenterOutfitColor === "charcoal" ||
+            persisted.presenterOutfitColor === "emerald" ||
+            persisted.presenterOutfitColor === "cream"
+              ? persisted.presenterOutfitColor
+              : "navy",
         }
       },
     }
