@@ -182,6 +182,8 @@ export interface AvatarController {
   object: THREE.Object3D
   kind: "vrm" | "glb"
   update: (delta: number, elapsed: number, lip: LipSyncWeights) => void
+  setOrbitRotation?: (yaw: number, pitch?: number) => void
+  setAutoOrbit?: (enabled: boolean) => void
   dispose: () => void
 }
 
@@ -371,6 +373,10 @@ export function createGlbAvatarController(root: THREE.Object3D): AvatarControlle
   const blink = createBlinkState(0)
   let smoothPitch = 0
   let smoothYaw = 0
+  let userOrbitYaw = 0
+  let userOrbitPitch = 0
+  let autoOrbitEnabled = false
+  let autoOrbitAngle = 0
 
   const applyMorph = (names: string[], value: number) => {
     for (const mesh of morphMeshes) {
@@ -396,10 +402,15 @@ export function createGlbAvatarController(root: THREE.Object3D): AvatarControlle
     applyMorph(["viseme_I", "ih", "Fcl_MTH_I"], lip.ih)
     applyMorph(["eyeBlinkLeft", "eyeBlinkRight", "blink", "Fcl_EYE_Close"], blinkWeight)
 
-    const isSpeaking = lip.aa > 0.15
-    const vocalBoost = isSpeaking ? (lip.aa - 0.15) * 0.1 : 0
-    const targetPitch = Math.sin(elapsed * 5.0) * vocalBoost
-    const targetYaw = Math.sin(elapsed * 1.3) * (isSpeaking ? 0.05 : 0.02)
+    if (autoOrbitEnabled) {
+      autoOrbitAngle = (autoOrbitAngle + dt * 0.75) % (Math.PI * 2)
+    }
+
+    const isSpeaking = lip.aa > 0.15 || lip.energy > 0.15
+    const vocalBoost = isSpeaking ? Math.max(lip.aa, lip.energy) * 0.08 : 0
+    const targetPitch = Math.sin(elapsed * 5.0) * vocalBoost + userOrbitPitch
+    const targetYaw =
+      Math.sin(elapsed * 1.15) * (isSpeaking ? 0.12 : 0.06) + userOrbitYaw + autoOrbitAngle
 
     const alpha = 1 - Math.exp(-8 * dt)
     smoothPitch = lerp(smoothPitch, targetPitch, alpha)
@@ -407,7 +418,20 @@ export function createGlbAvatarController(root: THREE.Object3D): AvatarControlle
 
     root.rotation.x = smoothPitch
     root.rotation.y = smoothYaw
-    root.position.y = baseY + Math.sin(elapsed * 1.6) * 0.005
+    root.position.y =
+      baseY + Math.sin(elapsed * 1.6) * 0.012 + (isSpeaking ? lip.energy * 0.015 : 0)
+  }
+
+  const setOrbitRotation = (yaw: number, pitch = 0) => {
+    userOrbitYaw = yaw
+    userOrbitPitch = Math.max(-0.55, Math.min(0.55, pitch))
+  }
+
+  const setAutoOrbit = (enabled: boolean) => {
+    autoOrbitEnabled = enabled
+    if (!enabled) {
+      autoOrbitAngle = 0
+    }
   }
 
   const dispose = () => {
@@ -418,6 +442,8 @@ export function createGlbAvatarController(root: THREE.Object3D): AvatarControlle
     object: root,
     kind: "glb",
     update,
+    setOrbitRotation,
+    setAutoOrbit,
     dispose,
   }
 }

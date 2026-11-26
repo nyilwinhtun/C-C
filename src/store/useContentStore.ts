@@ -195,6 +195,7 @@ interface ContentState {
   presenterStudioSet: PresenterStudioSet
   presenterShowLowerThird: boolean
   presenterShowCornerLogo: boolean
+  hfToken: string
   posterDraft: PosterDraft | null
   uploadedVideoFile: File | null
   videoPreviewUrl: string | null
@@ -269,6 +270,7 @@ interface ContentState {
   setPresenterStudioSet: (studioSet: PresenterStudioSet) => void
   setPresenterShowLowerThird: (show: boolean) => void
   setPresenterShowCornerLogo: (show: boolean) => void
+  setHfToken: (token: string) => void
   setPosterDraft: (draft: PosterDraft | null) => void
   setUploadedVideo: (file: File | null, previewUrl: string | null) => void
   setUploadedPhotos: (photos: UploadedPhotoItem[]) => void
@@ -376,6 +378,7 @@ export const useContentStore = create<ContentState>()(
       presenterStudioSet: "mobile_showroom",
       presenterShowLowerThird: true,
       presenterShowCornerLogo: true,
+      hfToken: "",
       posterDraft: null,
       uploadedVideoFile: null,
       videoPreviewUrl: null,
@@ -636,6 +639,7 @@ export const useContentStore = create<ContentState>()(
       setPresenterStudioSet: (presenterStudioSet) => set({ presenterStudioSet }),
       setPresenterShowLowerThird: (presenterShowLowerThird) => set({ presenterShowLowerThird }),
       setPresenterShowCornerLogo: (presenterShowCornerLogo) => set({ presenterShowCornerLogo }),
+      setHfToken: (hfToken) => set({ hfToken: hfToken.trim() }),
       setPosterDraft: (posterDraft) => set({ posterDraft }),
       setUploadedVideo: (file, previewUrl) =>
         set((state) => {
@@ -1238,6 +1242,7 @@ export const useContentStore = create<ContentState>()(
         presenterStudioSet: state.presenterStudioSet ?? "mobile_showroom",
         presenterShowLowerThird: state.presenterShowLowerThird ?? true,
         presenterShowCornerLogo: state.presenterShowCornerLogo ?? true,
+        hfToken: state.hfToken ?? "",
         videoProductNote: state.videoProductNote ?? "",
         videoPlatform: state.videoPlatform ?? "TikTok / Reels",
         videoOutputLanguage: state.videoOutputLanguage ?? "my",
@@ -1337,6 +1342,7 @@ export const useContentStore = create<ContentState>()(
             persisted.presenter3dPopMotion === "vocal_bounce"
               ? persisted.presenter3dPopMotion
               : "orbit_sway",
+          hfToken: typeof persisted.hfToken === "string" ? persisted.hfToken : "",
         }
       },
     }
