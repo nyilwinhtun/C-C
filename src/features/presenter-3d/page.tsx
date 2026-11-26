@@ -13,7 +13,6 @@ import {
   Share2,
   Sparkles,
   Square,
-  Tag,
   Upload,
   User,
   Video,
@@ -29,7 +28,6 @@ import { Label } from "@/components/ui/label"
 import { cn, triggerHaptic } from "@/lib/utils"
 import { t } from "@/locales/translations"
 import { useContentStore } from "@/store/useContentStore"
-import { detectMouthFromImage } from "@/lib/mouthDetector"
 import { useUIStore } from "@/store/useUIStore"
 import { formatAudioClockDuration } from "@/api/ttsService"
 import {
@@ -37,28 +35,28 @@ import {
   unlockIosAudio,
 } from "@/lib/iosAudio"
 import {
-  createBuiltinPresenterController,
   createLipSyncAnalyzer,
   createStudioBackdropGroup,
   drawBroadcastLowerThird,
   drawCaptionBar,
   drawCornerLogoWatermark,
-  drawTalkingPhotoFrame,
   drawPresenterCardFrame,
-  getTalkingPhotoRect,
-  loadCustomAvatarFromFile,
+  loadAvatarController,
   type AvatarController,
   type BuiltinPresenterId,
   type LipSyncAnalyzer,
-  type PresenterGestureStyle,
-  type PresenterOutfitColor,
   type PresenterStudioSet,
   type StudioBackdropController,
 } from "@/lib/vrmLipSync"
 
-type CharacterKind = "model" | "photo"
+type CharacterKind = "photo" | "model"
 type AspectPreset = "9:16" | "1:1"
 type FramingPreset = "upper_body" | "close_up"
+
+const PRESET_VRM_PATHS: Record<BuiltinPresenterId, string> = {
+  female_nilar: "/models/nilar.vrm",
+  male_kokhant: "/models/kokhant.vrm",
+}
 
 interface ExportedVideoState {
   url: string
@@ -138,15 +136,13 @@ export function Presenter3DPage() {
     mascotPresets,
     saveMascotPreset,
     deleteMascotPreset,
+    presenterMascotDataUrl,
     presenterLogoDataUrl,
-    presenterOutfitColor,
-    presenterGestureStyle,
     presenterStudioSet,
     presenterShowLowerThird,
     presenterShowCornerLogo,
+    setPresenterMascotDataUrl,
     setPresenterLogoDataUrl,
-    setPresenterOutfitColor,
-    setPresenterGestureStyle,
     setPresenterStudioSet,
     setPresenterShowLowerThird,
     setPresenterShowCornerLogo,
@@ -161,15 +157,13 @@ export function Presenter3DPage() {
       mascotPresets: state.mascotPresets,
       saveMascotPreset: state.saveMascotPreset,
       deleteMascotPreset: state.deleteMascotPreset,
+      presenterMascotDataUrl: state.presenterMascotDataUrl,
       presenterLogoDataUrl: state.presenterLogoDataUrl,
-      presenterOutfitColor: state.presenterOutfitColor,
-      presenterGestureStyle: state.presenterGestureStyle,
       presenterStudioSet: state.presenterStudioSet,
       presenterShowLowerThird: state.presenterShowLowerThird,
       presenterShowCornerLogo: state.presenterShowCornerLogo,
+      setPresenterMascotDataUrl: state.setPresenterMascotDataUrl,
       setPresenterLogoDataUrl: state.setPresenterLogoDataUrl,
-      setPresenterOutfitColor: state.setPresenterOutfitColor,
-      setPresenterGestureStyle: state.setPresenterGestureStyle,
       setPresenterStudioSet: state.setPresenterStudioSet,
       setPresenterShowLowerThird: state.setPresenterShowLowerThird,
       setPresenterShowCornerLogo: state.setPresenterShowCornerLogo,
@@ -184,30 +178,20 @@ export function Presenter3DPage() {
     return "female_nilar"
   }, [selectedVoice])
 
-  // Character & Scene state
-  const [characterKind, setCharacterKind] = useState<CharacterKind>("model")
+  // Character & Scene state (2D Mascot Motion Card is the default)
+  const [characterKind, setCharacterKind] = useState<CharacterKind>("photo")
   const [photoDims, setPhotoDims] = useState<{ w: number; h: number } | null>(null)
   const [photoName, setPhotoName] = useState("")
-  const [mouthX, setMouthX] = useState(0.5)
-  const [mouthY, setMouthY] = useState(0.42)
-  const [mouthWidth, setMouthWidth] = useState(0.12)
-  const [jawOpenness, setJawOpenness] = useState(1)
-  const [jawBottom, setJawBottom] = useState(0.56)
-  const [jawHalfWidth, setJawHalfWidth] = useState(0.14)
-  const [photoStyle, setPhotoStyle] = useState<"lipsync" | "card">("lipsync")
-  const [showAdvanced, setShowAdvanced] = useState(false)
-  const [isDetecting, setIsDetecting] = useState(false)
   const [photoDataUrl, setPhotoDataUrl] = useState("")
   const [mascotName, setMascotName] = useState("")
   const [captionsOn, setCaptionsOn] = useState(false)
   const [captionText, setCaptionText] = useState("")
   const characterPhotoRef = useRef<HTMLImageElement | null>(null)
   const characterPhotoUrlRef = useRef<string | null>(null)
-  const stageRef = useRef<HTMLDivElement | null>(null)
-  const draggingMouthRef = useRef(false)
   const [avatarMode, setAvatarMode] = useState<"preset" | "custom">("preset")
   const [presetId, setPresetId] = useState<BuiltinPresenterId>(defaultPreset)
   const [customAvatarName, setCustomAvatarName] = useState<string>("")
+  const [hasLoaded3dAvatar, setHasLoaded3dAvatar] = useState(false)
   const [isLoadingAvatar, setIsLoadingAvatar] = useState(false)
 
   const [aspectRatio, setAspectRatio] = useState<AspectPreset>("9:16")
@@ -266,14 +250,9 @@ export function Presenter3DPage() {
     avatarMode,
     presetId,
     customAvatarName,
+    hasLoaded3dAvatar,
     photoName,
-    mouthX,
-    mouthY,
-    mouthWidth,
-    jawOpenness,
-    jawBottom,
-    jawHalfWidth,
-    photoStyle,
+    mascotName,
     captionsOn,
     captionText,
   })
@@ -290,14 +269,9 @@ export function Presenter3DPage() {
     avatarMode,
     presetId,
     customAvatarName,
+    hasLoaded3dAvatar,
     photoName,
-    mouthX,
-    mouthY,
-    mouthWidth,
-    jawOpenness,
-    jawBottom,
-    jawHalfWidth,
-    photoStyle,
+    mascotName,
     captionsOn,
     captionText,
   }
@@ -460,7 +434,6 @@ export function Presenter3DPage() {
     const camera = new THREE.PerspectiveCamera(32, 9 / 16, 0.1, 30)
     cameraRef.current = camera
 
-    // Load initial preset avatar with persisted uniform, logo & gesture style
     const storeSnapshot = useContentStore.getState()
     const studioBackdrop = createStudioBackdropGroup({
       studioSet: storeSnapshot.presenterStudioSet,
@@ -469,14 +442,6 @@ export function Presenter3DPage() {
     })
     scene.add(studioBackdrop.object)
     studioBackdropRef.current = studioBackdrop
-
-    const initialAvatar = createBuiltinPresenterController(defaultPreset, {
-      outfitColor: storeSnapshot.presenterOutfitColor,
-      logoDataUrl: storeSnapshot.presenterLogoDataUrl,
-      gestureStyle: storeSnapshot.presenterGestureStyle,
-    })
-    scene.add(initialAvatar.object)
-    avatarRef.current = initialAvatar
 
     const clock = new THREE.Clock()
     let rafId = 0
@@ -501,7 +466,7 @@ export function Presenter3DPage() {
       // Lip-sync weights from active AnalyserNode
       const lip = lipSyncRef.current
         ? lipSyncRef.current.update(delta)
-        : { aa: 0, oh: 0, ee: 0, ih: 0, energy: 0 }
+        : { aa: 0, oh: 0, ou: 0, ee: 0, ih: 0, energy: 0 }
 
       // Update playback progress if playing
       if (isPlayingRef.current && audioCtxRef.current && audioBufferRef.current) {
@@ -592,34 +557,17 @@ export function Presenter3DPage() {
         ctx.fillRect(0, 0, dims.width, dims.height)
       }
 
-      // 2. Draw character layer: 2.5D Talking Photo or 3D WebGL (with 3D Studio Set)
+      // 2. Draw character layer: 2D Mascot Motion Card (default) or 3D WebGL (.vrm/.glb)
       if (settings.characterKind === "photo") {
         const photo = characterPhotoRef.current
-        if (photo && settings.photoStyle === "card") {
+        if (photo) {
           drawPresenterCardFrame(ctx, photo, dims.width, dims.height, lip, elapsed)
-        } else if (photo) {
-          drawTalkingPhotoFrame(
-            ctx,
-            photo,
-            dims.width,
-            dims.height,
-            {
-              mouthX: settings.mouthX,
-              mouthY: settings.mouthY,
-              mouthWidth: settings.mouthWidth,
-              jawOpenness: settings.jawOpenness,
-              jawBottom: settings.jawBottom,
-              jawHalfWidth: settings.jawHalfWidth,
-            },
-            lip,
-            elapsed
-          )
         }
-      } else {
+      } else if (settings.hasLoaded3dAvatar) {
         ctx.drawImage(glCanvas, 0, 0, dims.width, dims.height)
       }
 
-      // 3. Top-Right Corner Brand Bug (Watermark)
+      // 3. Top-Right Corner Brand Bug (Watermark at 80% opacity)
       if (settings.presenterShowCornerLogo && cornerLogoImgRef.current) {
         drawCornerLogoWatermark(ctx, cornerLogoImgRef.current, dims.width)
       }
@@ -633,7 +581,9 @@ export function Presenter3DPage() {
                 ? "ကိုခန့်"
                 : "နီလာ"
               : settings.customAvatarName.replace(/\.(vrm|glb)$/i, "") || "3D Presenter"
-            : settings.photoName.replace(/\.[^.]+$/, "")
+            : settings.mascotName.trim() ||
+              settings.photoName.replace(/\.[^.]+$/, "") ||
+              "Mascot"
         drawBroadcastLowerThird(
           ctx,
           {
@@ -642,15 +592,15 @@ export function Presenter3DPage() {
             logoImg: cornerLogoImgRef.current,
             lip,
             elapsed,
-            captionsOn: settings.characterKind === "photo" && settings.captionsOn,
+            captionsOn: settings.captionsOn,
           },
           dims.width,
           dims.height
         )
       }
 
-      // 5. Optional live captions (Talking Photo mode)
-      if (settings.characterKind === "photo" && settings.captionsOn) {
+      // 5. Optional live Burmese captions
+      if (settings.captionsOn) {
         drawCaptionBar(ctx, settings.captionText, dims.width, dims.height)
       }
     }
@@ -696,27 +646,47 @@ export function Presenter3DPage() {
     }
   }, [applyCameraFraming, framing, aspectRatio])
 
-  const swapAvatarController = useCallback((next: AvatarController) => {
+  const swapAvatarController = useCallback((next: AvatarController | null) => {
     const scene = sceneRef.current
     if (!scene) {
-      next.dispose()
+      next?.dispose()
       return
     }
     if (avatarRef.current) {
       scene.remove(avatarRef.current.object)
       avatarRef.current.dispose()
+      avatarRef.current = null
     }
-    scene.add(next.object)
-    avatarRef.current = next
+    if (next) {
+      scene.add(next.object)
+      avatarRef.current = next
+      setHasLoaded3dAvatar(true)
+    } else {
+      setHasLoaded3dAvatar(false)
+    }
   }, [])
 
-  // Sync persisted outfit color & chest logo to active built-in preset
+  // Restore persisted mascot photo on mount if available
   useEffect(() => {
-    avatarRef.current?.setOutfitColor?.(presenterOutfitColor)
-  }, [presenterOutfitColor])
+    if (!presenterMascotDataUrl || characterPhotoRef.current) return
+    let cancelled = false
+    const img = new Image()
+    img.onload = () => {
+      if (cancelled) return
+      characterPhotoRef.current = img
+      setPhotoDims({ w: img.width, h: img.height })
+      setPhotoDataUrl(presenterMascotDataUrl)
+      if (!photoName) {
+        setPhotoName(shopProfile.name.trim() || "Saved Mascot")
+      }
+    }
+    img.src = presenterMascotDataUrl
+    return () => {
+      cancelled = true
+    }
+  }, [presenterMascotDataUrl, photoName, shopProfile.name])
 
   useEffect(() => {
-    avatarRef.current?.setLogoDataUrl?.(presenterLogoDataUrl)
     studioBackdropRef.current?.setLogoDataUrl(presenterLogoDataUrl)
 
     if (!presenterLogoDataUrl) {
@@ -749,22 +719,31 @@ export function Presenter3DPage() {
     studioBackdropRef.current?.setShopName(badgeText)
   }, [badgeText])
 
-  useEffect(() => {
-    avatarRef.current?.setGestureStyle?.(presenterGestureStyle)
-  }, [presenterGestureStyle])
+  const loadPresetVrm = useCallback(
+    async (id: BuiltinPresenterId, silentMissing = false) => {
+      setPresetId(id)
+      setAvatarMode("preset")
+      setCustomAvatarName("")
+      setIsLoadingAvatar(true)
+      try {
+        const url = PRESET_VRM_PATHS[id]
+        const controller = await loadAvatarController(url)
+        swapAvatarController(controller)
+      } catch {
+        swapAvatarController(null)
+        if (!silentMissing) {
+          toast.info(t(language, "presenter3d.presetNotPlaced"))
+        }
+      } finally {
+        setIsLoadingAvatar(false)
+      }
+    },
+    [language, swapAvatarController]
+  )
 
   const handleSelectPreset = (id: BuiltinPresenterId) => {
     triggerHaptic(8)
-    setPresetId(id)
-    setAvatarMode("preset")
-    setCustomAvatarName("")
-    swapAvatarController(
-      createBuiltinPresenterController(id, {
-        outfitColor: presenterOutfitColor,
-        logoDataUrl: presenterLogoDataUrl,
-        gestureStyle: presenterGestureStyle,
-      })
-    )
+    void loadPresetVrm(id, false)
   }
 
   const handleUploadUniformLogo = (e: React.ChangeEvent<HTMLInputElement> | File) => {
@@ -817,7 +796,7 @@ export function Presenter3DPage() {
 
     setIsLoadingAvatar(true)
     try {
-      const controller = await loadCustomAvatarFromFile(file)
+      const controller = await loadAvatarController(file)
       swapAvatarController(controller)
       setAvatarMode("custom")
       setCustomAvatarName(file.name)
@@ -843,7 +822,7 @@ export function Presenter3DPage() {
     img.onload = () => {
       if (characterPhotoUrlRef.current) URL.revokeObjectURL(characterPhotoUrlRef.current)
       characterPhotoUrlRef.current = url
-      applyCharacterImage(img, file.name, null)
+      applyCharacterImage(img, file.name)
       toast.success(t(language, "presenter3d.photoLoaded"))
     }
     img.onerror = () => {
@@ -853,56 +832,42 @@ export function Presenter3DPage() {
     img.src = url
   }
 
-  /** Installs a photo as the character and (unless coordinates are given) auto-detects the mouth. */
-  const applyCharacterImage = (
-    img: HTMLImageElement,
-    name: string,
-    known: {
-      mouthX: number
-      mouthY: number
-      mouthWidth: number
-      jawBottom: number
-      jawHalfWidth: number
-      jawOpenness: number
-    } | null
-  ) => {
+  /** Installs a crisp, undistorted mascot photo and persists it to the store. */
+  const applyCharacterImage = (img: HTMLImageElement, name: string, existingDataUrl?: string) => {
     characterPhotoRef.current = img
     setPhotoDims({ w: img.width, h: img.height })
     setPhotoName(name)
-    setPhotoDataUrl("")
-    // Downscaled copy for saving as a mascot (keeps localStorage small)
-    try {
-      const max = 640
-      const k = Math.min(1, max / Math.max(img.width, img.height))
-      const c = document.createElement("canvas")
-      c.width = Math.round(img.width * k)
-      c.height = Math.round(img.height * k)
-      c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height)
-      setPhotoDataUrl(c.toDataURL("image/jpeg", 0.85))
-    } catch {
-      /* ignore */
-    }
-    if (known) {
-      setMouthX(known.mouthX)
-      setMouthY(known.mouthY)
-      setMouthWidth(known.mouthWidth)
-      setJawBottom(known.jawBottom)
-      setJawHalfWidth(known.jawHalfWidth)
-      setJawOpenness(known.jawOpenness)
+    if (existingDataUrl) {
+      setPhotoDataUrl(existingDataUrl)
+      setPresenterMascotDataUrl(existingDataUrl)
       return
     }
-    setIsDetecting(true)
-    void detectMouthFromImage(img).then((m) => {
-      if (characterPhotoRef.current !== img) return
-      setMouthX(m.x)
-      setMouthY(m.y)
-      setMouthWidth(m.width)
-      setJawBottom(m.jawBottom)
-      setJawHalfWidth(m.jawHalfWidth)
-      setIsDetecting(false)
-      if (m.detected) toast.success("✅ နှုတ်ခမ်းနေရာကို အလိုအလျောက် တွေ့ရှိပြီး")
-      else toast.info("မျက်နှာမတွေ့ပါ – အလယ်တည့်တည့်ကို သုံးထားပါသည် (အသေးစိတ်ညှိနိုင်သည်)")
-    })
+    try {
+      const max = 800
+      const k = Math.min(1, max / Math.max(img.width, img.height))
+      const c = document.createElement("canvas")
+      c.width = Math.max(1, Math.round(img.width * k))
+      c.height = Math.max(1, Math.round(img.height * k))
+      c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height)
+      const dataUrl = c.toDataURL("image/png")
+      setPhotoDataUrl(dataUrl)
+      setPresenterMascotDataUrl(dataUrl)
+    } catch {
+      setPhotoDataUrl("")
+    }
+  }
+
+  const handleClearMascotPhoto = () => {
+    triggerHaptic(6)
+    if (characterPhotoUrlRef.current) {
+      URL.revokeObjectURL(characterPhotoUrlRef.current)
+      characterPhotoUrlRef.current = null
+    }
+    characterPhotoRef.current = null
+    setPhotoDims(null)
+    setPhotoName("")
+    setPhotoDataUrl("")
+    setPresenterMascotDataUrl(null)
   }
 
   const handleSaveMascot = () => {
@@ -911,12 +876,12 @@ export function Presenter3DPage() {
     saveMascotPreset({
       name,
       photoDataUrl,
-      mouthX,
-      mouthY,
-      mouthWidth,
-      jawBottom,
-      jawHalfWidth,
-      jawOpenness,
+      mouthX: 0.5,
+      mouthY: 0.42,
+      mouthWidth: 0.12,
+      jawBottom: 0.56,
+      jawHalfWidth: 0.14,
+      jawOpenness: 1,
     })
     setMascotName("")
     toast.success(`💾 "${name}" Mascot သိမ်းပြီးပါပြီ`)
@@ -926,23 +891,11 @@ export function Presenter3DPage() {
     const img = new Image()
     img.onload = () => {
       setCharacterKind("photo")
-      applyCharacterImage(img, m.name, m)
+      applyCharacterImage(img, m.name, m.photoDataUrl)
       toast.success(`"${m.name}" ကို ခေါ်ပြီးပါပြီ`)
     }
     img.onerror = () => toast.error(t(language, "presenter3d.photoCharLoadError"))
     img.src = m.photoDataUrl
-  }
-
-  const placeMouthFromPointer = (clientX: number, clientY: number) => {
-    const stage = stageRef.current
-    if (!stage || !photoDims) return
-    const box = stage.getBoundingClientRect()
-    const dims = CANVAS_DIMENSIONS[aspectRatio]
-    const rect = getTalkingPhotoRect(dims.width, dims.height, photoDims.w, photoDims.h)
-    const cx = (clientX - box.left) / box.width
-    const cy = (clientY - box.top) / box.height
-    setMouthX(Math.min(1, Math.max(0, (cx - rect.x) / rect.w)))
-    setMouthY(Math.min(1, Math.max(0, (cy - rect.y) / rect.h)))
   }
 
   const handleUploadBackdropPhoto = (e: React.ChangeEvent<HTMLInputElement> | File) => {
@@ -1042,6 +995,11 @@ export function Presenter3DPage() {
 
     if (characterKind === "photo" && !characterPhotoRef.current) {
       toast.error(t(language, "presenter3d.noPhotoError"))
+      return
+    }
+
+    if (characterKind === "model" && !hasLoaded3dAvatar) {
+      toast.error(t(language, "presenter3d.noAvatarError"))
       return
     }
 
@@ -1236,30 +1194,16 @@ export function Presenter3DPage() {
 
           {/* Canvas Preview Container */}
           <FileDropzone
-            accept={[".jpg", ".jpeg", ".png", ".webp"]}
-            disabled={characterKind !== "photo"}
-            onFiles={(f) => handleUploadCharacterPhoto(f[0])}
+            accept={characterKind === "photo" ? [".jpg", ".jpeg", ".png", ".webp"] : [".vrm", ".glb"]}
+            onFiles={(f) =>
+              characterKind === "photo"
+                ? handleUploadCharacterPhoto(f[0])
+                : void handleUploadAvatarFile(f[0])
+            }
           >
           <div className="flex items-center justify-center rounded-2xl bg-[#EFEAE1]/70 dark:bg-[#09090B]/70 p-3 border border-[#E7E5E4]/80 dark:border-[#27272A]">
             <div
-              ref={stageRef}
-              onPointerDown={(e) => {
-                if (characterKind !== "photo" || !photoDims || isRenderingVideo || !showAdvanced || photoStyle !== "lipsync") return
-                draggingMouthRef.current = true
-                e.currentTarget.setPointerCapture(e.pointerId)
-                placeMouthFromPointer(e.clientX, e.clientY)
-              }}
-              onPointerMove={(e) => {
-                if (draggingMouthRef.current) placeMouthFromPointer(e.clientX, e.clientY)
-              }}
-              onPointerUp={() => {
-                draggingMouthRef.current = false
-              }}
-              onPointerCancel={() => {
-                draggingMouthRef.current = false
-              }}
               className={cn(
-                characterKind === "photo" && photoDims && showAdvanced && photoStyle === "lipsync" && "touch-none cursor-crosshair",
                 "relative overflow-hidden rounded-2xl shadow-md border border-black/10 dark:border-white/10 w-full",
                 aspectRatio === "9:16" ? "max-w-[300px] aspect-[9/16]" : "max-w-[380px] aspect-square"
               )}
@@ -1268,26 +1212,61 @@ export function Presenter3DPage() {
                 ref={displayCanvasRef}
                 className="w-full h-full block object-contain"
               />
-              {characterKind === "photo" && photoDims && !isRenderingVideo && showAdvanced && photoStyle === "lipsync" && (() => {
-                const dims = CANVAS_DIMENSIONS[aspectRatio]
-                const rect = getTalkingPhotoRect(dims.width, dims.height, photoDims.w, photoDims.h)
-                const diameter = Math.max(18, mouthWidth * rect.w * 100)
-                return (
-                  <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-amber-400 shadow-[0_0_0_2px_rgba(0,0,0,0.45)] bg-amber-400/15"
-                    style={{
-                      left: `${(rect.x + mouthX * rect.w) * 100}%`,
-                      top: `${(rect.y + mouthY * rect.h) * 100}%`,
-                      width: `${diameter}%`,
-                      aspectRatio: "1 / 1",
-                    }}
-                  />
-                )
-              })()}
               {characterKind === "photo" && !photoDims && (
-                <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
-                  {t(language, "presenter3d.uploadPhotoFirst")}
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-5 text-center">
+                  <div className="rounded-2xl bg-white/85 dark:bg-[#18181B]/85 backdrop-blur-xs border border-[#E7E5E4] dark:border-[#3F3F46] p-4 shadow-sm space-y-2.5 max-w-[230px]">
+                    <ImagePlus className="h-6 w-6 mx-auto text-amber-600 dark:text-amber-400" />
+                    <p className="text-xs font-semibold text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                      {t(language, "presenter3d.uploadPhotoFirst")}
+                    </p>
+                    <label className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B] px-3 py-1.5 text-[11px] font-semibold cursor-pointer font-myanmar">
+                      <Upload className="h-3.5 w-3.5" />
+                      <span>{t(language, "presenter3d.choosePhotoBtn")}</span>
+                      <input
+                        type="file"
+                        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                        onChange={handleUploadCharacterPhoto}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
+              )}
+              {characterKind === "model" && !hasLoaded3dAvatar && !isLoadingAvatar && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-5 text-center">
+                  <div className="rounded-2xl bg-white/90 dark:bg-[#18181B]/90 backdrop-blur-xs border border-[#E7E5E4] dark:border-[#3F3F46] p-4 shadow-sm space-y-3 max-w-[245px]">
+                    <User className="h-6 w-6 mx-auto text-amber-600 dark:text-amber-400" />
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                        {t(language, "presenter3d.emptyVrmTitle")}
+                      </p>
+                      <p className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar leading-relaxed">
+                        {t(language, "presenter3d.emptyVrmDesc")}
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B] px-3 py-2 text-[11px] font-semibold cursor-pointer font-myanmar">
+                        <Upload className="h-3.5 w-3.5" />
+                        <span>{t(language, "presenter3d.uploadCustomAvatar")}</span>
+                        <input
+                          type="file"
+                          accept=".vrm,.glb"
+                          onChange={handleUploadAvatarFile}
+                          className="hidden"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic(6)
+                          setCharacterKind("photo")
+                        }}
+                        className="inline-flex items-center justify-center rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#27272A] px-3 py-1.5 text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#EFEAE1] dark:hover:bg-[#3F3F46] cursor-pointer font-myanmar"
+                      >
+                        {t(language, "presenter3d.switchToMascotBtn")}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
               {isLoadingAvatar && (
@@ -1359,7 +1338,12 @@ export function Presenter3DPage() {
             <Button
               type="button"
               onClick={handleRenderVideo}
-              disabled={!activeAudioSource || isLoadingAvatar || (characterKind === "photo" && !photoDims)}
+              disabled={
+                !activeAudioSource ||
+                isLoadingAvatar ||
+                (characterKind === "photo" && !photoDims) ||
+                (characterKind === "model" && !hasLoaded3dAvatar)
+              }
               className={cn(
                 "w-full h-12 rounded-2xl text-sm font-semibold transition-all font-myanmar cursor-pointer",
                 isRenderingVideo
@@ -1463,8 +1447,8 @@ export function Presenter3DPage() {
             >
               {(
                 [
-                  { id: "model", labelKey: "presenter3d.mode3d" },
                   { id: "photo", labelKey: "presenter3d.modePhoto" },
+                  { id: "model", labelKey: "presenter3d.mode3d" },
                 ] as const
               ).map((opt) => (
                 <button
@@ -1476,6 +1460,9 @@ export function Presenter3DPage() {
                     triggerHaptic(6)
                     if (isRenderingVideo) return
                     setCharacterKind(opt.id)
+                    if (opt.id === "model" && !hasLoaded3dAvatar && !isLoadingAvatar) {
+                      void loadPresetVrm(presetId, true)
+                    }
                   }}
                   className={cn(
                     "rounded-xl py-2 px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer font-myanmar",
@@ -1494,7 +1481,7 @@ export function Presenter3DPage() {
                 <FileDropzone accept={[".jpg", ".jpeg", ".png", ".webp"]} onFiles={(f) => handleUploadCharacterPhoto(f[0])}>
                   <label className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-white/70 dark:bg-[#27272A]/70 py-2.5 px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
                     <ImagePlus className="h-3.5 w-3.5" />
-                    <span>{t(language, "presenter3d.photoUpload")}</span>
+                    <span>{photoDims ? t(language, "presenter3d.changePhotoBtn") : t(language, "presenter3d.photoUpload")}</span>
                     <input
                       type="file"
                       accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
@@ -1506,44 +1493,35 @@ export function Presenter3DPage() {
 
                 {photoDims && (
                   <div className="space-y-2.5 rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-3">
-                    <div className="grid grid-cols-2 gap-2">
-                      {([
-                        ["lipsync", "🎤 Lip-Sync Animation"],
-                        ["card", "✨ Presenter Card (ပုံအသန့် + အသံလှိုင်း)"],
-                      ] as const).map(([id, label]) => (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => {
-                            setPhotoStyle(id)
-                            if (id === "card") {
-                              setShowAdvanced(false)
-                              if (shopProfile.name.trim()) setPresenterShowLowerThird(true)
-                            }
-                          }}
-                          className={cn(
-                            "rounded-xl border px-2 py-2 text-[11px] font-semibold font-myanmar cursor-pointer transition-colors",
-                            photoStyle === id
-                              ? "border-[#1C1917] bg-[#1C1917] text-[#FAF8F5] dark:border-[#F5F5F4] dark:bg-[#F5F5F4] dark:text-[#18181B]"
-                              : "border-[#E7E5E4] dark:border-[#3F3F46] text-[#57534E] dark:text-[#A1A1AA]"
-                          )}
-                        >
-                          {label}
-                        </button>
-                      ))}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {photoDataUrl && (
+                          <img
+                            src={photoDataUrl}
+                            alt=""
+                            className="h-8 w-8 rounded-lg object-cover border border-black/10 shrink-0"
+                          />
+                        )}
+                        <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] truncate font-myanmar">
+                          {photoName || t(language, "presenter3d.savedMascotLabel")}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleClearMascotPhoto}
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 dark:text-rose-400 hover:underline cursor-pointer shrink-0 font-myanmar"
+                      >
+                        <X className="h-3 w-3" />
+                        <span>{t(language, "presenter3d.clearLogo")}</span>
+                      </button>
                     </div>
-                    {isDetecting && (
-                      <p className="flex items-center gap-1.5 text-[11px] text-amber-700 font-myanmar">
-                        <Loader2 className="h-3 w-3 animate-spin" /> နှုတ်ခမ်းနေရာ ရှာနေသည်...
-                      </p>
-                    )}
 
                     <div className="space-y-1.5 rounded-xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] p-2">
                       <div className="flex gap-1.5">
                         <Input
                           value={mascotName}
                           onChange={(e) => setMascotName(e.target.value)}
-                          placeholder={shopProfile.name.trim() || "Mascot အမည် (ဥပမာ The Boys Mobile)"}
+                          placeholder={shopProfile.name.trim() || "Mascot / Presenter Name"}
                           className="h-8 rounded-lg text-[11px] font-myanmar"
                         />
                         <button
@@ -1552,7 +1530,7 @@ export function Presenter3DPage() {
                           disabled={!photoDataUrl}
                           className="shrink-0 rounded-lg bg-amber-500 px-2.5 text-[11px] font-semibold text-white disabled:opacity-50 cursor-pointer font-myanmar"
                         >
-                          💾 Mascot သိမ်းထားမည်
+                          💾 Mascot သိမ်းမည်
                         </button>
                       </div>
                       {mascotPresets.length > 0 && (
@@ -1583,286 +1561,124 @@ export function Presenter3DPage() {
                         </div>
                       )}
                     </div>
+                  </div>
+                )}
 
-                    {photoStyle === "lipsync" && (
-                      <button
-                        type="button"
-                        onClick={() => setShowAdvanced((v) => !v)}
-                        className="text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] underline-offset-2 hover:underline cursor-pointer font-myanmar"
+                {mascotPresets.length > 0 && !photoDims && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {mascotPresets.map((m) => (
+                      <span
+                        key={m.id}
+                        className="inline-flex items-center gap-1 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#EFEAE1]/60 dark:bg-[#18181B] pl-1 pr-1.5 py-0.5"
                       >
-                        ⚙️ အသေးစိတ်ညှိရန် {showAdvanced ? "▲" : "▼"}
-                      </button>
-                    )}
-                    {showAdvanced && photoStyle === "lipsync" && (
-                    <div className="space-y-2.5">
-                    <p className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
-                      {t(language, "presenter3d.photoHint")}
-                    </p>
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-[11px] font-medium font-myanmar">
-                        <span>{t(language, "presenter3d.mouthWidth")}</span>
-                        <span className="tabular-nums">{Math.round(mouthWidth * 100)}%</span>
-                      </div>
-                      <input
-                        type="range"
-                        min={0.04}
-                        max={0.3}
-                        step={0.005}
-                        value={mouthWidth}
-                        onChange={(e) => setMouthWidth(Number(e.target.value))}
-                        className="w-full accent-amber-600"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-[11px] font-medium font-myanmar">
-                        <span>{t(language, "presenter3d.jawOpenness")}</span>
-                        <span className="tabular-nums">{jawOpenness.toFixed(1)}x</span>
-                      </div>
-                      <input
-                        type="range"
-                        min={0.2}
-                        max={2}
-                        step={0.05}
-                        value={jawOpenness}
-                        onChange={(e) => setJawOpenness(Number(e.target.value))}
-                        className="w-full accent-amber-600"
-                      />
-                    </div>
-                    </div>
-                    )}
-
-                    <div className="pt-2 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium font-myanmar">
-                          {t(language, "presenter3d.captionToggle")}
-                        </span>
                         <button
                           type="button"
-                          onClick={() => setCaptionsOn((v) => !v)}
-                          className={cn(
-                            "rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer transition-colors",
-                            captionsOn
-                              ? "bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
-                              : "bg-[#EFEAE1] text-[#57534E] dark:bg-[#18181B] dark:text-[#A1A1AA]"
-                          )}
+                          onClick={() => handleLoadMascot(m)}
+                          className="inline-flex items-center gap-1 text-[11px] font-medium cursor-pointer"
                         >
-                          {captionsOn ? "ON" : "OFF"}
+                          <img src={m.photoDataUrl} alt="" className="h-5 w-5 rounded-full object-cover" />
+                          {m.name}
                         </button>
-                      </div>
-                      {captionsOn && (
-                        <Input
-                          value={captionText}
-                          onChange={(e) => setCaptionText(e.target.value)}
-                          placeholder={t(language, "presenter3d.captionPlaceholder")}
-                          className="h-9 rounded-xl bg-white dark:bg-[#27272A] border-[#E7E5E4] dark:border-[#3F3F46] text-xs font-myanmar"
-                        />
-                      )}
-                    </div>
+                        <button
+                          type="button"
+                          aria-label="delete mascot"
+                          onClick={() => deleteMascotPreset(m.id)}
+                          className="text-[11px] text-[#A8A29E] hover:text-red-500 cursor-pointer"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
                   </div>
                 )}
               </div>
             )}
 
             {characterKind === "model" && (
-            <>
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={() => handleSelectPreset("female_nilar")}
-                className={cn(
-                  "flex items-center gap-2.5 rounded-2xl border p-3 text-left transition-all cursor-pointer",
-                  avatarMode === "preset" && presetId === "female_nilar"
-                    ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
-                    : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
-                )}
-              >
-                <User className="h-4 w-4 shrink-0" />
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold truncate font-myanmar">
-                    {t(language, "presenter3d.presetNilar")}
-                  </div>
-                  <div className="text-[10px] opacity-75 truncate">Female Presenter</div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSelectPreset("male_kokhant")}
-                className={cn(
-                  "flex items-center gap-2.5 rounded-2xl border p-3 text-left transition-all cursor-pointer",
-                  avatarMode === "preset" && presetId === "male_kokhant"
-                    ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
-                    : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
-                )}
-              >
-                <User className="h-4 w-4 shrink-0" />
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold truncate font-myanmar">
-                    {t(language, "presenter3d.presetKoKhant")}
-                  </div>
-                  <div className="text-[10px] opacity-75 truncate">Male Presenter</div>
-                </div>
-              </button>
-            </div>
-
-            <FileDropzone accept={[".vrm", ".glb"]} onFiles={(f) => handleUploadAvatarFile(f[0])}>
-              <label className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-white/70 dark:bg-[#27272A]/70 py-2.5 px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
-                <Upload className="h-3.5 w-3.5" />
-                <span>{t(language, "presenter3d.uploadCustomAvatar")}</span>
-                <input
-                  type="file"
-                  accept=".vrm,.glb"
-                  onChange={handleUploadAvatarFile}
-                  className="hidden"
-                />
-              </label>
-            </FileDropzone>
-
-            {avatarMode === "preset" && (
-              <div className="rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white/80 dark:bg-[#27272A]/80 p-3 space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] flex items-center gap-1.5 font-myanmar">
-                    <Tag className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
-                    <span>{t(language, "presenter3d.uniformTitle")}</span>
-                  </span>
-                  {presenterLogoDataUrl && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        triggerHaptic(6)
-                        setPresenterLogoDataUrl(null)
-                      }}
-                      className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 dark:text-rose-400 hover:underline cursor-pointer font-myanmar"
-                    >
-                      <X className="h-3 w-3" />
-                      <span>{t(language, "presenter3d.clearLogo")}</span>
-                    </button>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => handleSelectPreset("female_nilar")}
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-2xl border p-3 text-left transition-all cursor-pointer",
+                    avatarMode === "preset" && presetId === "female_nilar"
+                      ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                      : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
                   )}
-                </div>
-
-                {/* 4 Outfit Color Swatches */}
-                <div className="grid grid-cols-4 gap-1.5">
-                  {(
-                    [
-                      { id: "navy", hex: "#1e293b", labelKey: "presenter3d.colorNavy" },
-                      { id: "charcoal", hex: "#27272a", labelKey: "presenter3d.colorCharcoal" },
-                      { id: "emerald", hex: "#115e59", labelKey: "presenter3d.colorEmerald" },
-                      { id: "cream", hex: "#e7dfd3", labelKey: "presenter3d.colorCream" },
-                    ] as const satisfies readonly {
-                      id: PresenterOutfitColor
-                      hex: string
-                      labelKey: string
-                    }[]
-                  ).map((swatch) => (
-                    <button
-                      key={swatch.id}
-                      type="button"
-                      onClick={() => {
-                        triggerHaptic(6)
-                        setPresenterOutfitColor(swatch.id)
-                      }}
-                      className={cn(
-                        "flex items-center justify-center gap-1.5 rounded-xl border py-1.5 px-2 text-[11px] font-medium transition-all cursor-pointer font-myanmar",
-                        presenterOutfitColor === swatch.id
-                          ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#EFEAE1] dark:bg-[#18181B] text-[#1C1917] dark:text-[#F5F5F4] shadow-xs"
-                          : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#57534E] dark:text-[#A1A1AA]"
-                      )}
-                    >
-                      <span
-                        className="h-3 w-3 rounded-full border border-black/15 dark:border-white/20 shrink-0"
-                        style={{ backgroundColor: swatch.hex }}
-                        aria-hidden="true"
-                      />
-                      <span className="truncate">{t(language, swatch.labelKey)}</span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Chest Logo Upload / Drop Button */}
-                <FileDropzone
-                  accept={[".png", ".jpg", ".jpeg", ".webp"]}
-                  onFiles={(f) => handleUploadUniformLogo(f[0])}
                 >
-                  <label className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-[#FAF8F5] dark:bg-[#18181B]/70 py-2 px-3 text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#18181B] cursor-pointer transition-colors font-myanmar">
-                    {presenterLogoDataUrl ? (
-                      <>
-                        <img
-                          src={presenterLogoDataUrl}
-                          alt="Shop logo"
-                          className="h-5 w-5 rounded-full object-contain bg-white border border-black/10"
-                        />
-                        <span>{t(language, "presenter3d.changeLogo")}</span>
-                      </>
-                    ) : (
-                      <>
-                        <ImagePlus className="h-3.5 w-3.5" />
-                        <span>{t(language, "presenter3d.uploadLogo")}</span>
-                      </>
-                    )}
-                    <input
-                      type="file"
-                      accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
-                      onChange={handleUploadUniformLogo}
-                      className="hidden"
-                    />
-                  </label>
-                </FileDropzone>
+                  <User className="h-4 w-4 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold truncate font-myanmar">
+                      {t(language, "presenter3d.presetNilar")}
+                    </div>
+                    <div className="text-[10px] opacity-75 truncate">/models/nilar.vrm</div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectPreset("male_kokhant")}
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-2xl border p-3 text-left transition-all cursor-pointer",
+                    avatarMode === "preset" && presetId === "male_kokhant"
+                      ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                      : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
+                  )}
+                >
+                  <User className="h-4 w-4 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold truncate font-myanmar">
+                      {t(language, "presenter3d.presetKoKhant")}
+                    </div>
+                    <div className="text-[10px] opacity-75 truncate">/models/kokhant.vrm</div>
+                  </div>
+                </button>
               </div>
+
+              <FileDropzone accept={[".vrm", ".glb"]} onFiles={(f) => void handleUploadAvatarFile(f[0])}>
+                <label className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-white/70 dark:bg-[#27272A]/70 py-2.5 px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
+                  <Upload className="h-3.5 w-3.5" />
+                  <span>{t(language, "presenter3d.uploadCustomAvatar")}</span>
+                  <input
+                    type="file"
+                    accept=".vrm,.glb"
+                    onChange={handleUploadAvatarFile}
+                    className="hidden"
+                  />
+                </label>
+              </FileDropzone>
+            </div>
             )}
-            {avatarMode === "preset" && (
-              <div className="rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white/80 dark:bg-[#27272A]/80 p-3 space-y-2.5">
-                <span className="text-[11px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] block font-myanmar">
-                  {t(language, "presenter3d.gestureStyleTitle")}
+
+            {/* Captions Toggle & Input (Available in both modes) */}
+            <div className="pt-2 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                  {t(language, "presenter3d.captionToggle")}
                 </span>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {(
-                    [
-                      {
-                        id: "natural",
-                        labelKey: "presenter3d.gestureNatural",
-                        descKey: "presenter3d.gestureNaturalDesc",
-                      },
-                      {
-                        id: "energetic",
-                        labelKey: "presenter3d.gestureEnergetic",
-                        descKey: "presenter3d.gestureEnergeticDesc",
-                      },
-                      {
-                        id: "calm",
-                        labelKey: "presenter3d.gestureCalm",
-                        descKey: "presenter3d.gestureCalmDesc",
-                      },
-                    ] as const satisfies readonly {
-                      id: PresenterGestureStyle
-                      labelKey: string
-                      descKey: string
-                    }[]
-                  ).map((styleOpt) => (
-                    <button
-                      key={styleOpt.id}
-                      type="button"
-                      onClick={() => {
-                        triggerHaptic(6)
-                        setPresenterGestureStyle(styleOpt.id)
-                      }}
-                      title={t(language, styleOpt.descKey)}
-                      className={cn(
-                        "rounded-xl border py-2 px-2 text-center transition-all cursor-pointer font-myanmar",
-                        presenterGestureStyle === styleOpt.id
-                          ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B] shadow-xs"
-                          : "border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
-                      )}
-                    >
-                      <div className="text-[11px] font-semibold leading-tight truncate">
-                        {t(language, styleOpt.labelKey)}
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setCaptionsOn((v) => !v)}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer transition-colors",
+                    captionsOn
+                      ? "bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                      : "bg-[#EFEAE1] text-[#57534E] dark:bg-[#27272A] dark:text-[#A1A1AA]"
+                  )}
+                >
+                  {captionsOn ? "ON" : "OFF"}
+                </button>
               </div>
-            )}
-            </>
-            )}
+              {captionsOn && (
+                <Input
+                  value={captionText}
+                  onChange={(e) => setCaptionText(e.target.value)}
+                  placeholder={t(language, "presenter3d.captionPlaceholder")}
+                  className="h-9 rounded-xl bg-white dark:bg-[#27272A] border-[#E7E5E4] dark:border-[#3F3F46] text-xs font-myanmar"
+                />
+              )}
+            </div>
           </div>
 
           {/* 2. Aspect Ratio & Framing */}
@@ -2005,8 +1821,58 @@ export function Presenter3DPage() {
               </div>
             )}
 
-            {/* Broadcast Overlays: Corner Logo Watermark + Broadcast Nameplate */}
+            {/* Broadcast Overlays: Shop Logo + Corner Logo Watermark + Broadcast Nameplate */}
             <div className="pt-2 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2.5">
+              {/* Persistent Shop Logo Uploader (Drag & Drop) */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                    {t(language, "presenter3d.shopLogoLabel")}
+                  </span>
+                  {presenterLogoDataUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic(6)
+                        setPresenterLogoDataUrl(null)
+                      }}
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 dark:text-rose-400 hover:underline cursor-pointer font-myanmar"
+                    >
+                      <X className="h-3 w-3" />
+                      <span>{t(language, "presenter3d.clearLogo")}</span>
+                    </button>
+                  )}
+                </div>
+                <FileDropzone
+                  accept={[".png", ".jpg", ".jpeg", ".webp"]}
+                  onFiles={(f) => handleUploadUniformLogo(f[0])}
+                >
+                  <label className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-white/80 dark:bg-[#27272A]/80 py-2 px-3 text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
+                    {presenterLogoDataUrl ? (
+                      <>
+                        <img
+                          src={presenterLogoDataUrl}
+                          alt="Shop logo"
+                          className="h-5 w-5 rounded-full object-contain bg-white border border-black/10"
+                        />
+                        <span>{t(language, "presenter3d.changeLogo")}</span>
+                      </>
+                    ) : (
+                      <>
+                        <ImagePlus className="h-3.5 w-3.5" />
+                        <span>{t(language, "presenter3d.uploadLogo")}</span>
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+                      onChange={handleUploadUniformLogo}
+                      className="hidden"
+                    />
+                  </label>
+                </FileDropzone>
+              </div>
+
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
                   {t(language, "presenter3d.cornerLogoToggle")}

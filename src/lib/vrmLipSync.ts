@@ -7,6 +7,8 @@ export interface LipSyncWeights {
   aa: number
   /** Rounded vowel openness derived from low-mid */
   oh: number
+  /** Tight rounded vowel openness */
+  ou: number
   /** High-mid mouth spread (1500–3500 Hz) */
   ee: number
   /** Secondary high-mid spread */
@@ -93,6 +95,7 @@ export function createLipSyncAnalyzer({
   const state: LipSyncWeights = {
     aa: 0,
     oh: 0,
+    ou: 0,
     ee: 0,
     ih: 0,
     energy: 0,
@@ -111,6 +114,7 @@ export function createLipSyncAnalyzer({
 
     const targetAa = clamp01(lowMid * 1.05)
     const targetOh = clamp01(lowMid * 0.62 * (1 - highMid * 0.45))
+    const targetOu = clamp01(lowMid * 0.48 * (1 - highMid * 0.55))
     const targetEe = clamp01(highMid * 0.95)
     const targetIh = clamp01(highMid * 0.65)
     const targetEnergy = clamp01(Math.max(targetAa, targetEe * 0.85))
@@ -121,6 +125,7 @@ export function createLipSyncAnalyzer({
 
     state.aa = lerp(state.aa, targetAa, targetAa > state.aa ? attackAlpha : releaseAlpha)
     state.oh = lerp(state.oh, targetOh, targetOh > state.oh ? attackAlpha : releaseAlpha)
+    state.ou = lerp(state.ou, targetOu, targetOu > state.ou ? attackAlpha : releaseAlpha)
     state.ee = lerp(state.ee, targetEe, targetEe > state.ee ? attackAlpha : releaseAlpha)
     state.ih = lerp(state.ih, targetIh, targetIh > state.ih ? attackAlpha : releaseAlpha)
     state.energy = lerp(
@@ -135,6 +140,7 @@ export function createLipSyncAnalyzer({
   const reset = () => {
     state.aa = 0
     state.oh = 0
+    state.ou = 0
     state.ee = 0
     state.ih = 0
     state.energy = 0
@@ -164,22 +170,19 @@ export function createLipSyncAnalyzer({
   }
 }
 
-export type PresenterOutfitColor = "navy" | "charcoal" | "emerald" | "cream"
-export type PresenterGestureStyle = "natural" | "energetic" | "calm"
 export type PresenterStudioSet =
   | "mobile_showroom"
   | "tech_podcast"
   | "soft_bokeh"
   | "custom_photo"
 
+export type BuiltinPresenterId = "female_nilar" | "male_kokhant"
+
 export interface AvatarController {
   object: THREE.Object3D
-  kind: "preset" | "vrm" | "glb"
+  kind: "vrm" | "glb"
   update: (delta: number, elapsed: number, lip: LipSyncWeights) => void
   dispose: () => void
-  setOutfitColor?: (color: PresenterOutfitColor) => void
-  setLogoDataUrl?: (dataUrl: string | null) => void
-  setGestureStyle?: (style: PresenterGestureStyle) => void
 }
 
 interface BlinkState {
@@ -267,13 +270,14 @@ export function createVrmAvatarController(vrm: VRM): AvatarController {
   const update = (delta: number, elapsed: number, lip: LipSyncWeights) => {
     const dt = Math.min(delta, 0.05)
 
-    // 1. Lip-sync expressions
+    // 1. Lip-sync expressions (aa, ih, ou, ee, oh)
     const em = vrm.expressionManager
     if (em) {
       em.setValue("aa", lip.aa)
-      em.setValue("oh", lip.oh)
-      em.setValue("ee", lip.ee)
       em.setValue("ih", lip.ih)
+      em.setValue("ou", lip.ou)
+      em.setValue("ee", lip.ee)
+      em.setValue("oh", lip.oh)
 
       // 2. Automatic eye blinking every 3–5s
       const blinkWeight = sampleBlinkValue(blink, elapsed)
@@ -387,6 +391,7 @@ export function createGlbAvatarController(root: THREE.Object3D): AvatarControlle
 
     applyMorph(["jawOpen", "mouthOpen", "viseme_aa", "aa", "Fcl_MTH_A"], lip.aa)
     applyMorph(["viseme_O", "oh", "Fcl_MTH_O", "mouthFunnel"], lip.oh)
+    applyMorph(["viseme_U", "ou", "Fcl_MTH_U", "mouthPucker"], lip.ou)
     applyMorph(["viseme_E", "ee", "mouthSmile", "Fcl_MTH_E"], lip.ee)
     applyMorph(["viseme_I", "ih", "Fcl_MTH_I"], lip.ih)
     applyMorph(["eyeBlinkLeft", "eyeBlinkRight", "blink", "Fcl_EYE_Close"], blinkWeight)
@@ -417,993 +422,27 @@ export function createGlbAvatarController(root: THREE.Object3D): AvatarControlle
   }
 }
 
-export type BuiltinPresenterId = "female_nilar" | "male_kokhant"
-
-export interface BuiltinPresenterOptions {
-  outfitColor?: PresenterOutfitColor
-  logoDataUrl?: string | null
-  gestureStyle?: PresenterGestureStyle
-}
-
-interface GestureStyleParams {
-  amp: number
-  speed: number
-  browMul: number
-  headMul: number
-  gazeFreq: number
-}
-
-const GESTURE_STYLE_CONFIG: Record<PresenterGestureStyle, GestureStyleParams> = {
-  natural: { amp: 1.0, speed: 1.0, browMul: 1.0, headMul: 1.0, gazeFreq: 1.0 },
-  energetic: { amp: 1.38, speed: 1.26, browMul: 1.45, headMul: 1.32, gazeFreq: 1.2 },
-  calm: { amp: 0.56, speed: 0.78, browMul: 0.65, headMul: 0.68, gazeFreq: 0.6 },
-}
-
-interface OutfitPalette {
-  main: number
-  lapel: number
-  trim: number
-  inner: number
-}
-
-const OUTFIT_PALETTES: Record<PresenterOutfitColor, OutfitPalette> = {
-  navy: { main: 0x1e293b, lapel: 0x0f172a, trim: 0x334155, inner: 0xf8fafc },
-  charcoal: { main: 0x27272a, lapel: 0x18181b, trim: 0x3f3f46, inner: 0xf4f4f5 },
-  emerald: { main: 0x115e59, lapel: 0x0f4c48, trim: 0x0d9488, inner: 0xfafaf9 },
-  cream: { main: 0xe7dfd3, lapel: 0xd6cbb9, trim: 0xc4b5a0, inner: 0x292524 },
-}
-
-function createDefaultCrestTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement("canvas")
-  canvas.width = 256
-  canvas.height = 256
-  const ctx = canvas.getContext("2d")
-  if (ctx) {
-    // Deep studio crest background
-    const grad = ctx.createRadialGradient(128, 108, 18, 128, 128, 128)
-    grad.addColorStop(0, "#292524")
-    grad.addColorStop(1, "#0f172a")
-    ctx.fillStyle = grad
-    ctx.beginPath()
-    ctx.arc(128, 128, 124, 0, Math.PI * 2)
-    ctx.fill()
-
-    // Gold inner ring
-    ctx.strokeStyle = "#d4af37"
-    ctx.lineWidth = 10
-    ctx.beginPath()
-    ctx.arc(128, 128, 110, 0, Math.PI * 2)
-    ctx.stroke()
-
-    // Sleek studio monogram crest
-    ctx.fillStyle = "#faf8f5"
-    ctx.font = "700 92px Georgia, serif"
-    ctx.textAlign = "center"
-    ctx.textBaseline = "middle"
-    ctx.fillText("S", 128, 134)
-  }
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.needsUpdate = true
-  return tex
-}
-
 /**
- * Builds a distinct, expressive stylized 3D presenter mesh (Female Nilar or Male Ko Khant)
- * with sculpted facial geometry, layered hair, Bomber Jacket / Blazer outfits,
- * dynamic left-chest shop logo emblem, articulated mouth interior, blinking, and vocal head nod.
- * Works 100% offline with zero external network dependencies.
+ * Loads a .vrm or .glb 3D model from a local File or remote/public URL
+ * and returns a unified AvatarController.
  */
-export function createBuiltinPresenterController(
-  preset: BuiltinPresenterId,
-  options: BuiltinPresenterOptions = {}
-): AvatarController {
-  const isFemale = preset === "female_nilar"
-  const root = new THREE.Group()
-  root.name = `preset_${preset}`
-
-  const disposables: { dispose: () => void }[] = []
-  const track = <T extends { dispose: () => void }>(item: T): T => {
-    disposables.push(item)
-    return item
-  }
-
-  const initialPalette = OUTFIT_PALETTES[options.outfitColor ?? "navy"]
-
-  // Materials matching warm studio aesthetic
-  const skinMat = track(
-    new THREE.MeshStandardMaterial({
-      color: isFemale ? 0xf2cab0 : 0xe0b18e,
-      roughness: 0.58,
-      metalness: 0.02,
-    })
-  )
-  const hairMat = track(
-    new THREE.MeshStandardMaterial({
-      color: isFemale ? 0x1c1714 : 0x17171a,
-      roughness: 0.48,
-      metalness: 0.08,
-    })
-  )
-  const outfitMat = track(
-    new THREE.MeshStandardMaterial({
-      color: initialPalette.main,
-      roughness: 0.68,
-      metalness: 0.05,
-    })
-  )
-  const lapelMat = track(
-    new THREE.MeshStandardMaterial({
-      color: initialPalette.lapel,
-      roughness: 0.62,
-      metalness: 0.06,
-    })
-  )
-  const trimMat = track(
-    new THREE.MeshStandardMaterial({
-      color: initialPalette.trim,
-      roughness: 0.72,
-      metalness: 0.04,
-    })
-  )
-  const innerShirtMat = track(
-    new THREE.MeshStandardMaterial({
-      color: initialPalette.inner,
-      roughness: 0.64,
-      metalness: 0.02,
-    })
-  )
-  const metalAccentMat = track(
-    new THREE.MeshStandardMaterial({
-      color: isFemale ? 0xd4af37 : 0xd4d4d8,
-      roughness: 0.25,
-      metalness: 0.78,
-    })
-  )
-  const eyeWhiteMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0xfefefe,
-      roughness: 0.18,
-    })
-  )
-  const irisMat = track(
-    new THREE.MeshStandardMaterial({
-      color: isFemale ? 0x2d1c14 : 0x221712,
-      roughness: 0.16,
-    })
-  )
-  const pupilMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0x09090b,
-      roughness: 0.12,
-    })
-  )
-  const catchlightMat = track(
-    new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-    })
-  )
-  const lashMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0x111113,
-      roughness: 0.4,
-    })
-  )
-  const blushMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0xe68484,
-      roughness: 0.85,
-      transparent: true,
-      opacity: 0.36,
-    })
-  )
-  const lipMat = track(
-    new THREE.MeshStandardMaterial({
-      color: isFemale ? 0xc2545c : 0xa3645b,
-      roughness: 0.42,
-    })
-  )
-  const mouthCavityMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0x3f1217,
-      roughness: 0.9,
-    })
-  )
-  const teethMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0xfaf7f2,
-      roughness: 0.28,
-    })
-  )
-  const tongueMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0xb64c56,
-      roughness: 0.65,
-    })
-  )
-
-  // Chest / Torso group (positioned so upper-body & close-up framing match VRM ~1.45m eye height)
-  const torsoGroup = new THREE.Group()
-  torsoGroup.position.set(0, 1.05, 0)
-  root.add(torsoGroup)
-
-  const torsoGeo = track(
-    new THREE.CylinderGeometry(isFemale ? 0.142 : 0.182, isFemale ? 0.126 : 0.16, 0.39, 28)
-  )
-  const torsoMesh = new THREE.Mesh(torsoGeo, outfitMat)
-  torsoMesh.position.set(0, 0.03, 0)
-  torsoMesh.scale.set(isFemale ? 1.18 : 1.26, 1, isFemale ? 0.70 : 0.74)
-  torsoGroup.add(torsoMesh)
-
-  // Inner shirt / tee
-  const innerTeeGeo = track(
-    new THREE.CylinderGeometry(isFemale ? 0.078 : 0.088, isFemale ? 0.056 : 0.068, 0.14, 20)
-  )
-  const innerTee = new THREE.Mesh(innerTeeGeo, innerShirtMat)
-  innerTee.position.set(0, 0.175, 0.032)
-  innerTee.scale.set(1.06, 1, 0.76)
-  torsoGroup.add(innerTee)
-
-  if (isFemale) {
-    // Nilar: Tailored Presenter Blazer with clean lapels & V-neck inner top
-    const lapelGeo = track(new THREE.BoxGeometry(0.038, 0.175, 0.014))
-    const leftLapel = new THREE.Mesh(lapelGeo, lapelMat)
-    leftLapel.position.set(-0.044, 0.138, 0.106)
-    leftLapel.rotation.z = -0.28
-    leftLapel.rotation.y = -0.18
-    torsoGroup.add(leftLapel)
-
-    const rightLapel = new THREE.Mesh(lapelGeo, lapelMat)
-    rightLapel.position.set(0.044, 0.138, 0.106)
-    rightLapel.rotation.z = 0.28
-    rightLapel.rotation.y = 0.18
-    torsoGroup.add(rightLapel)
-
-    // Blazer button accent
-    const buttonGeo = track(new THREE.CylinderGeometry(0.011, 0.011, 0.008, 14))
-    const blazerButton = new THREE.Mesh(buttonGeo, metalAccentMat)
-    blazerButton.rotation.x = Math.PI / 2
-    blazerButton.position.set(0, 0.02, 0.106)
-    torsoGroup.add(blazerButton)
-  } else {
-    // Ko Khant: Tailored zip-up Bomber Jacket with ribbed collar & metallic zipper
-    const crewNeckGeo = track(new THREE.TorusGeometry(0.056, 0.009, 10, 22))
-    const crewNeck = new THREE.Mesh(crewNeckGeo, innerShirtMat)
-    crewNeck.rotation.x = Math.PI / 2 - 0.12
-    crewNeck.position.set(0, 0.212, 0.012)
-    torsoGroup.add(crewNeck)
-
-    const bomberCollarGeo = track(new THREE.TorusGeometry(0.072, 0.017, 12, 24, Math.PI * 1.45))
-    const bomberCollar = new THREE.Mesh(bomberCollarGeo, trimMat)
-    bomberCollar.rotation.x = Math.PI / 2
-    bomberCollar.rotation.z = Math.PI * 0.78
-    bomberCollar.position.set(0, 0.218, 0.005)
-    torsoGroup.add(bomberCollar)
-
-    // Center metallic zipper track + pull tab
-    const zipperGeo = track(new THREE.BoxGeometry(0.010, 0.255, 0.012))
-    const zipperTrack = new THREE.Mesh(zipperGeo, metalAccentMat)
-    zipperTrack.position.set(0, 0.065, 0.129)
-    torsoGroup.add(zipperTrack)
-
-    const pullGeo = track(new THREE.BoxGeometry(0.014, 0.022, 0.010))
-    const zipperPull = new THREE.Mesh(pullGeo, metalAccentMat)
-    zipperPull.position.set(0, 0.175, 0.136)
-    torsoGroup.add(zipperPull)
-
-    // Subtle bomber pocket welt accents
-    const weltGeo = track(new THREE.BoxGeometry(0.055, 0.012, 0.010))
-    const leftWelt = new THREE.Mesh(weltGeo, lapelMat)
-    leftWelt.position.set(-0.095, -0.04, 0.118)
-    leftWelt.rotation.z = 0.22
-    leftWelt.rotation.y = -0.3
-    torsoGroup.add(leftWelt)
-
-    const rightWelt = new THREE.Mesh(weltGeo, lapelMat)
-    rightWelt.position.set(0.095, -0.04, 0.118)
-    rightWelt.rotation.z = -0.22
-    rightWelt.rotation.y = 0.3
-    torsoGroup.add(rightWelt)
-  }
-
-  // Shoulders
-  const shoulderGeo = track(new THREE.SphereGeometry(isFemale ? 0.072 : 0.092, 20, 16))
-  const leftShoulder = new THREE.Mesh(shoulderGeo, outfitMat)
-  leftShoulder.position.set(isFemale ? -0.185 : -0.235, 0.16, 0)
-  torsoGroup.add(leftShoulder)
-
-  const rightShoulder = new THREE.Mesh(shoulderGeo, outfitMat)
-  rightShoulder.position.set(isFemale ? 0.185 : 0.235, 0.16, 0)
-  torsoGroup.add(rightShoulder)
-
-  // Articulated Arms, Blazer/Bomber Sleeves, Elbows, Wrists & Stylized Hands
-  const upperArmLen = isFemale ? 0.22 : 0.24
-  const forearmLen = isFemale ? 0.20 : 0.21
-  const upperArmTopR = isFemale ? 0.044 : 0.053
-  const elbowR = isFemale ? 0.036 : 0.043
-  const wristR = isFemale ? 0.029 : 0.035
-
-  const upperArmGeo = track(new THREE.CylinderGeometry(upperArmTopR, elbowR, upperArmLen, 16))
-  const elbowGeo = track(new THREE.SphereGeometry(elbowR * 1.04, 14, 12))
-  const forearmGeo = track(new THREE.CylinderGeometry(elbowR * 0.96, wristR, forearmLen, 16))
-  const cuffGeo = track(new THREE.CylinderGeometry(wristR * 1.07, wristR * 1.07, 0.022, 16))
-  const wristGeo = track(new THREE.SphereGeometry(wristR * 0.76, 12, 10))
-  const palmGeo = track(new THREE.SphereGeometry(isFemale ? 0.027 : 0.032, 14, 12))
-  const fingersGeo = track(new THREE.CapsuleGeometry(isFemale ? 0.017 : 0.020, 0.026, 6, 10))
-  const thumbGeo = track(new THREE.CapsuleGeometry(isFemale ? 0.0075 : 0.0088, 0.020, 6, 8))
-
-  const createArticulatedArm = (side: -1 | 1) => {
-    const armGroup = new THREE.Group()
-    armGroup.position.set(side * (isFemale ? 0.194 : 0.242), 0.16, 0)
-    torsoGroup.add(armGroup)
-
-    const upperArm = new THREE.Mesh(upperArmGeo, outfitMat)
-    upperArm.position.set(0, -upperArmLen / 2, 0)
-    armGroup.add(upperArm)
-
-    const elbowMesh = new THREE.Mesh(elbowGeo, outfitMat)
-    elbowMesh.position.set(0, -upperArmLen, 0)
-    armGroup.add(elbowMesh)
-
-    const forearm = new THREE.Group()
-    forearm.position.set(0, -upperArmLen, 0)
-    armGroup.add(forearm)
-
-    const forearmMesh = new THREE.Mesh(forearmGeo, outfitMat)
-    forearmMesh.position.set(0, -forearmLen / 2, 0)
-    forearm.add(forearmMesh)
-
-    const cuffMesh = new THREE.Mesh(cuffGeo, trimMat)
-    cuffMesh.position.set(0, -forearmLen + 0.011, 0)
-    forearm.add(cuffMesh)
-
-    const wristMesh = new THREE.Mesh(wristGeo, skinMat)
-    wristMesh.position.set(0, -forearmLen - 0.010, 0)
-    forearm.add(wristMesh)
-
-    const hand = new THREE.Group()
-    hand.position.set(0, -forearmLen - 0.014, 0)
-    forearm.add(hand)
-
-    const palm = new THREE.Mesh(palmGeo, skinMat)
-    palm.position.set(0, -0.024, 0)
-    palm.scale.set(0.84, 1.18, 0.42)
-    hand.add(palm)
-
-    const fingers = new THREE.Mesh(fingersGeo, skinMat)
-    fingers.position.set(0, -0.052, 0.002)
-    fingers.scale.set(1.0, 1.0, 0.46)
-    hand.add(fingers)
-
-    const thumb = new THREE.Mesh(thumbGeo, skinMat)
-    thumb.position.set(-side * 0.020, -0.022, 0.010)
-    thumb.rotation.z = side * 0.55
-    thumb.rotation.x = -0.35
-    hand.add(thumb)
-
-    return { armGroup, forearm, hand }
-  }
-
-  const leftArmRig = createArticulatedArm(-1)
-  const rightArmRig = createArticulatedArm(1)
-  const leftArmGroup = leftArmRig.armGroup
-  const rightArmGroup = rightArmRig.armGroup
-  const leftForearm = leftArmRig.forearm
-  const rightForearm = rightArmRig.forearm
-  const leftHand = leftArmRig.hand
-  const rightHand = rightArmRig.hand
-
-  // Left-Chest Shop Logo Badge (dynamically renders uploaded shop logo or default monogram crest)
-  const defaultCrestTex = track(createDefaultCrestTexture())
-  let activeLogoTex: THREE.Texture | null = null
-  const logoFaceMat = track(
-    new THREE.MeshStandardMaterial({
-      map: defaultCrestTex,
-      roughness: 0.35,
-      metalness: 0.08,
-      transparent: true,
-    })
-  )
-
-  const badgeGroup = new THREE.Group()
-  badgeGroup.position.set(isFemale ? 0.074 : 0.086, 0.105, isFemale ? 0.104 : 0.122)
-  badgeGroup.rotation.y = 0.26
-  badgeGroup.rotation.x = -0.08
-  torsoGroup.add(badgeGroup)
-
-  const badgeRimGeo = track(new THREE.CylinderGeometry(0.026, 0.026, 0.005, 24))
-  const badgeRim = new THREE.Mesh(badgeRimGeo, metalAccentMat)
-  badgeRim.rotation.x = Math.PI / 2
-  badgeGroup.add(badgeRim)
-
-  const badgeFaceGeo = track(new THREE.CircleGeometry(0.0235, 24))
-  const badgeFace = new THREE.Mesh(badgeFaceGeo, logoFaceMat)
-  badgeFace.position.z = 0.0032
-  badgeGroup.add(badgeFace)
-
-  const applyLogoDataUrl = (dataUrl: string | null | undefined) => {
-    const clean = typeof dataUrl === "string" ? dataUrl.trim() : ""
-    if (!clean) {
-      if (activeLogoTex) {
-        activeLogoTex.dispose()
-        activeLogoTex = null
-      }
-      logoFaceMat.map = defaultCrestTex
-      logoFaceMat.needsUpdate = true
-      return
-    }
-    const loader = new THREE.TextureLoader()
-    loader.load(
-      clean,
-      (tex) => {
-        tex.colorSpace = THREE.SRGBColorSpace
-        tex.needsUpdate = true
-        if (activeLogoTex) {
-          activeLogoTex.dispose()
-        }
-        activeLogoTex = tex
-        logoFaceMat.map = tex
-        logoFaceMat.needsUpdate = true
-      },
-      undefined,
-      () => {
-        // Fallback to default crest if image fails to load
-        logoFaceMat.map = defaultCrestTex
-        logoFaceMat.needsUpdate = true
-      }
-    )
-  }
-
-  if (options.logoDataUrl) {
-    applyLogoDataUrl(options.logoDataUrl)
-  }
-
-  // Neck (broader for Ko Khant, graceful for Nilar)
-  const neckGeo = track(
-    new THREE.CylinderGeometry(isFemale ? 0.043 : 0.054, isFemale ? 0.050 : 0.062, 0.115, 20)
-  )
-  const neckMesh = new THREE.Mesh(neckGeo, skinMat)
-  neckMesh.position.set(0, 0.25, 0)
-  torsoGroup.add(neckMesh)
-
-  // Head pivot
-  const headGroup = new THREE.Group()
-  headGroup.position.set(0, 0.34, 0.01)
-  torsoGroup.add(headGroup)
-
-  // Cranium + Distinct Facial Sculpting
-  const headGeo = track(new THREE.SphereGeometry(isFemale ? 0.128 : 0.132, 32, 28))
-  const headMesh = new THREE.Mesh(headGeo, skinMat)
-  headMesh.position.set(0, 0.074, 0)
-  headMesh.scale.set(isFemale ? 0.90 : 0.96, isFemale ? 1.04 : 1.04, isFemale ? 0.94 : 0.96)
-  headGroup.add(headMesh)
-
-  if (isFemale) {
-    // Nilar: Softer, slender V-line lower face & chin + warm cheek blush
-    const vJawGeo = track(new THREE.SphereGeometry(0.088, 24, 20))
-    const vJawMesh = new THREE.Mesh(vJawGeo, skinMat)
-    vJawMesh.position.set(0, 0.018, 0.018)
-    vJawMesh.scale.set(0.84, 1.02, 0.86)
-    headGroup.add(vJawMesh)
-
-    const chinGeo = track(new THREE.SphereGeometry(0.032, 16, 14))
-    const chinMesh = new THREE.Mesh(chinGeo, skinMat)
-    chinMesh.position.set(0, -0.042, 0.054)
-    chinMesh.scale.set(0.95, 0.88, 0.9)
-    headGroup.add(chinMesh)
-
-    // Subtle warm cheek blush accents
-    const blushGeo = track(new THREE.SphereGeometry(0.024, 14, 12))
-    const leftBlush = new THREE.Mesh(blushGeo, blushMat)
-    leftBlush.position.set(-0.062, 0.042, 0.095)
-    leftBlush.scale.set(1.15, 0.65, 0.35)
-    headGroup.add(leftBlush)
-
-    const rightBlush = new THREE.Mesh(blushGeo, blushMat)
-    rightBlush.position.set(0.062, 0.042, 0.095)
-    rightBlush.scale.set(1.15, 0.65, 0.35)
-    headGroup.add(rightBlush)
-  } else {
-    // Ko Khant: Sculpted masculine jawline & defined chin
-    const jawGeo = track(new THREE.CylinderGeometry(0.102, 0.072, 0.088, 20))
-    const jawMesh = new THREE.Mesh(jawGeo, skinMat)
-    jawMesh.position.set(0, 0.010, 0.018)
-    jawMesh.scale.set(1.06, 1.0, 0.90)
-    headGroup.add(jawMesh)
-
-    const chinGeo = track(new THREE.BoxGeometry(0.058, 0.034, 0.042))
-    const chinMesh = new THREE.Mesh(chinGeo, skinMat)
-    chinMesh.position.set(0, -0.036, 0.056)
-    headGroup.add(chinMesh)
-  }
-
-  // Ears
-  const earGeo = track(new THREE.SphereGeometry(0.025, 14, 12))
-  const leftEar = new THREE.Mesh(earGeo, skinMat)
-  leftEar.position.set(isFemale ? -0.116 : -0.125, 0.065, -0.005)
-  leftEar.scale.set(0.55, 1, 0.7)
-  headGroup.add(leftEar)
-
-  const rightEar = new THREE.Mesh(earGeo, skinMat)
-  rightEar.position.set(isFemale ? 0.116 : 0.125, 0.065, -0.005)
-  rightEar.scale.set(0.55, 1, 0.7)
-  headGroup.add(rightEar)
-
-  if (isFemale) {
-    const earringGeo = track(new THREE.SphereGeometry(0.009, 12, 10))
-    const leftEarring = new THREE.Mesh(earringGeo, metalAccentMat)
-    leftEarring.position.set(-0.12, 0.036, 0.004)
-    headGroup.add(leftEarring)
-
-    const rightEarring = new THREE.Mesh(earringGeo, metalAccentMat)
-    rightEarring.position.set(0.12, 0.036, 0.004)
-    headGroup.add(rightEarring)
-  }
-
-  // Distinct Layered Hairstyles
-  let backHairGroup: THREE.Group | null = null
-  const hairCapGeo = track(new THREE.SphereGeometry(isFemale ? 0.136 : 0.138, 28, 24))
-  const hairCap = new THREE.Mesh(hairCapGeo, hairMat)
-  hairCap.position.set(0, 0.096, -0.018)
-  hairCap.scale.set(isFemale ? 0.95 : 0.99, 1.03, 1.0)
-  headGroup.add(hairCap)
-
-  if (isFemale) {
-    // Soft front bangs
-    const bangGeo = track(new THREE.CapsuleGeometry(0.024, 0.055, 6, 12))
-    const leftBang = new THREE.Mesh(bangGeo, hairMat)
-    leftBang.position.set(-0.048, 0.145, 0.094)
-    leftBang.rotation.z = 0.55
-    leftBang.rotation.x = 0.35
-    headGroup.add(leftBang)
-
-    const centerBang = new THREE.Mesh(bangGeo, hairMat)
-    centerBang.position.set(0.008, 0.152, 0.102)
-    centerBang.rotation.z = -0.35
-    centerBang.rotation.x = 0.38
-    headGroup.add(centerBang)
-
-    const rightBang = new THREE.Mesh(bangGeo, hairMat)
-    rightBang.position.set(0.055, 0.142, 0.090)
-    rightBang.rotation.z = -0.62
-    rightBang.rotation.x = 0.32
-    headGroup.add(rightBang)
-
-    // Face-framing side locks
-    const sideLockGeo = track(new THREE.CapsuleGeometry(0.030, 0.16, 8, 14))
-    const leftLock = new THREE.Mesh(sideLockGeo, hairMat)
-    leftLock.position.set(-0.102, 0.015, 0.012)
-    leftLock.rotation.z = -0.09
-    headGroup.add(leftLock)
-
-    const rightLock = new THREE.Mesh(sideLockGeo, hairMat)
-    rightLock.position.set(0.102, 0.015, 0.012)
-    rightLock.rotation.z = 0.09
-    headGroup.add(rightLock)
-
-    // Shoulder-length back hair group (gently sways with head rotation)
-    backHairGroup = new THREE.Group()
-    backHairGroup.position.set(0, 0.08, -0.04)
-    headGroup.add(backHairGroup)
-
-    const backHairGeo = track(new THREE.CylinderGeometry(0.116, 0.136, 0.22, 22))
-    const backHair = new THREE.Mesh(backHairGeo, hairMat)
-    backHair.position.set(0, -0.085, -0.025)
-    backHair.scale.set(1.02, 1, 0.72)
-    backHairGroup.add(backHair)
-  } else {
-    // Ko Khant: Multi-layered modern side-parted / slightly wavy tapered male hair
-    const fadeGeo = track(new THREE.BoxGeometry(0.022, 0.095, 0.12))
-    const leftFade = new THREE.Mesh(fadeGeo, hairMat)
-    leftFade.position.set(-0.122, 0.105, -0.015)
-    leftFade.rotation.z = 0.08
-    headGroup.add(leftFade)
-
-    const rightFade = new THREE.Mesh(fadeGeo, hairMat)
-    rightFade.position.set(0.122, 0.105, -0.015)
-    rightFade.rotation.z = -0.08
-    headGroup.add(rightFade)
-
-    // Styled crown volume
-    const crownGeo = track(new THREE.SphereGeometry(0.118, 22, 18))
-    const crown = new THREE.Mesh(crownGeo, hairMat)
-    crown.position.set(-0.012, 0.168, -0.004)
-    crown.scale.set(1.05, 0.52, 1.05)
-    headGroup.add(crown)
-
-    // Side-parted wavy front volume
-    const waveMainGeo = track(new THREE.CapsuleGeometry(0.036, 0.11, 8, 14))
-    const waveMain = new THREE.Mesh(waveMainGeo, hairMat)
-    waveMain.position.set(0.018, 0.184, 0.056)
-    waveMain.rotation.z = Math.PI / 2 - 0.16
-    waveMain.rotation.y = 0.18
-    headGroup.add(waveMain)
-
-    const waveSubGeo = track(new THREE.CapsuleGeometry(0.026, 0.075, 8, 12))
-    const waveSub = new THREE.Mesh(waveSubGeo, hairMat)
-    waveSub.position.set(-0.055, 0.172, 0.062)
-    waveSub.rotation.z = Math.PI / 2 + 0.25
-    waveSub.rotation.y = -0.22
-    headGroup.add(waveSub)
-  }
-
-  // Nose
-  const noseGeo = track(new THREE.ConeGeometry(isFemale ? 0.012 : 0.015, 0.034, 12))
-  const noseMesh = new THREE.Mesh(noseGeo, skinMat)
-  noseMesh.position.set(0, 0.052, isFemale ? 0.122 : 0.129)
-  noseMesh.rotation.x = 0.35
-  headGroup.add(noseMesh)
-
-  // Eyes + Iris + Pupil + Specular Catchlight + Eyelashes (Nilar) + Eyelids
-  const eyeRadius = isFemale ? 0.0225 : 0.0195
-  const eyeGeo = track(new THREE.SphereGeometry(eyeRadius, 18, 14))
-  const irisGeo = track(new THREE.SphereGeometry(eyeRadius * 0.58, 14, 12))
-  const pupilGeo = track(new THREE.SphereGeometry(eyeRadius * 0.32, 12, 10))
-  const catchGeo = track(new THREE.SphereGeometry(0.0032, 8, 8))
-  const eyelidGeo = track(
-    new THREE.SphereGeometry(eyeRadius + 0.0022, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.56)
-  )
-  const lashGeo = track(new THREE.TorusGeometry(eyeRadius + 0.001, 0.0026, 8, 16, Math.PI * 0.85))
-
-  const createEye = (xPos: number) => {
-    const eyeGroup = new THREE.Group()
-    eyeGroup.position.set(xPos, 0.082, isFemale ? 0.106 : 0.114)
-
-    const white = new THREE.Mesh(eyeGeo, eyeWhiteMat)
-    white.scale.set(1, isFemale ? 0.92 : 0.84, 0.65)
-    eyeGroup.add(white)
-
-    const iris = new THREE.Mesh(irisGeo, irisMat)
-    iris.position.set(0, 0, eyeRadius * 0.52)
-    iris.scale.set(1, 1, 0.55)
-    eyeGroup.add(iris)
-
-    const pupil = new THREE.Mesh(pupilGeo, pupilMat)
-    pupil.position.set(0, 0, eyeRadius * 0.64)
-    pupil.scale.set(1, 1, 0.5)
-    eyeGroup.add(pupil)
-
-    const catchlight = new THREE.Mesh(catchGeo, catchlightMat)
-    catchlight.position.set(0.0045, 0.0045, eyeRadius * 0.74)
-    eyeGroup.add(catchlight)
-
-    if (isFemale) {
-      const lash = new THREE.Mesh(lashGeo, lashMat)
-      lash.position.set(0, 0.003, 0.005)
-      lash.rotation.z = Math.PI * 0.08
-      eyeGroup.add(lash)
-    }
-
-    const lid = new THREE.Mesh(eyelidGeo, skinMat)
-    lid.position.set(0, 0.002, 0.002)
-    lid.rotation.x = -0.62 // open position
-    eyeGroup.add(lid)
-
-    headGroup.add(eyeGroup)
-    return { lid, iris, pupil, catchlight }
-  }
-
-  const leftEye = createEye(-0.044)
-  const rightEye = createEye(0.044)
-  const leftEyelid = leftEye.lid
-  const rightEyelid = rightEye.lid
-
-  // Eyebrows (slender arched for Nilar, thicker confident for Ko Khant)
-  const browGeo = track(
-    new THREE.BoxGeometry(isFemale ? 0.036 : 0.044, isFemale ? 0.0055 : 0.010, 0.012)
-  )
-  const browBaseY = isFemale ? 0.116 : 0.113
-  const leftBrow = new THREE.Mesh(browGeo, hairMat)
-  leftBrow.position.set(-0.044, browBaseY, isFemale ? 0.108 : 0.118)
-  leftBrow.rotation.z = isFemale ? 0.11 : 0.05
-  headGroup.add(leftBrow)
-
-  const rightBrow = new THREE.Mesh(browGeo, hairMat)
-  rightBrow.position.set(0.044, browBaseY, isFemale ? 0.108 : 0.118)
-  rightBrow.rotation.z = isFemale ? -0.11 : -0.05
-  headGroup.add(rightBrow)
-
-  // Articulated Mouth (cavity + upper teeth hint + tongue + upper lip + lower lip)
-  const mouthGroup = new THREE.Group()
-  mouthGroup.position.set(0, 0.012, isFemale ? 0.112 : 0.120)
-  headGroup.add(mouthGroup)
-
-  const cavityGeo = track(new THREE.SphereGeometry(0.024, 16, 12))
-  const mouthCavity = new THREE.Mesh(cavityGeo, mouthCavityMat)
-  mouthCavity.scale.set(1.1, 0.15, 0.42)
-  mouthCavity.position.set(0, 0, -0.004)
-  mouthGroup.add(mouthCavity)
-
-  const teethGeo = track(new THREE.BoxGeometry(0.028, 0.0065, 0.008))
-  const upperTeeth = new THREE.Mesh(teethGeo, teethMat)
-  upperTeeth.position.set(0, 0.004, 0.001)
-  mouthGroup.add(upperTeeth)
-
-  const tongueGeo = track(new THREE.SphereGeometry(0.014, 12, 10))
-  const tongueMesh = new THREE.Mesh(tongueGeo, tongueMat)
-  tongueMesh.scale.set(1.05, 0.42, 0.78)
-  tongueMesh.position.set(0, -0.006, 0.000)
-  mouthGroup.add(tongueMesh)
-
-  const lipGeo = track(new THREE.CapsuleGeometry(isFemale ? 0.0052 : 0.0056, 0.030, 6, 12))
-  const upperLip = new THREE.Mesh(lipGeo, lipMat)
-  upperLip.rotation.z = Math.PI / 2
-  upperLip.position.set(0, 0.005, 0.0055)
-  mouthGroup.add(upperLip)
-
-  const lowerLip = new THREE.Mesh(lipGeo, lipMat)
-  lowerLip.rotation.z = Math.PI / 2
-  lowerLip.position.set(0, -0.005, 0.0055)
-  mouthGroup.add(lowerLip)
-
-  const cornerGeo = track(new THREE.SphereGeometry(isFemale ? 0.0046 : 0.0048, 10, 8))
-  const leftMouthCorner = new THREE.Mesh(cornerGeo, lipMat)
-  leftMouthCorner.position.set(-0.0185, 0.001, 0.0042)
-  leftMouthCorner.scale.set(1.1, 0.75, 0.65)
-  mouthGroup.add(leftMouthCorner)
-
-  const rightMouthCorner = new THREE.Mesh(cornerGeo, lipMat)
-  rightMouthCorner.position.set(0.0185, 0.001, 0.0042)
-  rightMouthCorner.scale.set(1.1, 0.75, 0.65)
-  mouthGroup.add(rightMouthCorner)
-
-  let currentGestureStyle: PresenterGestureStyle = options.gestureStyle ?? "natural"
-  const blink = createBlinkState(0)
-  let smoothPitch = 0
-  let smoothYaw = 0
-  let smoothRoll = 0
-  let smoothBrowLift = 0
-  let smoothSpeechMix = 0
-  let smoothSmile = 1
-  let smoothLeftArmX = -0.08
-  let smoothLeftArmZ = 0.13
-  let smoothRightArmX = -0.08
-  let smoothRightArmZ = -0.13
-  let smoothLeftForearmX = -0.48
-  let smoothLeftForearmY = 0.06
-  let smoothRightForearmX = -0.48
-  let smoothRightForearmY = -0.06
-  let smoothLeftHandX = 0.08
-  let smoothLeftHandY = -0.18
-  let smoothRightHandX = 0.08
-  let smoothRightHandY = 0.18
-
-  // Micro eye-gaze state: mostly direct camera contact with brief natural glances every 3–6s
-  let nextGazeAt = 2.8 + Math.random() * 2.5
-  let gazeHoldUntil = 0
-  let gazeTargetX = 0
-  let gazeTargetY = 0
-  let smoothGazeX = 0
-  let smoothGazeY = 0
-
-  const baseLeftBrowRotZ = isFemale ? 0.11 : 0.05
-  const baseRightBrowRotZ = isFemale ? -0.11 : -0.05
-
-  const update = (delta: number, elapsed: number, lip: LipSyncWeights) => {
-    const dt = Math.min(delta, 0.05)
-    const style = GESTURE_STYLE_CONFIG[currentGestureStyle] ?? GESTURE_STYLE_CONFIG.natural
-
-    // 1. Lip-sync mouth articulation + warm idle presenter smile curve
-    const openness = clamp01(lip.aa * 0.95 + lip.oh * 0.42)
-    const targetSmile = clamp01(1 - openness * 1.55) * 0.85 + 0.15
-    smoothSmile = lerp(smoothSmile, targetSmile, 1 - Math.exp(-10 * dt))
-
-    const spread = clamp01(1 + lip.ee * 0.45 + lip.ih * 0.25 - lip.oh * 0.25) + smoothSmile * 0.08
-
-    mouthCavity.scale.set(1.05 * spread, 0.10 + openness * 0.95, 0.45)
-    upperTeeth.visible = openness > 0.08 || lip.ee > 0.15
-    upperTeeth.position.y = 0.003 + openness * 0.004
-    tongueMesh.visible = openness > 0.12
-    tongueMesh.position.y = -0.004 - openness * 0.011
-
-    upperLip.position.y = 0.004 + openness * 0.006 + smoothSmile * 0.0008
-    lowerLip.position.y = -0.004 - openness * 0.022 + smoothSmile * 0.0008
-    upperLip.scale.set(1, spread, 1)
-    lowerLip.scale.set(1, spread, 1)
-
-    const cornerLift = smoothSmile * 0.0026 - openness * 0.0022
-    const cornerSpread = 0.0185 + smoothSmile * 0.0018
-    leftMouthCorner.position.set(-cornerSpread, cornerLift, 0.0042)
-    rightMouthCorner.position.set(cornerSpread, cornerLift, 0.0042)
-
-    // 2. Vocal-reactive eyebrows (gentle lift on aa + oh > 0.45 emphasis peaks)
-    const emphasisPeak = clamp01((lip.aa + lip.oh - 0.45) * 1.65)
-    const targetBrowLift = (lip.energy * 0.0035 + emphasisPeak * 0.0085) * style.browMul
-    smoothBrowLift = lerp(smoothBrowLift, targetBrowLift, 1 - Math.exp(-10 * dt))
-    leftBrow.position.y = browBaseY + smoothBrowLift
-    rightBrow.position.y = browBaseY + smoothBrowLift
-    leftBrow.rotation.z = baseLeftBrowRotZ + smoothBrowLift * 4.2
-    rightBrow.rotation.z = baseRightBrowRotZ - smoothBrowLift * 4.2
-
-    // 3. Automatic eye blinking every 3–5 seconds + living micro eye gaze
-    const blinkWeight = sampleBlinkValue(blink, elapsed)
-    const lidRot = -0.62 + blinkWeight * 1.48
-    leftEyelid.rotation.x = lidRot
-    rightEyelid.rotation.x = lidRot
-
-    if (elapsed >= nextGazeAt) {
-      const doGlance = Math.random() < 0.72
-      if (doGlance) {
-        const angle = Math.random() * Math.PI * 2
-        gazeTargetX = Math.cos(angle) * 0.0034 * Math.min(1.15, style.gazeFreq)
-        gazeTargetY = Math.sin(angle) * 0.0020 * Math.min(1.15, style.gazeFreq)
-        gazeHoldUntil = elapsed + 0.45 + Math.random() * 0.45
-      } else {
-        gazeTargetX = 0
-        gazeTargetY = 0
-        gazeHoldUntil = elapsed + 0.4
-      }
-      nextGazeAt = elapsed + (3.0 + Math.random() * 3.0) / Math.max(0.6, style.gazeFreq)
-    } else if (elapsed >= gazeHoldUntil) {
-      gazeTargetX = 0
-      gazeTargetY = 0
-    }
-
-    const microSaccadeX = Math.sin(elapsed * 1.7) * 0.00035
-    const microSaccadeY = Math.cos(elapsed * 1.3) * 0.00025
-    const gazeAlpha = 1 - Math.exp(-11 * dt)
-    smoothGazeX = THREE.MathUtils.clamp(
-      lerp(smoothGazeX, gazeTargetX + microSaccadeX, gazeAlpha),
-      -0.0040,
-      0.0040
-    )
-    smoothGazeY = THREE.MathUtils.clamp(
-      lerp(smoothGazeY, gazeTargetY + microSaccadeY, gazeAlpha),
-      -0.0026,
-      0.0026
-    )
-
-    const applyEyeGaze = (eye: typeof leftEye) => {
-      eye.iris.position.x = smoothGazeX
-      eye.iris.position.y = smoothGazeY
-      eye.pupil.position.x = smoothGazeX * 1.08
-      eye.pupil.position.y = smoothGazeY * 1.08
-      eye.catchlight.position.x = 0.0045 + smoothGazeX * 0.85
-      eye.catchlight.position.y = 0.0045 + smoothGazeY * 0.85
-    }
-    applyEyeGaze(leftEye)
-    applyEyeGaze(rightEye)
-
-    // 4. Subtle head nod/sway & phrasing proportional to vocal energy
-    const isSpeaking = lip.energy >= 0.12
-    smoothSpeechMix = lerp(smoothSpeechMix, isSpeaking ? 1 : 0, 1 - Math.exp((isSpeaking ? -7.5 : -4.5) * dt))
-
-    const vocalBoost = isSpeaking ? Math.max(0, lip.aa - 0.12) * 0.13 * style.headMul : 0
-    const targetPitch =
-      Math.sin(elapsed * 5.0 * style.speed) * vocalBoost + Math.sin(elapsed * 0.9) * 0.015
-    const targetYaw =
-      Math.sin(elapsed * 1.4 * style.speed) * (isSpeaking ? 0.055 * style.headMul : 0.022) +
-      Math.cos(elapsed * 2.3) * vocalBoost * 0.35
-    const targetRoll =
-      Math.cos(elapsed * 1.1 * style.speed) * (isSpeaking ? 0.036 * style.headMul : 0.012)
-
-    const headAlpha = 1 - Math.exp(-8 * dt)
-    smoothPitch = lerp(smoothPitch, targetPitch, headAlpha)
-    smoothYaw = lerp(smoothYaw, targetYaw, headAlpha)
-    smoothRoll = lerp(smoothRoll, targetRoll, headAlpha)
-
-    headGroup.rotation.x = smoothPitch
-    headGroup.rotation.y = smoothYaw
-    headGroup.rotation.z = smoothRoll
-
-    // Gentle back-hair sway on Nilar
-    if (backHairGroup) {
-      backHairGroup.rotation.z = -smoothRoll * 0.65
-      backHairGroup.rotation.x = -smoothPitch * 0.35
-    }
-
-    // 5. Gentle chest breathing & upper-body counter-rotation
-    const breath = Math.sin(elapsed * 1.6)
-    const shoulderSway = Math.sin(elapsed * 0.85) * 0.015
-    torsoGroup.position.y = 1.05 + breath * 0.004
-    torsoGroup.rotation.x = breath * 0.014
-    torsoGroup.rotation.y = -smoothYaw * 0.28
-    torsoGroup.rotation.z = -smoothRoll * 0.20 + shoulderSway * (1 - smoothSpeechMix * 0.5)
-
-    // 6. Procedural presenter arm & open-palm hand gestures (kept outward & waist-to-lower-chest level)
-    const syllablePeak = clamp01((lip.aa * 0.65 + lip.oh * 0.45 + lip.ee * 0.35 - 0.12) * 1.45)
-    const beatPhase = elapsed * 2.5 * style.speed
-    const altLeft = 0.5 + 0.5 * Math.sin(beatPhase)
-    const altRight = 0.5 - 0.5 * Math.sin(beatPhase)
-    const pairedPulse = Math.max(0, syllablePeak - 0.35) * 0.85
-
-    const liftL = clamp01(altLeft * 0.65 + pairedPulse + syllablePeak * 0.35) * style.amp
-    const liftR = clamp01(altRight * 0.65 + pairedPulse + syllablePeak * 0.35) * style.amp
-
-    const idleArmX = -0.08 + breath * 0.012
-    const idleArmZ = 0.13 + shoulderSway * 0.4
-    const idleForearmX = -0.48 + breath * 0.025
-
-    // Active speech keeps arms angled slightly outward (z >= 0.14) and forearms raised to waist/lower-chest
-    const targetLeftArmX = lerp(idleArmX, -0.20 - liftL * 0.10, smoothSpeechMix)
-    const targetLeftArmZ = lerp(idleArmZ, 0.15 + liftL * 0.07, smoothSpeechMix)
-    const targetRightArmX = lerp(idleArmX, -0.20 - liftR * 0.10, smoothSpeechMix)
-    const targetRightArmZ = lerp(-idleArmZ, -(0.15 + liftR * 0.07), smoothSpeechMix)
-
-    const targetLeftForearmX = lerp(idleForearmX, -1.16 - liftL * 0.24, smoothSpeechMix)
-    const targetLeftForearmY = lerp(0.06, -0.14 - liftL * 0.10, smoothSpeechMix)
-    const targetRightForearmX = lerp(idleForearmX, -1.16 - liftR * 0.24, smoothSpeechMix)
-    const targetRightForearmY = lerp(-0.06, 0.14 + liftR * 0.10, smoothSpeechMix)
-
-    const targetLeftHandX = lerp(0.08, 0.16 + syllablePeak * 0.18 * style.amp, smoothSpeechMix)
-    const targetLeftHandY = lerp(-0.18, 0.38 + liftL * 0.18, smoothSpeechMix)
-    const targetRightHandX = lerp(0.08, 0.16 + syllablePeak * 0.18 * style.amp, smoothSpeechMix)
-    const targetRightHandY = lerp(0.18, -0.38 - liftR * 0.18, smoothSpeechMix)
-
-    const armAlpha = 1 - Math.exp(-7.5 * dt)
-    smoothLeftArmX = lerp(smoothLeftArmX, targetLeftArmX, armAlpha)
-    smoothLeftArmZ = lerp(smoothLeftArmZ, targetLeftArmZ, armAlpha)
-    smoothRightArmX = lerp(smoothRightArmX, targetRightArmX, armAlpha)
-    smoothRightArmZ = lerp(smoothRightArmZ, targetRightArmZ, armAlpha)
-
-    smoothLeftForearmX = lerp(smoothLeftForearmX, targetLeftForearmX, armAlpha)
-    smoothLeftForearmY = lerp(smoothLeftForearmY, targetLeftForearmY, armAlpha)
-    smoothRightForearmX = lerp(smoothRightForearmX, targetRightForearmX, armAlpha)
-    smoothRightForearmY = lerp(smoothRightForearmY, targetRightForearmY, armAlpha)
-
-    smoothLeftHandX = lerp(smoothLeftHandX, targetLeftHandX, armAlpha)
-    smoothLeftHandY = lerp(smoothLeftHandY, targetLeftHandY, armAlpha)
-    smoothRightHandX = lerp(smoothRightHandX, targetRightHandX, armAlpha)
-    smoothRightHandY = lerp(smoothRightHandY, targetRightHandY, armAlpha)
-
-    leftArmGroup.rotation.set(smoothLeftArmX, 0, smoothLeftArmZ)
-    rightArmGroup.rotation.set(smoothRightArmX, 0, smoothRightArmZ)
-    leftForearm.rotation.set(smoothLeftForearmX, smoothLeftForearmY, 0)
-    rightForearm.rotation.set(smoothRightForearmX, smoothRightForearmY, 0)
-    leftHand.rotation.set(smoothLeftHandX, smoothLeftHandY, 0.10)
-    rightHand.rotation.set(smoothRightHandX, smoothRightHandY, -0.10)
-  }
-
-  const setOutfitColor = (color: PresenterOutfitColor) => {
-    const pal = OUTFIT_PALETTES[color] ?? OUTFIT_PALETTES.navy
-    outfitMat.color.setHex(pal.main)
-    lapelMat.color.setHex(pal.lapel)
-    trimMat.color.setHex(pal.trim)
-    innerShirtMat.color.setHex(pal.inner)
-  }
-
-  const dispose = () => {
-    if (activeLogoTex) {
-      activeLogoTex.dispose()
-      activeLogoTex = null
-    }
-    for (const d of disposables) {
-      d.dispose()
-    }
-  }
-
-  const setGestureStyle = (style: PresenterGestureStyle) => {
-    currentGestureStyle = style
-  }
-
-  return {
-    object: root,
-    kind: "preset",
-    update,
-    dispose,
-    setOutfitColor,
-    setLogoDataUrl: applyLogoDataUrl,
-    setGestureStyle,
-  }
-}
-
-/**
- * Loads a local .vrm or .glb File/Blob URL and returns a unified AvatarController.
- */
-export async function loadCustomAvatarFromFile(file: File): Promise<AvatarController> {
-  const objectUrl = URL.createObjectURL(file)
+export async function loadAvatarController(source: File | string): Promise<AvatarController> {
+  const isFile = source instanceof File
+  const url = isFile ? URL.createObjectURL(source) : source
   const loader = new GLTFLoader()
   loader.register((parser) => new VRMLoaderPlugin(parser))
 
   try {
-    const gltf = await loader.loadAsync(objectUrl)
+    const gltf = await loader.loadAsync(url)
     const vrm = gltf.userData?.vrm as VRM | undefined
     if (vrm) {
       return createVrmAvatarController(vrm)
     }
     return createGlbAvatarController(gltf.scene)
   } finally {
-    URL.revokeObjectURL(objectUrl)
+    if (isFile) {
+      URL.revokeObjectURL(url)
+    }
   }
 }
 
@@ -1432,189 +471,10 @@ export function disposeObject3D(root: THREE.Object3D): void {
   })
 }
 
-/* ------------------------------------------------------------------ */
-/* Talking Photo (2.5D) — pure Canvas2D renderer, 0 external API cost  */
-/* ------------------------------------------------------------------ */
-
-export interface TalkingPhotoParams {
-  /** Mouth (lip-line) centre, 0–1 in image space */
-  mouthX: number
-  mouthY: number
-  /** Mouth width as a fraction of the image width */
-  mouthWidth: number
-  /** Jaw openness multiplier (0.2–2) */
-  jawOpenness: number
-  /** Chin bottom, 0–1 of image height (optional, from landmark detection) */
-  jawBottom?: number
-  /** Jaw half-width as fraction of image width (optional) */
-  jawHalfWidth?: number
-}
-
-/** Contain-fit rect of the photo inside the canvas, in 0–1 canvas fractions. */
-export function getTalkingPhotoRect(
-  canvasW: number,
-  canvasH: number,
-  imgW: number,
-  imgH: number
-): { x: number; y: number; w: number; h: number } {
-  const scale = Math.min(canvasW / imgW, canvasH / imgH)
-  const w = (imgW * scale) / canvasW
-  const h = (imgH * scale) / canvasH
-  return { x: (1 - w) / 2, y: (1 - h) / 2, w, h }
-}
-
-let warpCanvas: HTMLCanvasElement | null = null
-
-export function drawTalkingPhotoFrame(
-  ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
-  canvasW: number,
-  canvasH: number,
-  params: TalkingPhotoParams,
-  lip: LipSyncWeights,
-  elapsed: number
-): void {
-  const rect = getTalkingPhotoRect(canvasW, canvasH, img.width, img.height)
-  const dw = rect.w * canvasW
-  const dh = rect.h * canvasH
-  const dx = rect.x * canvasW
-  const dy = rect.y * canvasH
-
-  const energy = Math.min(1, Math.max(0, lip.energy))
-  const open = Math.min(1, Math.max(lip.aa, lip.oh * 0.85, lip.ee * 0.55, energy * 0.7))
-
-  // Head motion: breathing + vocal nod, pivoting around bottom-centre of the photo
-  const breathe = Math.sin(elapsed * 1.6) * 0.5 + 0.5
-  const bobY = (breathe * 0.004 + energy * 0.006) * dh
-  const rot = Math.sin(elapsed * 0.9) * 0.006 + Math.sin(elapsed * 2.3) * energy * 0.012
-  const sc = 1 + breathe * 0.004 + energy * 0.006
-
-  ctx.save()
-  ctx.translate(dx + dw / 2, dy + dh)
-  ctx.rotate(rot)
-  ctx.scale(sc, sc)
-  ctx.translate(-(dx + dw / 2), -(dy + dh) + bobY)
-
-  ctx.drawImage(img, dx, dy, dw, dh)
-
-  const mx = dx + params.mouthX * dw
-  const my = dy + params.mouthY * dh
-  const mw = Math.max(8, params.mouthWidth * dw)
-  const jaw = Math.min(2, Math.max(0.1, params.jawOpenness))
-  const drop = mw * 0.5 * jaw * open
-
-  if (drop > 0.8 && typeof document !== "undefined") {
-    const jawY = Math.max(
-      my + mw * 0.8,
-      dy + (params.jawBottom ?? params.mouthY + params.mouthWidth * 1.2) * dh
-    )
-    const halfW = Math.max(mw * 0.8, (params.jawHalfWidth ?? params.mouthWidth * 1.15) * dw)
-    const fade = Math.max(8, (jawY - my) * 0.45)
-
-    const x0 = Math.floor(Math.max(0, mx - halfW * 1.1))
-    const x1 = Math.ceil(Math.min(canvasW, mx + halfW * 1.1))
-    const y0 = Math.floor(Math.max(0, my))
-    const y1 = Math.ceil(Math.min(canvasH, jawY + fade + drop + 4))
-    const bw = x1 - x0
-    const bh = y1 - y0
-
-    if (bw > 4 && bh > 4) {
-      if (!warpCanvas) warpCanvas = document.createElement("canvas")
-      if (warpCanvas.width !== bw || warpCanvas.height !== bh) {
-        warpCanvas.width = bw
-        warpCanvas.height = bh
-      }
-      const wctx = warpCanvas.getContext("2d")
-      if (wctx) {
-        wctx.globalCompositeOperation = "source-over"
-        wctx.clearRect(0, 0, bw, bh)
-        const kx = img.width / dw
-        const ky = img.height / dh
-        const band = 2
-        // 1. Slice-warp the real lower-face pixels: chin drops, neck stays put
-        for (let sy = my; sy < jawY + fade; sy += band) {
-          const off = sy <= jawY ? drop : drop * (1 - (sy - jawY) / fade)
-          if (off <= 0) break
-          const srcY = (sy - dy) * ky
-          wctx.drawImage(
-            img,
-            (x0 - dx) * kx,
-            srcY,
-            bw * kx,
-            band * ky,
-            0,
-            sy + off - y0,
-            bw,
-            band + 1
-          )
-        }
-        // 2. Feather the warped patch into the surrounding skin (jaw-shaped mask)
-        const cy = (my + jawY) / 2 - y0
-        const ry = (jawY - my) / 2 + fade
-        wctx.globalCompositeOperation = "destination-in"
-        wctx.save()
-        wctx.translate(mx - x0, cy)
-        wctx.scale(1, ry / halfW)
-        const g = wctx.createRadialGradient(0, 0, 0, 0, 0, halfW)
-        g.addColorStop(0, "rgba(0,0,0,1)")
-        g.addColorStop(0.72, "rgba(0,0,0,1)")
-        g.addColorStop(1, "rgba(0,0,0,0)")
-        wctx.fillStyle = g
-        wctx.fillRect(-halfW, -halfW, halfW * 2, halfW * 2)
-        wctx.restore()
-        wctx.globalCompositeOperation = "source-over"
-        ctx.drawImage(warpCanvas, x0, y0)
-      }
-    }
-
-    // 3. Inner-mouth cavity along the lip contour (lens between upper & lower lip)
-    const wScale = 1 + lip.ee * 0.14 - lip.oh * 0.2
-    const rx = (mw / 2) * Math.max(0.6, wScale)
-    const lensPath = () => {
-      ctx.beginPath()
-      ctx.moveTo(mx - rx, my)
-      ctx.quadraticCurveTo(mx, my - drop * 0.25, mx + rx, my)
-      ctx.quadraticCurveTo(mx, my + drop * 2.05, mx - rx, my)
-      ctx.closePath()
-    }
-    ctx.save()
-    lensPath()
-    ctx.clip()
-    const grad = ctx.createLinearGradient(0, my - drop * 0.2, 0, my + drop)
-    grad.addColorStop(0, "#1a0709")
-    grad.addColorStop(0.55, "#3b1216")
-    grad.addColorStop(1, "#5a2326")
-    ctx.fillStyle = grad
-    ctx.fillRect(mx - rx, my - drop, rx * 2, drop * 3)
-    if (open > 0.25) {
-      ctx.fillStyle = "rgba(246,242,235,0.88)"
-      ctx.fillRect(mx - rx * 0.78, my - drop * 0.1, rx * 1.56, drop * 0.3)
-      ctx.fillStyle = "rgba(190,86,92,0.85)"
-      ctx.beginPath()
-      ctx.ellipse(mx, my + drop * 0.92, rx * 0.5, drop * 0.34, 0, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    // soft upper-lip shadow for depth
-    const shade = ctx.createLinearGradient(0, my, 0, my + drop * 0.45)
-    shade.addColorStop(0, "rgba(0,0,0,0.45)")
-    shade.addColorStop(1, "rgba(0,0,0,0)")
-    ctx.fillStyle = shade
-    ctx.fillRect(mx - rx, my, rx * 2, drop * 0.5)
-    ctx.restore()
-
-    ctx.strokeStyle = "rgba(95,35,40,0.5)"
-    ctx.lineWidth = Math.max(1.2, mw * 0.025)
-    ctx.lineJoin = "round"
-    lensPath()
-    ctx.stroke()
-  }
-
-  ctx.restore()
-}
-
 /**
- * "Presenter Card" style: the photo stays 100% crisp (no warping). Only a subtle
- * vocal scale bounce and a glowing audio-spectrum bar are animated.
+ * "2D Mascot Motion Card" renderer: keeps the uploaded mascot photo 100% crisp
+ * (zero mouth warping or synthetic overlays), animating smooth vocal-reactive
+ * breathing bounce (scale & subtle float) driven by Web Audio energy.
  */
 export function drawPresenterCardFrame(
   ctx: CanvasRenderingContext2D,
@@ -1626,15 +486,17 @@ export function drawPresenterCardFrame(
 ): void {
   const energy = Math.min(1, Math.max(0, lip.energy))
   const areaX = canvasW * 0.07
-  const areaY = canvasH * 0.09
+  const areaY = canvasH * 0.08
   const areaW = canvasW * 0.86
   const areaH = canvasH * 0.62
   const fit = Math.min(areaW / img.width, areaH / img.height)
   const pw = img.width * fit
   const ph = img.height * fit
   const px = areaX + (areaW - pw) / 2
-  const py = areaY + (areaH - ph) / 2
-  const bounce = 1 + energy * 0.018 + (Math.sin(elapsed * 1.6) * 0.5 + 0.5) * 0.003
+  const breathe = Math.sin(elapsed * 1.6) * 0.5 + 0.5
+  const floatY = Math.sin(elapsed * 1.6) * (canvasH * 0.004) - energy * (canvasH * 0.008)
+  const py = areaY + (areaH - ph) / 2 + floatY
+  const bounce = 1 + energy * 0.022 + breathe * 0.005
   const radius = Math.min(pw, ph) * 0.06
 
   ctx.save()

@@ -183,6 +183,7 @@ interface ContentState {
   customNiche: string
   autoAppendShopCta: boolean
   shopLogoDataUrl: string | null
+  presenterMascotDataUrl: string | null
   presenterLogoDataUrl: string | null
   presenterOutfitColor: PresenterOutfitColor
   presenterGestureStyle: PresenterGestureStyle
@@ -252,6 +253,7 @@ interface ContentState {
   setCustomNiche: (niche: string) => void
   setAutoAppendShopCta: (enabled: boolean) => void
   setShopLogoDataUrl: (dataUrl: string | null) => void
+  setPresenterMascotDataUrl: (dataUrl: string | null) => void
   setPresenterLogoDataUrl: (dataUrl: string | null) => void
   setPresenterOutfitColor: (color: PresenterOutfitColor) => void
   setPresenterGestureStyle: (style: PresenterGestureStyle) => void
@@ -354,6 +356,7 @@ export const useContentStore = create<ContentState>()(
       customNiche: "",
       autoAppendShopCta: false,
       shopLogoDataUrl: null,
+      presenterMascotDataUrl: null,
       presenterLogoDataUrl: null,
       presenterOutfitColor: "navy",
       presenterGestureStyle: "natural",
@@ -601,6 +604,7 @@ export const useContentStore = create<ContentState>()(
       setCustomNiche: (customNiche) => set({ customNiche }),
       setAutoAppendShopCta: (autoAppendShopCta) => set({ autoAppendShopCta }),
       setShopLogoDataUrl: (shopLogoDataUrl) => set({ shopLogoDataUrl }),
+      setPresenterMascotDataUrl: (presenterMascotDataUrl) => set({ presenterMascotDataUrl }),
       setPresenterLogoDataUrl: (presenterLogoDataUrl) => set({ presenterLogoDataUrl }),
       setPresenterOutfitColor: (presenterOutfitColor) => set({ presenterOutfitColor }),
       setPresenterGestureStyle: (presenterGestureStyle) => set({ presenterGestureStyle }),
@@ -1198,6 +1202,7 @@ export const useContentStore = create<ContentState>()(
         customNiche: state.customNiche ?? "",
         autoAppendShopCta: state.autoAppendShopCta ?? false,
         shopLogoDataUrl: state.shopLogoDataUrl ?? null,
+        presenterMascotDataUrl: state.presenterMascotDataUrl ?? null,
         presenterLogoDataUrl: state.presenterLogoDataUrl ?? null,
         presenterOutfitColor: state.presenterOutfitColor ?? "navy",
         presenterGestureStyle: state.presenterGestureStyle ?? "natural",
@@ -1248,6 +1253,10 @@ export const useContentStore = create<ContentState>()(
                 : false
               : normalizedCat === "online_shop",
           draftInput: normalizedDraft,
+          presenterMascotDataUrl:
+            typeof persisted.presenterMascotDataUrl === "string"
+              ? persisted.presenterMascotDataUrl
+              : null,
           presenterLogoDataUrl:
             typeof persisted.presenterLogoDataUrl === "string"
               ? persisted.presenterLogoDataUrl
