@@ -106,6 +106,7 @@ export function VoiceoverPage() {
     setVoiceCustomMusicFile,
     ttsStatus,
     ttsProgress,
+    ttsError,
     pdfExtractionStatus,
     generatedAudioUrl,
     generatedAudioBlob,
@@ -143,6 +144,7 @@ export function VoiceoverPage() {
       setVoiceCustomMusicFile: state.setVoiceCustomMusicFile,
       ttsStatus: state.ttsStatus,
       ttsProgress: state.ttsProgress,
+      ttsError: state.ttsError,
       pdfExtractionStatus: state.pdfExtractionStatus,
       generatedAudioUrl: state.generatedAudioUrl,
       generatedAudioBlob: state.generatedAudioBlob,
@@ -880,7 +882,8 @@ export function VoiceoverPage() {
           : language === "my"
             ? "အပိုင်းအသံပြန်ထုတ်ရာတွင် အဆင်မပြေပါ"
             : "Failed to regenerate segment"
-      toast.error(msg)
+      useContentStore.setState({ ttsStatus: "error", ttsError: msg })
+      toast.error(msg, { duration: 8000 })
     } finally {
       if (segmentAbortRef.current === controller) {
         segmentAbortRef.current = null
@@ -1516,6 +1519,16 @@ export function VoiceoverPage() {
                     width: `${Math.round((ttsProgress.current / ttsProgress.total) * 100)}%`,
                   }}
                 />
+              </div>
+            )}
+
+            {ttsStatus === "error" && ttsError && (
+              <div
+                role="alert"
+                className="flex items-start gap-2.5 rounded-2xl border border-rose-200 dark:border-rose-900/70 bg-rose-50/90 dark:bg-rose-950/40 px-3.5 py-3 text-xs leading-relaxed text-rose-900 dark:text-rose-200 font-myanmar"
+              >
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-rose-600 dark:text-rose-400" />
+                <div className="min-w-0 flex-1 break-words">{ttsError}</div>
               </div>
             )}
           </div>

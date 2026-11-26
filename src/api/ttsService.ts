@@ -765,7 +765,9 @@ function getSpeedPromptInstruction(speed: VoiceoverSpeed): string {
 }
 
 export const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
+export const GEMINI_TTS_FALLBACK_MODEL = "gemini-2.5-flash"
 export const GEMINI_SPEECH_PREP_MODEL = "gemini-2.5-flash"
+export const GEMINI_TTS_CHUNK_CHARS = 650
 
 /**
  * Fast speech-normalization pass using Gemini 2.5 Flash (when an API key is configured)
@@ -785,6 +787,11 @@ export async function prepareBurmeseSpeechText(
 
   const deterministic = normalizeBurmeseForTTS(rawText, customRules)
   if (!deterministic || !useAiSpeechPrep || deterministic.length > 1800) return deterministic
+
+  // Only invoke an extra Gemini speech-prep request if unexpanded digits or symbols remain;
+  // otherwise save the user's Free Tier quota so a 30s script uses 1 single TTS API request.
+  const needsAiNormalization = /[\d$%฿€£¥]/.test(deterministic)
+  if (!needsAiNormalization) return deterministic
 
   const apiKey = getSavedGeminiApiKey()
   if (!apiKey) return deterministic
@@ -898,10 +905,14 @@ function segmentBurmeseClusters(text: string): string[] {
 
 /**
  * Split long scripts cleanly at sentence boundaries (`။` / `.` / newlines / spaces)
- * into balanced chunks (~240 chars / ~2 sentences) so Gemini 2.5 Flash TTS never drifts
- * in pitch or persona mid-script and never splits inside a Burmese syllable cluster.
+ * into balanced chunks (~650 chars / ~35–40 seconds of Burmese speech) so a typical
+ * 30-second script uses only 1 single API request while never splitting inside a
+ * Burmese syllable cluster.
  */
-export function splitScriptIntoChunks(text: string, maxChunkChars = 240): string[] {
+export function splitScriptIntoChunks(
+  text: string,
+  maxChunkChars = GEMINI_TTS_CHUNK_CHARS
+): string[] {
   const normalized = text.trim()
   if (!normalized) return []
   if (normalized.length <= maxChunkChars) return [normalized]
@@ -1000,12 +1011,12 @@ export function splitScriptIntoChunks(text: string, maxChunkChars = 240): string
   if (current.trim()) {
     chunks.push(current.trim())
   }
-  // Prevent isolated short trailing chunks (< 110 chars) from shifting pitch or persona
+  // Prevent isolated short trailing chunks (< 140 chars) from wasting an extra API request
   if (chunks.length >= 2) {
     const lastChunk = chunks[chunks.length - 1]
     const prevChunk = chunks[chunks.length - 2]
     const merged = `${prevChunk} ${lastChunk}`
-    if (lastChunk.length < 110 && merged.length <= 330) {
+    if (lastChunk.length < 140 && merged.length <= maxChunkChars + 150) {
       chunks.splice(chunks.length - 2, 2, merged)
     }
   }
@@ -1124,23 +1135,128 @@ export async function concatenateAudioBlobsToWav(blobs: Blob[]): Promise<Blob> {
   }
 }
 
-function buildGeminiTtsError(status: number, errText: string): TtsError {
+interface ParsedGeminiApiError {
+  message: string
+  statusText?: string
+  retryDelay?: string
+}
+
+function parseGeminiErrorPayload(errText: string): ParsedGeminiApiError {
+  const raw = errText.trim()
+  if (!raw) {
+    return { message: "" }
+  }
+
+  let message = ""
+  let statusText: string | undefined
+  let retryDelay: string | undefined
+
+  try {
+    const parsed = JSON.parse(raw) as
+      | {
+          error?: {
+            code?: number
+            message?: string
+            status?: string
+            details?: Array<{
+              "@type"?: string
+              retryDelay?: string
+              violations?: Array<{ quotaId?: string; quotaMetric?: string }>
+            }>
+          }
+        }
+      | Array<{
+          error?: {
+            code?: number
+            message?: string
+            status?: string
+            details?: Array<{
+              "@type"?: string
+              retryDelay?: string
+              violations?: Array<{ quotaId?: string; quotaMetric?: string }>
+            }>
+          }
+        }>
+
+    const errObj = Array.isArray(parsed) ? parsed[0]?.error : parsed?.error
+    if (errObj) {
+      if (typeof errObj.message === "string" && errObj.message.trim()) {
+        message = errObj.message.trim()
+      }
+      if (typeof errObj.status === "string" && errObj.status.trim()) {
+        statusText = errObj.status.trim()
+      }
+      if (Array.isArray(errObj.details)) {
+        for (const detail of errObj.details) {
+          if (typeof detail?.retryDelay === "string" && detail.retryDelay.trim()) {
+            retryDelay = detail.retryDelay.trim()
+          }
+          if (Array.isArray(detail?.violations)) {
+            const quotaTags = detail.violations
+              .map((v) => v.quotaId || v.quotaMetric || "")
+              .filter(Boolean)
+              .join(", ")
+            if (quotaTags && !message.includes(quotaTags)) {
+              message = message ? `${message} [${quotaTags}]` : quotaTags
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // Non-JSON error body; fall back to raw text
+  }
+
+  if (!message) {
+    message = raw
+  }
+
+  if (!retryDelay) {
+    const retryMatch =
+      message.match(/retry in\s+([0-9]+(?:\.[0-9]+)?s)/i) ||
+      raw.match(/"retryDelay"\s*:\s*"([^"]+)"/i)
+    if (retryMatch?.[1]) {
+      retryDelay = retryMatch[1]
+    }
+  }
+
+  return { message, statusText, retryDelay }
+}
+
+export function buildGeminiTtsError(status: number, errText: string): TtsError {
+  const { message, statusText, retryDelay } = parseGeminiErrorPayload(errText)
+  const cleanDetail = message.replace(/\s+/g, " ").trim()
+  const combinedSource = `${cleanDetail} ${errText}`
+
   if (status === 429) {
+    const isDailyOrQuotaExceeded =
+      /PerDay|daily|Quota exceeded|GenerateRequestsPerDay|free_tier_requests|limit:\s*0\b/i.test(
+        combinedSource
+      )
+    if (isDailyOrQuotaExceeded) {
+      const detailSuffix = cleanDetail ? ` — [${cleanDetail}]` : ""
+      return new TtsError(
+        `ယနေ့အတွက် Gemini TTS အခမဲ့ အသုံးပြုခွင့် ပြည့်သွားပါပြီ (Settings တွင် API Key အသစ် ပြောင်းထည့်သုံးနိုင်ပါသည်)${detailSuffix}`
+      )
+    }
+
+    const delayNote = retryDelay
+      ? `Retry after ${retryDelay}`
+      : "Per-minute rate limit reached"
+    const detailSuffix = cleanDetail ? ` — ${cleanDetail}` : ""
     return new TtsError(
-      "API အသုံးပြုမှု ခဏပြည့်သွားပါသည် — စက္ကန့် ၂၀ ခန့်စောင့်ပြီး ပြန်နှိပ်ပါ"
+      `Gemini TTS တစ်မိနစ်အတွင်း အသုံးပြုမှု ကန့်သတ်ချက် ပြည့်သွားပါသည် (${delayNote})${detailSuffix}`
     )
   }
-  if (status === 401 || status === 403) {
-    return new TtsError(
-      "Gemini API Key မှားယွင်းနေပါသည် — Settings တွင် ပြန်လည်စစ်ဆေးပါ"
-    )
+
+  if (status === 400 || status === 404 || status === 403 || status === 401) {
+    const statusLabel = statusText ? `${status} ${statusText}` : `HTTP ${status}`
+    const detail = cleanDetail || "Request rejected by Gemini API (check API Key, model ID, or voiceName)."
+    return new TtsError(`Gemini TTS Error (${statusLabel}): ${detail}`)
   }
-  const detail = errText.trim().slice(0, 120)
-  return new TtsError(
-    detail
-      ? `Gemini အသံထုတ်ရာတွင် အဆင်မပြေပါ (${status}): ${detail}`
-      : `Gemini အသံထုတ်ရာတွင် အဆင်မပြေပါ (${status}) — ခဏစောင့်ပြီး ပြန်နှိပ်ပါ`
-  )
+
+  const fallbackDetail = cleanDetail || `HTTP ${status}`
+  return new TtsError(`Gemini TTS Error (HTTP ${status}): ${fallbackDetail}`)
 }
 
 async function synthesizeGeminiChunk(
@@ -1159,7 +1275,6 @@ async function synthesizeGeminiChunk(
   }
 
   const cleanKey = apiKey.trim()
-  const standardUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TTS_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
   const tonePreset = VOICE_DELIVERY_PRESETS[deliveryTone] ?? VOICE_DELIVERY_PRESETS.normal
   const narratorName =
     preset.id === "deep_male"
@@ -1194,111 +1309,137 @@ async function synthesizeGeminiChunk(
     "x-goog-api-key": cleanKey,
   }
 
+  const modelCandidates = [GEMINI_TTS_MODEL, GEMINI_TTS_FALLBACK_MODEL]
   const voiceCandidates = Array.from(
     new Set([preset.geminiVoice, preset.geminiFallbackVoice].filter(Boolean))
   )
 
   let response: Response | null = null
   let lastErrorText = ""
+  let lastStatus = 0
 
-  for (let voiceIdx = 0; voiceIdx < voiceCandidates.length; voiceIdx += 1) {
-    const voiceName = voiceCandidates[voiceIdx]
-    const requestBody = JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName,
+  outerLoop: for (let modelIdx = 0; modelIdx < modelCandidates.length; modelIdx += 1) {
+    const modelId = modelCandidates[modelIdx]
+    const standardUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${encodeURIComponent(cleanKey)}`
+
+    for (let voiceIdx = 0; voiceIdx < voiceCandidates.length; voiceIdx += 1) {
+      const voiceName = voiceCandidates[voiceIdx]
+      const requestBody = JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName,
+              },
             },
           },
         },
-      },
-    })
+      })
 
-    const maxAttempts = 2
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      if (signal?.aborted) {
-        throw new DOMException("Aborted", "AbortError")
-      }
-      response = null
-      if (cleanKey.startsWith("AQ.")) {
-        const vertexUrl = `https://aiplatform.googleapis.com/v1/publishers/google/models/${GEMINI_TTS_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
-        try {
-          const vertexRes = await fetch(vertexUrl, {
-            method: "POST",
-            headers,
-            body: requestBody,
-            signal,
+      const maxAttempts = 2
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (signal?.aborted) {
+          throw new DOMException("Aborted", "AbortError")
+        }
+        response = null
+        if (cleanKey.startsWith("AQ.")) {
+          const vertexUrl = `https://aiplatform.googleapis.com/v1/publishers/google/models/${modelId}:generateContent?key=${encodeURIComponent(cleanKey)}`
+          try {
+            const vertexRes = await fetch(vertexUrl, {
+              method: "POST",
+              headers,
+              body: requestBody,
+              signal,
+            })
+            if (vertexRes.ok) {
+              response = vertexRes
+            }
+          } catch (err) {
+            if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+              throw err
+            }
+            // Fall back to generativelanguage.googleapis.com
+          }
+        }
+
+        if (!response) {
+          try {
+            response = await fetch(standardUrl, {
+              method: "POST",
+              headers,
+              body: requestBody,
+              signal,
+            })
+          } catch (err) {
+            if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+              throw err
+            }
+            if (
+              attempt === maxAttempts - 1 &&
+              voiceIdx === voiceCandidates.length - 1 &&
+              modelIdx === modelCandidates.length - 1
+            ) {
+              throw new TtsError(
+                `Network Error: ${err instanceof Error ? err.message : "Failed to reach Gemini TTS endpoint"}`
+              )
+            }
+          }
+        }
+
+        if (response?.ok) break outerLoop
+
+        if (response && !response.ok) {
+          lastStatus = response.status
+          lastErrorText = await response.text().catch(() => "")
+
+          // Immediate throw on 429 or 401/403 so we don't burn extra requests
+          if (response.status === 429 || response.status === 401 || response.status === 403) {
+            throw buildGeminiTtsError(response.status, lastErrorText)
+          }
+
+          // If model returned 404 (or 400 mentioning model/modality unsupported), fall back to next model immediately
+          if (response.status === 404 && modelIdx < modelCandidates.length - 1) {
+            break
+          }
+
+          // If 400 error, try fallback voice or fallback model
+          if (response.status === 400) {
+            break
+          }
+        }
+
+        if (attempt < maxAttempts - 1 && (!response || response.status >= 500)) {
+          await new Promise<void>((resolve, reject) => {
+            const timer = window.setTimeout(resolve, 600 * (attempt + 1))
+            signal?.addEventListener(
+              "abort",
+              () => {
+                window.clearTimeout(timer)
+                reject(new DOMException("Aborted", "AbortError"))
+              },
+              { once: true }
+            )
           })
-          if (vertexRes.ok) {
-            response = vertexRes
-          }
-        } catch (err) {
-          if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
-            throw err
-          }
-          // Fall back to generativelanguage.googleapis.com
+          continue
         }
+        break
       }
 
-      if (!response) {
-        try {
-          response = await fetch(standardUrl, {
-            method: "POST",
-            headers,
-            body: requestBody,
-            signal,
-          })
-        } catch (err) {
-          if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
-            throw err
-          }
-          if (attempt === maxAttempts - 1 && voiceIdx === voiceCandidates.length - 1) {
-            throw new TtsError("အင်တာနက် ချိတ်ဆက်မှု အဆင်မပြေပါ — ခဏနေပြီး ပြန်နှိပ်ပါ")
-          }
-        }
+      // If the current model returned 404, skip remaining voices for this model and try fallback model
+      if (lastStatus === 404 && modelIdx < modelCandidates.length - 1) {
+        break
       }
-
-      if (response?.ok) break
-      if (response && !response.ok) {
-        lastErrorText = await response.text().catch(() => "")
-        // If voice ID is rejected (400), break retry loop to try fallback voice immediately
-        if (response.status === 400 && voiceIdx < voiceCandidates.length - 1) {
-          break
-        }
-        // Do not retry 429 blindly if we want immediate user feedback, or retry once on 5xx
-        if (response.status === 429) {
-          throw buildGeminiTtsError(429, lastErrorText)
-        }
-      }
-      if (attempt < maxAttempts - 1 && (!response || response.status >= 500)) {
-        await new Promise<void>((resolve, reject) => {
-          const timer = window.setTimeout(resolve, 600 * (attempt + 1))
-          signal?.addEventListener(
-            "abort",
-            () => {
-              window.clearTimeout(timer)
-              reject(new DOMException("Aborted", "AbortError"))
-            },
-            { once: true }
-          )
-        })
-        continue
-      }
-      break
     }
-
-    if (response?.ok) break
   }
 
   if (!response) {
-    throw new TtsError("အင်တာနက် ချိတ်ဆက်မှု အဆင်မပြေပါ — ခဏနေပြီး ပြန်နှိပ်ပါ")
+    throw new TtsError("Network Error: Could not connect to Gemini TTS API.")
   }
 
   if (!response.ok) {
-    throw buildGeminiTtsError(response.status, lastErrorText)
+    throw buildGeminiTtsError(lastStatus || response.status, lastErrorText)
   }
 
   const data = (await response.json()) as {
@@ -1356,7 +1497,7 @@ async function synthesizeWithGemini(
   fileExtension: "wav" | "mp3"
   segments: VoiceoverSegmentItem[]
 }> {
-  const chunks = splitScriptIntoChunks(cleanedText, 240)
+  const chunks = splitScriptIntoChunks(cleanedText, GEMINI_TTS_CHUNK_CHARS)
   const chunkResults = []
   for (let i = 0; i < chunks.length; i += 1) {
     if (signal?.aborted) {
@@ -2129,7 +2270,9 @@ export async function generateBurmeseVoiceover(
   }
 
   // Multi-segment (with pauses) and/or intro SFX path
-  const segmentChunkCounts = speechSegments.map((seg) => splitScriptIntoChunks(seg.text, 240).length)
+  const segmentChunkCounts = speechSegments.map(
+    (seg) => splitScriptIntoChunks(seg.text, GEMINI_TTS_CHUNK_CHARS).length
+  )
   const totalChunksAllSegments = Math.max(
     1,
     segmentChunkCounts.reduce((sum, count) => sum + count, 0)
