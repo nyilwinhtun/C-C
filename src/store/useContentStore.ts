@@ -34,7 +34,7 @@ import { playBlobUrlWithPrimedAudio } from "@/lib/iosAudio"
 import type { BackgroundMusicPreset } from "@/lib/videoAudioMerger"
 import { toast } from "@/components/ui/sonner"
 
-export type StudioVoiceChoice = "self" | "nilar" | "thiha"
+export type StudioVoiceChoice = "self" | "nilar" | "thiha" | "ko_khant"
 export type TtsStatus = "idle" | "preparing" | "generating" | "done" | "error"
 export type PdfReadingMode = "direct" | "recap"
 export type PdfExtractionStatus = "idle" | "extracting" | "rewriting" | "error"
@@ -308,7 +308,7 @@ export const useContentStore = create<ContentState>()(
       voiceSpeed: 1.0,
       voiceDialogueMode: false,
       voiceMusicPreset: "none",
-      voiceDeliveryTone: "storytelling",
+      voiceDeliveryTone: "normal",
       voiceCustomMusicFile: null,
       ttsStatus: "idle",
       ttsProgress: null,
@@ -538,7 +538,12 @@ export const useContentStore = create<ContentState>()(
           return
         }
 
-        const voiceType: BurmeseVoiceType = state.selectedVoice === "thiha" ? "male" : "female"
+        const voiceType: BurmeseVoiceType =
+          state.selectedVoice === "ko_khant"
+            ? "deep_male"
+            : state.selectedVoice === "thiha"
+              ? "male"
+              : "female"
         const speed = state.voiceSpeed
         const dialogueMode = state.voiceDialogueMode
         const musicPreset = state.voiceMusicPreset
@@ -555,7 +560,7 @@ export const useContentStore = create<ContentState>()(
         try {
           let result = dialogueMode
             ? await generateBurmeseDialogueVoiceover(rawScript, speed, {
-                deliveryTone: state.voiceDeliveryTone ?? "storytelling",
+                deliveryTone: state.voiceDeliveryTone ?? "normal",
                 customPronunciations,
                 useAiSpeechPrep,
                 onStageChange: (stage) => {
@@ -569,7 +574,7 @@ export const useContentStore = create<ContentState>()(
                 },
               })
             : await generateBurmeseVoiceover(cleaned, voiceType, speed, {
-                deliveryTone: state.voiceDeliveryTone ?? "storytelling",
+                deliveryTone: state.voiceDeliveryTone ?? "normal",
                 customPronunciations,
                 useAiSpeechPrep,
                 onStageChange: (stage) => {
@@ -611,9 +616,11 @@ export const useContentStore = create<ContentState>()(
             options?.customTitle ||
             (dialogueMode
               ? tt("store.voiceBoth")
-              : state.selectedVoice === "thiha"
-                ? tt("store.voiceThiha")
-                : tt("store.voiceNilar"))
+              : state.selectedVoice === "ko_khant"
+                ? tt("store.voiceKoKhant")
+                : state.selectedVoice === "thiha"
+                  ? tt("store.voiceThiha")
+                  : tt("store.voiceNilar"))
 
           set({
             ttsStatus: "done",

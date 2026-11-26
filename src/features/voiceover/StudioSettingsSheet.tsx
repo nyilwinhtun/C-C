@@ -397,7 +397,7 @@ export function StudioSettingsSheet({
             </Label>
             <div className="flex flex-wrap gap-2">
               {(Object.keys(VOICE_DELIVERY_PRESETS) as VoiceDeliveryTone[]).map((tone) => {
-                const active = (voiceDeliveryTone ?? "storytelling") === tone
+                const active = (voiceDeliveryTone ?? "normal") === tone
                 return (
                   <button
                     key={tone}

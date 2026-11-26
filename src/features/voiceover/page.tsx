@@ -944,17 +944,18 @@ export function VoiceoverPage() {
         )}
       </div>
 
-      {/* 2. De-AI 3-Pill Voice Switcher */}
+      {/* 2. De-AI 4-Pill Voice Switcher */}
       <div
         role="tablist"
         aria-label="Voice source"
-        className="grid grid-cols-3 gap-1 rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#F0EDE8]/70 dark:bg-[#27272A]/70 p-1"
+        className="grid grid-cols-2 sm:grid-cols-4 gap-1 rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#F0EDE8]/70 dark:bg-[#27272A]/70 p-1"
       >
         {(
           [
             { id: "self", icon: "🎙️", label: t(language, "booth.voiceSelf") },
             { id: "nilar", icon: "👩", label: t(language, "booth.voiceNilar") },
             { id: "thiha", icon: "👨", label: t(language, "booth.voiceThiha") },
+            { id: "ko_khant", icon: "🧔", label: t(language, "booth.voiceKoKhant") },
           ] as const
         ).map((pill) => {
           const active = selectedVoice === pill.id
@@ -970,14 +971,14 @@ export function VoiceoverPage() {
                 setSelectedVoice(pill.id)
               }}
               className={cn(
-                "flex items-center justify-center gap-1.5 rounded-xl py-2.5 px-2 text-xs sm:text-sm font-medium transition-all cursor-pointer font-myanmar disabled:opacity-60",
+                "flex items-center justify-center gap-1.5 rounded-xl py-2.5 px-2 text-xs sm:text-sm font-medium transition-all cursor-pointer font-myanmar disabled:opacity-60 min-w-0",
                 active
                   ? "bg-white dark:bg-[#18181B] text-[#1C1917] dark:text-[#F5F5F4] shadow-xs font-semibold"
                   : "text-[#57534E] dark:text-[#A1A1AA] hover:text-[#1C1917] dark:hover:text-[#F5F5F4]"
               )}
             >
-              <span aria-hidden="true">{pill.icon}</span>
-              <span>{pill.label}</span>
+              <span aria-hidden="true" className="shrink-0">{pill.icon}</span>
+              <span className="truncate">{pill.label}</span>
             </button>
           )
         })}
@@ -985,7 +986,8 @@ export function VoiceoverPage() {
 
       {/* 2.5 Active Settings Summary Pill Bar */}
       {(() => {
-        const deliveryPreset = VOICE_DELIVERY_PRESETS[voiceDeliveryTone]
+        const deliveryPreset =
+          VOICE_DELIVERY_PRESETS[voiceDeliveryTone] ?? VOICE_DELIVERY_PRESETS.normal
         const deliveryLabel = deliveryPreset
           ? language === "my"
             ? deliveryPreset.labelMy

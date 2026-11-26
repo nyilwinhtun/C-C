@@ -4,9 +4,9 @@ import { decodeAudioBlob, getAudioContextConstructor, unlockIosAudio } from "@/l
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
 
-export type BurmeseVoiceType = "female" | "male"
+export type BurmeseVoiceType = "female" | "male" | "deep_male"
 export type VoiceoverSpeed = 0.85 | 0.9 | 1.0 | 1.1 | 1.15 | 1.2
-export type VoiceDeliveryTone = "promo" | "storytelling" | "educational"
+export type VoiceDeliveryTone = "normal" | "promo" | "storytelling" | "educational"
 export type SoundEffectType = "none" | "pop" | "whoosh" | "cash_ding"
 
 export interface SoundEffectPreset {
@@ -36,6 +36,13 @@ export interface VoiceDeliveryPreset {
 }
 
 export const VOICE_DELIVERY_PRESETS: Record<VoiceDeliveryTone, VoiceDeliveryPreset> = {
+  normal: {
+    id: "normal",
+    label: "Normal Natural",
+    labelMy: "ပုံမှန် သဘာဝအသံ",
+    styleInstruction:
+      "Deliver in a clean, grounded, everyday conversational Burmese narrator tone—like a composed, natural Myanmar presenter. Zero theatrical exaggeration, zero dramatic pitch swings, 100% steady and natural.",
+  },
   promo: {
     id: "promo",
     label: "Energetic Promo",
@@ -81,6 +88,13 @@ export const BURMESE_VOICE_PRESETS: Record<BurmeseVoiceType, BurmeseVoicePreset>
     labelMy: "ယောက်ျားလေးအသံ (Thiha)",
     neuralVoice: "my-MM-ThihaNeural",
     geminiVoice: "Charon",
+  },
+  deep_male: {
+    id: "deep_male",
+    label: "Deep Male (Ko Khant)",
+    labelMy: "အသံဩဇာ (ကိုခန့်)",
+    neuralVoice: "my-MM-ThihaNeural",
+    geminiVoice: "Orus",
   },
 }
 
@@ -239,10 +253,19 @@ function numericStringToBurmeseWords(rawNum: string): string {
 const ENGLISH_TO_BURMESE_PHONETICS: ReadonlyArray<[RegExp, string]> = [
   [/\bfree\s+delivery\b/gi, "ဖရီး ဒယ်လီဗာရီ"],
   [/\bfree\s+deli\b/gi, "ဖရီး ဒယ်လီဗာရီ"],
+  [/\bdelivery\b/gi, "ဒယ်လီဗာရီ"],
+  [/\bdeli\b/gi, "ဒယ်လီဗာရီ"],
   [/\bpro\s+max\b/gi, "ပရိုမက်စ်"],
   [/\bpre[-\s]?order\b/gi, "ပရီအော်ဒါ"],
+  [/\borders?\b/gi, "အော်ဒါ"],
+  [/\biphone\b/gi, "အိုင်ဖုန်း"],
   [/\btype[-\s]?c\b/gi, "တိုက်ပ်စီ"],
   [/\bin[-\s]?stock\b/gi, "အင်စတော့ခ်"],
+  [/\bstock\b/gi, "စတော့ခ်"],
+  [/\bonline\b/gi, "အွန်လိုင်း"],
+  [/\bshop\b/gi, "ရှော့ပ်"],
+  [/\bpage\b/gi, "ပေ့ချ်"],
+  [/\bbrand\b/gi, "ဘရန်း"],
   [/\bsubscribes?\b/gi, "ဆပ်စခရိုက်ဘ်"],
   [/\bfollows?\b/gi, "ဖောလိုး"],
   [/\blikes?\b/gi, "လိုက်ခ်"],
@@ -384,15 +407,33 @@ export function normalizeBurmeseForTTS(
     return `${numericStringToBurmeseWords(num)} ရာခိုင်နှုန်း`
   })
 
-  // Convert currency-annotated prices
+  // Convert currency-annotated prices (including သိန်း / lakhs and ကျပ်)
   text = text
     .replace(
       /(?:Ks|MMK|Kyats?|ကျပ်)\s*(\d[\d,]*(?:\.\d+)?)/gi,
       (_match, num: string) => `${numericStringToBurmeseWords(num)} ကျပ်`
     )
     .replace(
-      /(\d[\d,]*(?:\.\d+)?)\s*(?:Ks|MMK|Kyats?|ကျပ်)\b/gi,
+      /(\d[\d,]*(?:\.\d+)?)\s*(?:(?:Ks|MMK|Kyats?)\b|ကျပ်)/gi,
       (_match, num: string) => `${numericStringToBurmeseWords(num)} ကျပ်`
+    )
+    .replace(
+      /(\d[\d,]*(?:\.\d+)?)\s*သိန်း/g,
+      (_match, num: string) => {
+        const cleaned = num.replace(/,/g, "")
+        const [intStr, decStr] = cleaned.split(".")
+        if (decStr === "5" && intStr) {
+          const intVal = Number.parseInt(intStr, 10)
+          if (Number.isFinite(intVal) && intVal > 0) {
+            return `${integerToBurmeseWords(intVal)} သိန်းခွဲ`
+          }
+        }
+        return `${numericStringToBurmeseWords(num)} သိန်း`
+      }
+    )
+    .replace(
+      /သိန်း\s*(\d[\d,]*(?:\.\d+)?)/g,
+      (_match, num: string) => `သိန်း ${numericStringToBurmeseWords(num)}`
     )
     .replace(
       /(?:USD|\$)\s*(\d[\d,]*(?:\.\d+)?)/gi,
@@ -827,10 +868,10 @@ export async function prepareBurmeseSpeechText(
 
 /**
  * Split long scripts cleanly at sentence boundaries (`။` / `.` / newlines / punctuation)
- * so each TTS chunk (max ~360 chars, safely under Gemini's ~24s / 450-char truncation limit)
- * synthesizes reliably and can be stitched seamlessly.
+ * into balanced chunks (~240 chars / ~2 sentences) so Gemini 2.5 Flash TTS never drifts
+ * in pitch or persona mid-script and chunks stitch seamlessly.
  */
-export function splitScriptIntoChunks(text: string, maxChunkChars = 360): string[] {
+export function splitScriptIntoChunks(text: string, maxChunkChars = 240): string[] {
   const normalized = text.trim()
   if (!normalized) return []
   if (normalized.length <= maxChunkChars) return [normalized]
@@ -1049,12 +1090,18 @@ async function synthesizeGeminiChunk(
 > {
   const cleanKey = apiKey.trim()
   const standardUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TTS_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
-  const tonePreset = VOICE_DELIVERY_PRESETS[deliveryTone]
-  const narratorName = preset.id === "male" ? "သီဟ (Thiha)" : "နီလာ (Nilar)"
+  const tonePreset = VOICE_DELIVERY_PRESETS[deliveryTone] ?? VOICE_DELIVERY_PRESETS.normal
+  const narratorName =
+    preset.id === "deep_male"
+      ? "ကိုခန့် (Ko Khant)"
+      : preset.id === "male"
+        ? "သီဟ (Thiha)"
+        : "နီလာ (Nilar)"
 
   const prompt = [
     `You are ${narratorName}, a native Yangon Myanmar (Burmese) professional voiceover narrator.`,
     tonePreset.styleInstruction,
+    "Voice Stability & Consistency Anchor (CRITICAL): Maintain the exact same vocal pitch, calm steady speaking rate, volume, and natural Burmese vocal timbre from the first syllable to the last. Do NOT shift pitch, whisper, dramatize, rush, or change persona mid-sentence or across chunks.",
     "Pronunciation & Prosody Direction: Speak in clear, articulate, warm native Yangon Myanmar pronunciation with crisp consonant endings (အသတ်သံများ ပီသကြည်လင်စွာ) and accurate Burmese tonal contours. Use natural Yangon spoken intonation—never stiff, robotic, or English-accented cadence.",
     `Pacing & Breath Pauses: Pause briefly and naturally after every \`၊\` and take a full, calm breath pause after every \`။\` so sentences are never rushed or slurred. ${getSpeedPromptInstruction(speed)}`,
     "Read ONLY the following Burmese script aloud. Do not add any intro, commentary, or extra words.",
@@ -1178,7 +1225,7 @@ async function synthesizeWithGemini(
   apiKey: string,
   onChunkProgress?: (currentChunk: number, totalChunks: number) => void
 ): Promise<{ blob: Blob; mimeType: string; fileExtension: "wav" | "mp3" }> {
-  const chunks = splitScriptIntoChunks(cleanedText, 420)
+  const chunks = splitScriptIntoChunks(cleanedText, 240)
   const chunkResults = []
   for (let i = 0; i < chunks.length; i += 1) {
     onChunkProgress?.(i + 1, chunks.length)
@@ -1755,7 +1802,7 @@ export async function generateBurmeseVoiceover(
   speed: VoiceoverSpeed = 1.0,
   options: GenerateVoiceoverOptions = {}
 ): Promise<VoiceoverResult> {
-  const deliveryTone = options.deliveryTone ?? "storytelling"
+  const deliveryTone = options.deliveryTone ?? "normal"
   const introSfx = options.introSfx ?? "none"
   const useAiSpeechPrep = options.useAiSpeechPrep ?? true
   const preset = BURMESE_VOICE_PRESETS[voiceType]
@@ -1833,7 +1880,7 @@ export async function generateBurmeseVoiceover(
   }
 
   // Multi-segment (with pauses) and/or intro SFX path
-  const segmentChunkCounts = speechSegments.map((seg) => splitScriptIntoChunks(seg.text, 420).length)
+  const segmentChunkCounts = speechSegments.map((seg) => splitScriptIntoChunks(seg.text, 240).length)
   const totalChunksAllSegments = Math.max(
     1,
     segmentChunkCounts.reduce((sum, count) => sum + count, 0)
@@ -1948,7 +1995,7 @@ export async function generateBurmeseDialogueVoiceover(
     throw new TtsError("Dialogue script is empty.")
   }
 
-  const deliveryTone = options.deliveryTone ?? "storytelling"
+  const deliveryTone = options.deliveryTone ?? "normal"
   const introSfx = options.introSfx ?? "none"
   const useAiSpeechPrep = options.useAiSpeechPrep ?? true
   const onProgress = options.onProgress
