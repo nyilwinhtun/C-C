@@ -47,6 +47,7 @@ import {
   type AvatarController,
   type BuiltinPresenterId,
   type LipSyncAnalyzer,
+  type PresenterGestureStyle,
   type PresenterOutfitColor,
 } from "@/lib/vrmLipSync"
 
@@ -135,8 +136,10 @@ export function Presenter3DPage() {
     deleteMascotPreset,
     presenterLogoDataUrl,
     presenterOutfitColor,
+    presenterGestureStyle,
     setPresenterLogoDataUrl,
     setPresenterOutfitColor,
+    setPresenterGestureStyle,
   } = useContentStore(
     useShallow((state) => ({
       generatedAudioUrl: state.generatedAudioUrl,
@@ -150,8 +153,10 @@ export function Presenter3DPage() {
       deleteMascotPreset: state.deleteMascotPreset,
       presenterLogoDataUrl: state.presenterLogoDataUrl,
       presenterOutfitColor: state.presenterOutfitColor,
+      presenterGestureStyle: state.presenterGestureStyle,
       setPresenterLogoDataUrl: state.setPresenterLogoDataUrl,
       setPresenterOutfitColor: state.setPresenterOutfitColor,
+      setPresenterGestureStyle: state.setPresenterGestureStyle,
     }))
   )
 
@@ -429,11 +434,12 @@ export function Presenter3DPage() {
     const camera = new THREE.PerspectiveCamera(32, 9 / 16, 0.1, 30)
     cameraRef.current = camera
 
-    // Load initial preset avatar with persisted uniform & logo
+    // Load initial preset avatar with persisted uniform, logo & gesture style
     const storeSnapshot = useContentStore.getState()
     const initialAvatar = createBuiltinPresenterController(defaultPreset, {
       outfitColor: storeSnapshot.presenterOutfitColor,
       logoDataUrl: storeSnapshot.presenterLogoDataUrl,
+      gestureStyle: storeSnapshot.presenterGestureStyle,
     })
     scene.add(initialAvatar.object)
     avatarRef.current = initialAvatar
@@ -650,6 +656,10 @@ export function Presenter3DPage() {
     avatarRef.current?.setLogoDataUrl?.(presenterLogoDataUrl)
   }, [presenterLogoDataUrl])
 
+  useEffect(() => {
+    avatarRef.current?.setGestureStyle?.(presenterGestureStyle)
+  }, [presenterGestureStyle])
+
   const handleSelectPreset = (id: BuiltinPresenterId) => {
     triggerHaptic(8)
     setPresetId(id)
@@ -659,6 +669,7 @@ export function Presenter3DPage() {
       createBuiltinPresenterController(id, {
         outfitColor: presenterOutfitColor,
         logoDataUrl: presenterLogoDataUrl,
+        gestureStyle: presenterGestureStyle,
       })
     )
   }
@@ -1703,6 +1714,58 @@ export function Presenter3DPage() {
                     />
                   </label>
                 </FileDropzone>
+              </div>
+            )}
+            {avatarMode === "preset" && (
+              <div className="rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white/80 dark:bg-[#27272A]/80 p-3 space-y-2.5">
+                <span className="text-[11px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] block font-myanmar">
+                  {t(language, "presenter3d.gestureStyleTitle")}
+                </span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      {
+                        id: "natural",
+                        labelKey: "presenter3d.gestureNatural",
+                        descKey: "presenter3d.gestureNaturalDesc",
+                      },
+                      {
+                        id: "energetic",
+                        labelKey: "presenter3d.gestureEnergetic",
+                        descKey: "presenter3d.gestureEnergeticDesc",
+                      },
+                      {
+                        id: "calm",
+                        labelKey: "presenter3d.gestureCalm",
+                        descKey: "presenter3d.gestureCalmDesc",
+                      },
+                    ] as const satisfies readonly {
+                      id: PresenterGestureStyle
+                      labelKey: string
+                      descKey: string
+                    }[]
+                  ).map((styleOpt) => (
+                    <button
+                      key={styleOpt.id}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic(6)
+                        setPresenterGestureStyle(styleOpt.id)
+                      }}
+                      title={t(language, styleOpt.descKey)}
+                      className={cn(
+                        "rounded-xl border py-2 px-2 text-center transition-all cursor-pointer font-myanmar",
+                        presenterGestureStyle === styleOpt.id
+                          ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B] shadow-xs"
+                          : "border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
+                      )}
+                    >
+                      <div className="text-[11px] font-semibold leading-tight truncate">
+                        {t(language, styleOpt.labelKey)}
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             </>

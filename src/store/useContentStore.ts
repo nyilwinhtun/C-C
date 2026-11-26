@@ -124,6 +124,7 @@ export type EditorialLength = "short" | "medium" | "detailed"
 
 export type MicFilterMode = "raw" | "light"
 export type PresenterOutfitColor = "navy" | "charcoal" | "emerald" | "cream"
+export type PresenterGestureStyle = "natural" | "energetic" | "calm"
 
 export interface ShopProfile {
   name: string
@@ -179,6 +180,7 @@ interface ContentState {
   shopLogoDataUrl: string | null
   presenterLogoDataUrl: string | null
   presenterOutfitColor: PresenterOutfitColor
+  presenterGestureStyle: PresenterGestureStyle
   posterDraft: PosterDraft | null
   uploadedVideoFile: File | null
   videoPreviewUrl: string | null
@@ -244,6 +246,7 @@ interface ContentState {
   setShopLogoDataUrl: (dataUrl: string | null) => void
   setPresenterLogoDataUrl: (dataUrl: string | null) => void
   setPresenterOutfitColor: (color: PresenterOutfitColor) => void
+  setPresenterGestureStyle: (style: PresenterGestureStyle) => void
   setPosterDraft: (draft: PosterDraft | null) => void
   setUploadedVideo: (file: File | null, previewUrl: string | null) => void
   setUploadedPhotos: (photos: UploadedPhotoItem[]) => void
@@ -342,6 +345,7 @@ export const useContentStore = create<ContentState>()(
       shopLogoDataUrl: null,
       presenterLogoDataUrl: null,
       presenterOutfitColor: "navy",
+      presenterGestureStyle: "natural",
       posterDraft: null,
       uploadedVideoFile: null,
       videoPreviewUrl: null,
@@ -585,6 +589,7 @@ export const useContentStore = create<ContentState>()(
       setShopLogoDataUrl: (shopLogoDataUrl) => set({ shopLogoDataUrl }),
       setPresenterLogoDataUrl: (presenterLogoDataUrl) => set({ presenterLogoDataUrl }),
       setPresenterOutfitColor: (presenterOutfitColor) => set({ presenterOutfitColor }),
+      setPresenterGestureStyle: (presenterGestureStyle) => set({ presenterGestureStyle }),
       setPosterDraft: (posterDraft) => set({ posterDraft }),
       setUploadedVideo: (file, previewUrl) =>
         set((state) => {
@@ -1178,6 +1183,7 @@ export const useContentStore = create<ContentState>()(
         shopLogoDataUrl: state.shopLogoDataUrl ?? null,
         presenterLogoDataUrl: state.presenterLogoDataUrl ?? null,
         presenterOutfitColor: state.presenterOutfitColor ?? "navy",
+        presenterGestureStyle: state.presenterGestureStyle ?? "natural",
         videoProductNote: state.videoProductNote ?? "",
         videoPlatform: state.videoPlatform ?? "TikTok / Reels",
         videoOutputLanguage: state.videoOutputLanguage ?? "my",
@@ -1233,6 +1239,12 @@ export const useContentStore = create<ContentState>()(
             persisted.presenterOutfitColor === "cream"
               ? persisted.presenterOutfitColor
               : "navy",
+          presenterGestureStyle:
+            persisted.presenterGestureStyle === "natural" ||
+            persisted.presenterGestureStyle === "energetic" ||
+            persisted.presenterGestureStyle === "calm"
+              ? persisted.presenterGestureStyle
+              : "natural",
         }
       },
     }

@@ -165,6 +165,7 @@ export function createLipSyncAnalyzer({
 }
 
 export type PresenterOutfitColor = "navy" | "charcoal" | "emerald" | "cream"
+export type PresenterGestureStyle = "natural" | "energetic" | "calm"
 
 export interface AvatarController {
   object: THREE.Object3D
@@ -173,6 +174,7 @@ export interface AvatarController {
   dispose: () => void
   setOutfitColor?: (color: PresenterOutfitColor) => void
   setLogoDataUrl?: (dataUrl: string | null) => void
+  setGestureStyle?: (style: PresenterGestureStyle) => void
 }
 
 interface BlinkState {
@@ -415,6 +417,21 @@ export type BuiltinPresenterId = "female_nilar" | "male_kokhant"
 export interface BuiltinPresenterOptions {
   outfitColor?: PresenterOutfitColor
   logoDataUrl?: string | null
+  gestureStyle?: PresenterGestureStyle
+}
+
+interface GestureStyleParams {
+  amp: number
+  speed: number
+  browMul: number
+  headMul: number
+  gazeFreq: number
+}
+
+const GESTURE_STYLE_CONFIG: Record<PresenterGestureStyle, GestureStyleParams> = {
+  natural: { amp: 1.0, speed: 1.0, browMul: 1.0, headMul: 1.0, gazeFreq: 1.0 },
+  energetic: { amp: 1.38, speed: 1.26, browMul: 1.45, headMul: 1.32, gazeFreq: 1.2 },
+  calm: { amp: 0.56, speed: 0.78, browMul: 0.65, headMul: 0.68, gazeFreq: 0.6 },
 }
 
 interface OutfitPalette {
@@ -694,19 +711,82 @@ export function createBuiltinPresenterController(
   rightShoulder.position.set(isFemale ? 0.185 : 0.235, 0.16, 0)
   torsoGroup.add(rightShoulder)
 
-  // Upper arms
-  const armGeo = track(
-    new THREE.CylinderGeometry(isFemale ? 0.045 : 0.054, isFemale ? 0.039 : 0.046, 0.28, 16)
-  )
-  const leftArm = new THREE.Mesh(armGeo, outfitMat)
-  leftArm.position.set(isFemale ? -0.208 : -0.26, 0.02, 0)
-  leftArm.rotation.z = 0.08
-  torsoGroup.add(leftArm)
+  // Articulated Arms, Blazer/Bomber Sleeves, Elbows, Wrists & Stylized Hands
+  const upperArmLen = isFemale ? 0.22 : 0.24
+  const forearmLen = isFemale ? 0.20 : 0.21
+  const upperArmTopR = isFemale ? 0.044 : 0.053
+  const elbowR = isFemale ? 0.036 : 0.043
+  const wristR = isFemale ? 0.029 : 0.035
 
-  const rightArm = new THREE.Mesh(armGeo, outfitMat)
-  rightArm.position.set(isFemale ? 0.208 : 0.26, 0.02, 0)
-  rightArm.rotation.z = -0.08
-  torsoGroup.add(rightArm)
+  const upperArmGeo = track(new THREE.CylinderGeometry(upperArmTopR, elbowR, upperArmLen, 16))
+  const elbowGeo = track(new THREE.SphereGeometry(elbowR * 1.04, 14, 12))
+  const forearmGeo = track(new THREE.CylinderGeometry(elbowR * 0.96, wristR, forearmLen, 16))
+  const cuffGeo = track(new THREE.CylinderGeometry(wristR * 1.07, wristR * 1.07, 0.022, 16))
+  const wristGeo = track(new THREE.SphereGeometry(wristR * 0.76, 12, 10))
+  const palmGeo = track(new THREE.SphereGeometry(isFemale ? 0.027 : 0.032, 14, 12))
+  const fingersGeo = track(new THREE.CapsuleGeometry(isFemale ? 0.017 : 0.020, 0.026, 6, 10))
+  const thumbGeo = track(new THREE.CapsuleGeometry(isFemale ? 0.0075 : 0.0088, 0.020, 6, 8))
+
+  const createArticulatedArm = (side: -1 | 1) => {
+    const armGroup = new THREE.Group()
+    armGroup.position.set(side * (isFemale ? 0.194 : 0.242), 0.16, 0)
+    torsoGroup.add(armGroup)
+
+    const upperArm = new THREE.Mesh(upperArmGeo, outfitMat)
+    upperArm.position.set(0, -upperArmLen / 2, 0)
+    armGroup.add(upperArm)
+
+    const elbowMesh = new THREE.Mesh(elbowGeo, outfitMat)
+    elbowMesh.position.set(0, -upperArmLen, 0)
+    armGroup.add(elbowMesh)
+
+    const forearm = new THREE.Group()
+    forearm.position.set(0, -upperArmLen, 0)
+    armGroup.add(forearm)
+
+    const forearmMesh = new THREE.Mesh(forearmGeo, outfitMat)
+    forearmMesh.position.set(0, -forearmLen / 2, 0)
+    forearm.add(forearmMesh)
+
+    const cuffMesh = new THREE.Mesh(cuffGeo, trimMat)
+    cuffMesh.position.set(0, -forearmLen + 0.011, 0)
+    forearm.add(cuffMesh)
+
+    const wristMesh = new THREE.Mesh(wristGeo, skinMat)
+    wristMesh.position.set(0, -forearmLen - 0.010, 0)
+    forearm.add(wristMesh)
+
+    const hand = new THREE.Group()
+    hand.position.set(0, -forearmLen - 0.014, 0)
+    forearm.add(hand)
+
+    const palm = new THREE.Mesh(palmGeo, skinMat)
+    palm.position.set(0, -0.024, 0)
+    palm.scale.set(0.84, 1.18, 0.42)
+    hand.add(palm)
+
+    const fingers = new THREE.Mesh(fingersGeo, skinMat)
+    fingers.position.set(0, -0.052, 0.002)
+    fingers.scale.set(1.0, 1.0, 0.46)
+    hand.add(fingers)
+
+    const thumb = new THREE.Mesh(thumbGeo, skinMat)
+    thumb.position.set(-side * 0.020, -0.022, 0.010)
+    thumb.rotation.z = side * 0.55
+    thumb.rotation.x = -0.35
+    hand.add(thumb)
+
+    return { armGroup, forearm, hand }
+  }
+
+  const leftArmRig = createArticulatedArm(-1)
+  const rightArmRig = createArticulatedArm(1)
+  const leftArmGroup = leftArmRig.armGroup
+  const rightArmGroup = rightArmRig.armGroup
+  const leftForearm = leftArmRig.forearm
+  const rightForearm = rightArmRig.forearm
+  const leftHand = leftArmRig.hand
+  const rightHand = rightArmRig.hand
 
   // Left-Chest Shop Logo Badge (dynamically renders uploaded shop logo or default monogram crest)
   const defaultCrestTex = track(createDefaultCrestTexture())
@@ -995,11 +1075,13 @@ export function createBuiltinPresenterController(
     eyeGroup.add(lid)
 
     headGroup.add(eyeGroup)
-    return lid
+    return { lid, iris, pupil, catchlight }
   }
 
-  const leftEyelid = createEye(-0.044)
-  const rightEyelid = createEye(0.044)
+  const leftEye = createEye(-0.044)
+  const rightEye = createEye(0.044)
+  const leftEyelid = leftEye.lid
+  const rightEyelid = rightEye.lid
 
   // Eyebrows (slender arched for Nilar, thicker confident for Ko Khant)
   const browGeo = track(
@@ -1049,48 +1131,146 @@ export function createBuiltinPresenterController(
   lowerLip.position.set(0, -0.005, 0.0055)
   mouthGroup.add(lowerLip)
 
+  const cornerGeo = track(new THREE.SphereGeometry(isFemale ? 0.0046 : 0.0048, 10, 8))
+  const leftMouthCorner = new THREE.Mesh(cornerGeo, lipMat)
+  leftMouthCorner.position.set(-0.0185, 0.001, 0.0042)
+  leftMouthCorner.scale.set(1.1, 0.75, 0.65)
+  mouthGroup.add(leftMouthCorner)
+
+  const rightMouthCorner = new THREE.Mesh(cornerGeo, lipMat)
+  rightMouthCorner.position.set(0.0185, 0.001, 0.0042)
+  rightMouthCorner.scale.set(1.1, 0.75, 0.65)
+  mouthGroup.add(rightMouthCorner)
+
+  let currentGestureStyle: PresenterGestureStyle = options.gestureStyle ?? "natural"
   const blink = createBlinkState(0)
   let smoothPitch = 0
   let smoothYaw = 0
   let smoothRoll = 0
+  let smoothBrowLift = 0
+  let smoothSpeechMix = 0
+  let smoothSmile = 1
+  let smoothLeftArmX = -0.08
+  let smoothLeftArmZ = 0.13
+  let smoothRightArmX = -0.08
+  let smoothRightArmZ = -0.13
+  let smoothLeftForearmX = -0.48
+  let smoothLeftForearmY = 0.06
+  let smoothRightForearmX = -0.48
+  let smoothRightForearmY = -0.06
+  let smoothLeftHandX = 0.08
+  let smoothLeftHandY = -0.18
+  let smoothRightHandX = 0.08
+  let smoothRightHandY = 0.18
+
+  // Micro eye-gaze state: mostly direct camera contact with brief natural glances every 3–6s
+  let nextGazeAt = 2.8 + Math.random() * 2.5
+  let gazeHoldUntil = 0
+  let gazeTargetX = 0
+  let gazeTargetY = 0
+  let smoothGazeX = 0
+  let smoothGazeY = 0
+
+  const baseLeftBrowRotZ = isFemale ? 0.11 : 0.05
+  const baseRightBrowRotZ = isFemale ? -0.11 : -0.05
 
   const update = (delta: number, elapsed: number, lip: LipSyncWeights) => {
     const dt = Math.min(delta, 0.05)
+    const style = GESTURE_STYLE_CONFIG[currentGestureStyle] ?? GESTURE_STYLE_CONFIG.natural
 
-    // 1. Lip-sync mouth articulation
+    // 1. Lip-sync mouth articulation + warm idle presenter smile curve
     const openness = clamp01(lip.aa * 0.95 + lip.oh * 0.42)
-    const spread = clamp01(1 + lip.ee * 0.45 + lip.ih * 0.25 - lip.oh * 0.25)
+    const targetSmile = clamp01(1 - openness * 1.55) * 0.85 + 0.15
+    smoothSmile = lerp(smoothSmile, targetSmile, 1 - Math.exp(-10 * dt))
 
-    mouthCavity.scale.set(1.05 * spread, 0.12 + openness * 0.95, 0.45)
+    const spread = clamp01(1 + lip.ee * 0.45 + lip.ih * 0.25 - lip.oh * 0.25) + smoothSmile * 0.08
+
+    mouthCavity.scale.set(1.05 * spread, 0.10 + openness * 0.95, 0.45)
     upperTeeth.visible = openness > 0.08 || lip.ee > 0.15
     upperTeeth.position.y = 0.003 + openness * 0.004
     tongueMesh.visible = openness > 0.12
     tongueMesh.position.y = -0.004 - openness * 0.011
 
-    upperLip.position.y = 0.004 + openness * 0.006
-    lowerLip.position.y = -0.004 - openness * 0.022
+    upperLip.position.y = 0.004 + openness * 0.006 + smoothSmile * 0.0008
+    lowerLip.position.y = -0.004 - openness * 0.022 + smoothSmile * 0.0008
     upperLip.scale.set(1, spread, 1)
     lowerLip.scale.set(1, spread, 1)
 
-    // Subtle brow lift with vocal energy
-    const browLift = lip.energy * 0.006
-    leftBrow.position.y = browBaseY + browLift
-    rightBrow.position.y = browBaseY + browLift
+    const cornerLift = smoothSmile * 0.0026 - openness * 0.0022
+    const cornerSpread = 0.0185 + smoothSmile * 0.0018
+    leftMouthCorner.position.set(-cornerSpread, cornerLift, 0.0042)
+    rightMouthCorner.position.set(cornerSpread, cornerLift, 0.0042)
 
-    // 2. Automatic eye blinking every 3–5 seconds
+    // 2. Vocal-reactive eyebrows (gentle lift on aa + oh > 0.45 emphasis peaks)
+    const emphasisPeak = clamp01((lip.aa + lip.oh - 0.45) * 1.65)
+    const targetBrowLift = (lip.energy * 0.0035 + emphasisPeak * 0.0085) * style.browMul
+    smoothBrowLift = lerp(smoothBrowLift, targetBrowLift, 1 - Math.exp(-10 * dt))
+    leftBrow.position.y = browBaseY + smoothBrowLift
+    rightBrow.position.y = browBaseY + smoothBrowLift
+    leftBrow.rotation.z = baseLeftBrowRotZ + smoothBrowLift * 4.2
+    rightBrow.rotation.z = baseRightBrowRotZ - smoothBrowLift * 4.2
+
+    // 3. Automatic eye blinking every 3–5 seconds + living micro eye gaze
     const blinkWeight = sampleBlinkValue(blink, elapsed)
     const lidRot = -0.62 + blinkWeight * 1.48
     leftEyelid.rotation.x = lidRot
     rightEyelid.rotation.x = lidRot
 
-    // 3. Subtle head nod/sway proportional to active vocal energy (aa > 0.15)
-    const isSpeaking = lip.aa > 0.15
-    const vocalBoost = isSpeaking ? (lip.aa - 0.15) * 0.14 : 0
-    const targetPitch = Math.sin(elapsed * 5.2) * vocalBoost + Math.sin(elapsed * 0.9) * 0.015
+    if (elapsed >= nextGazeAt) {
+      const doGlance = Math.random() < 0.72
+      if (doGlance) {
+        const angle = Math.random() * Math.PI * 2
+        gazeTargetX = Math.cos(angle) * 0.0034 * Math.min(1.15, style.gazeFreq)
+        gazeTargetY = Math.sin(angle) * 0.0020 * Math.min(1.15, style.gazeFreq)
+        gazeHoldUntil = elapsed + 0.45 + Math.random() * 0.45
+      } else {
+        gazeTargetX = 0
+        gazeTargetY = 0
+        gazeHoldUntil = elapsed + 0.4
+      }
+      nextGazeAt = elapsed + (3.0 + Math.random() * 3.0) / Math.max(0.6, style.gazeFreq)
+    } else if (elapsed >= gazeHoldUntil) {
+      gazeTargetX = 0
+      gazeTargetY = 0
+    }
+
+    const microSaccadeX = Math.sin(elapsed * 1.7) * 0.00035
+    const microSaccadeY = Math.cos(elapsed * 1.3) * 0.00025
+    const gazeAlpha = 1 - Math.exp(-11 * dt)
+    smoothGazeX = THREE.MathUtils.clamp(
+      lerp(smoothGazeX, gazeTargetX + microSaccadeX, gazeAlpha),
+      -0.0040,
+      0.0040
+    )
+    smoothGazeY = THREE.MathUtils.clamp(
+      lerp(smoothGazeY, gazeTargetY + microSaccadeY, gazeAlpha),
+      -0.0026,
+      0.0026
+    )
+
+    const applyEyeGaze = (eye: typeof leftEye) => {
+      eye.iris.position.x = smoothGazeX
+      eye.iris.position.y = smoothGazeY
+      eye.pupil.position.x = smoothGazeX * 1.08
+      eye.pupil.position.y = smoothGazeY * 1.08
+      eye.catchlight.position.x = 0.0045 + smoothGazeX * 0.85
+      eye.catchlight.position.y = 0.0045 + smoothGazeY * 0.85
+    }
+    applyEyeGaze(leftEye)
+    applyEyeGaze(rightEye)
+
+    // 4. Subtle head nod/sway & phrasing proportional to vocal energy
+    const isSpeaking = lip.energy >= 0.12
+    smoothSpeechMix = lerp(smoothSpeechMix, isSpeaking ? 1 : 0, 1 - Math.exp((isSpeaking ? -7.5 : -4.5) * dt))
+
+    const vocalBoost = isSpeaking ? Math.max(0, lip.aa - 0.12) * 0.13 * style.headMul : 0
+    const targetPitch =
+      Math.sin(elapsed * 5.0 * style.speed) * vocalBoost + Math.sin(elapsed * 0.9) * 0.015
     const targetYaw =
-      Math.sin(elapsed * 1.4) * (isSpeaking ? 0.06 : 0.025) +
+      Math.sin(elapsed * 1.4 * style.speed) * (isSpeaking ? 0.055 * style.headMul : 0.022) +
       Math.cos(elapsed * 2.3) * vocalBoost * 0.35
-    const targetRoll = Math.cos(elapsed * 1.1) * (isSpeaking ? 0.035 : 0.012)
+    const targetRoll =
+      Math.cos(elapsed * 1.1 * style.speed) * (isSpeaking ? 0.036 * style.headMul : 0.012)
 
     const headAlpha = 1 - Math.exp(-8 * dt)
     smoothPitch = lerp(smoothPitch, targetPitch, headAlpha)
@@ -1107,10 +1287,66 @@ export function createBuiltinPresenterController(
       backHairGroup.rotation.x = -smoothPitch * 0.35
     }
 
-    // 4. Gentle idle chest breathing motion
+    // 5. Gentle chest breathing & upper-body counter-rotation
     const breath = Math.sin(elapsed * 1.6)
+    const shoulderSway = Math.sin(elapsed * 0.85) * 0.015
     torsoGroup.position.y = 1.05 + breath * 0.004
     torsoGroup.rotation.x = breath * 0.014
+    torsoGroup.rotation.y = -smoothYaw * 0.28
+    torsoGroup.rotation.z = -smoothRoll * 0.20 + shoulderSway * (1 - smoothSpeechMix * 0.5)
+
+    // 6. Procedural presenter arm & open-palm hand gestures (kept outward & waist-to-lower-chest level)
+    const syllablePeak = clamp01((lip.aa * 0.65 + lip.oh * 0.45 + lip.ee * 0.35 - 0.12) * 1.45)
+    const beatPhase = elapsed * 2.5 * style.speed
+    const altLeft = 0.5 + 0.5 * Math.sin(beatPhase)
+    const altRight = 0.5 - 0.5 * Math.sin(beatPhase)
+    const pairedPulse = Math.max(0, syllablePeak - 0.35) * 0.85
+
+    const liftL = clamp01(altLeft * 0.65 + pairedPulse + syllablePeak * 0.35) * style.amp
+    const liftR = clamp01(altRight * 0.65 + pairedPulse + syllablePeak * 0.35) * style.amp
+
+    const idleArmX = -0.08 + breath * 0.012
+    const idleArmZ = 0.13 + shoulderSway * 0.4
+    const idleForearmX = -0.48 + breath * 0.025
+
+    // Active speech keeps arms angled slightly outward (z >= 0.14) and forearms raised to waist/lower-chest
+    const targetLeftArmX = lerp(idleArmX, -0.20 - liftL * 0.10, smoothSpeechMix)
+    const targetLeftArmZ = lerp(idleArmZ, 0.15 + liftL * 0.07, smoothSpeechMix)
+    const targetRightArmX = lerp(idleArmX, -0.20 - liftR * 0.10, smoothSpeechMix)
+    const targetRightArmZ = lerp(-idleArmZ, -(0.15 + liftR * 0.07), smoothSpeechMix)
+
+    const targetLeftForearmX = lerp(idleForearmX, -1.16 - liftL * 0.24, smoothSpeechMix)
+    const targetLeftForearmY = lerp(0.06, -0.14 - liftL * 0.10, smoothSpeechMix)
+    const targetRightForearmX = lerp(idleForearmX, -1.16 - liftR * 0.24, smoothSpeechMix)
+    const targetRightForearmY = lerp(-0.06, 0.14 + liftR * 0.10, smoothSpeechMix)
+
+    const targetLeftHandX = lerp(0.08, 0.16 + syllablePeak * 0.18 * style.amp, smoothSpeechMix)
+    const targetLeftHandY = lerp(-0.18, 0.38 + liftL * 0.18, smoothSpeechMix)
+    const targetRightHandX = lerp(0.08, 0.16 + syllablePeak * 0.18 * style.amp, smoothSpeechMix)
+    const targetRightHandY = lerp(0.18, -0.38 - liftR * 0.18, smoothSpeechMix)
+
+    const armAlpha = 1 - Math.exp(-7.5 * dt)
+    smoothLeftArmX = lerp(smoothLeftArmX, targetLeftArmX, armAlpha)
+    smoothLeftArmZ = lerp(smoothLeftArmZ, targetLeftArmZ, armAlpha)
+    smoothRightArmX = lerp(smoothRightArmX, targetRightArmX, armAlpha)
+    smoothRightArmZ = lerp(smoothRightArmZ, targetRightArmZ, armAlpha)
+
+    smoothLeftForearmX = lerp(smoothLeftForearmX, targetLeftForearmX, armAlpha)
+    smoothLeftForearmY = lerp(smoothLeftForearmY, targetLeftForearmY, armAlpha)
+    smoothRightForearmX = lerp(smoothRightForearmX, targetRightForearmX, armAlpha)
+    smoothRightForearmY = lerp(smoothRightForearmY, targetRightForearmY, armAlpha)
+
+    smoothLeftHandX = lerp(smoothLeftHandX, targetLeftHandX, armAlpha)
+    smoothLeftHandY = lerp(smoothLeftHandY, targetLeftHandY, armAlpha)
+    smoothRightHandX = lerp(smoothRightHandX, targetRightHandX, armAlpha)
+    smoothRightHandY = lerp(smoothRightHandY, targetRightHandY, armAlpha)
+
+    leftArmGroup.rotation.set(smoothLeftArmX, 0, smoothLeftArmZ)
+    rightArmGroup.rotation.set(smoothRightArmX, 0, smoothRightArmZ)
+    leftForearm.rotation.set(smoothLeftForearmX, smoothLeftForearmY, 0)
+    rightForearm.rotation.set(smoothRightForearmX, smoothRightForearmY, 0)
+    leftHand.rotation.set(smoothLeftHandX, smoothLeftHandY, 0.10)
+    rightHand.rotation.set(smoothRightHandX, smoothRightHandY, -0.10)
   }
 
   const setOutfitColor = (color: PresenterOutfitColor) => {
@@ -1131,6 +1367,10 @@ export function createBuiltinPresenterController(
     }
   }
 
+  const setGestureStyle = (style: PresenterGestureStyle) => {
+    currentGestureStyle = style
+  }
+
   return {
     object: root,
     kind: "preset",
@@ -1138,6 +1378,7 @@ export function createBuiltinPresenterController(
     dispose,
     setOutfitColor,
     setLogoDataUrl: applyLogoDataUrl,
+    setGestureStyle,
   }
 }
 

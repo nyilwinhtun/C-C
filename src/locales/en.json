@@ -731,6 +731,13 @@
   "presenter3d.colorCharcoal": "Charcoal",
   "presenter3d.colorEmerald": "Emerald",
   "presenter3d.colorCream": "Cream",
+  "presenter3d.gestureStyleTitle": "🙌 Presenter Style",
+  "presenter3d.gestureNatural": "Natural",
+  "presenter3d.gestureNaturalDesc": "Balanced gestures, warm smile",
+  "presenter3d.gestureEnergetic": "Energetic",
+  "presenter3d.gestureEnergeticDesc": "Lively beats, expressive brows",
+  "presenter3d.gestureCalm": "Calm",
+  "presenter3d.gestureCalmDesc": "Subtle gestures, steady gaze",
   "dropzone.dropHere": "📂 Drop file here",
   "dropzone.unsupported": "Unsupported file type. Please drop a supported file.",
   "dropzone.pasted": "📋 Image pasted successfully"

@@ -731,6 +731,13 @@
   "presenter3d.colorCharcoal": "မီးခိုးရင့်",
   "presenter3d.colorEmerald": "မြစိမ်း",
   "presenter3d.colorCream": "ကရင်မ်",
+  "presenter3d.gestureStyleTitle": "🙌 အမူအရာ စတိုင် (Presenter Style)",
+  "presenter3d.gestureNatural": "သဘာဝရှင်းပြဟန်",
+  "presenter3d.gestureNaturalDesc": "ဟန်ချက်ညီ လက်ဟန်၊ နွေးထွေးသော အပြုံး",
+  "presenter3d.gestureEnergetic": "တက်ကြွကြော်ငြာဟန်",
+  "presenter3d.gestureEnergeticDesc": "တက်ကြွသော လက်ဟန်၊ မျက်ခုံးအမူအရာ",
+  "presenter3d.gestureCalm": "တည်ငြိမ်နွေးထွေးဟန်",
+  "presenter3d.gestureCalmDesc": "ညင်သာသော လက်ဟန်၊ တည်ငြိမ်သော အကြည့်",
   "dropzone.dropHere": "📂 ဖိုင်ကို ဒီနေရာသို့ ဆွဲချပါ (Drop file here)",
   "dropzone.unsupported": "ဤဖိုင်အမျိုးအစားကို မထောက်ပံ့ပါ။ ထောက်ပံ့သော ဖိုင်ကို ဆွဲချပါ။",
   "dropzone.pasted": "📋 ပုံကို Paste ထည့်သွင်းပြီးပါပြီ"
