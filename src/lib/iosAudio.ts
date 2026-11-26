@@ -242,8 +242,11 @@ export async function playBlobUrlWithPrimedAudio(blobUrl: string): Promise<HTMLA
   if (!el) return null
   setIosAudioSessionPlayback()
   el.pause()
+  el.removeAttribute("src")
+  el.load()
   el.volume = 1
   el.src = blobUrl
+  el.load()
   el.currentTime = 0
   try {
     await el.play()
@@ -251,6 +254,22 @@ export async function playBlobUrlWithPrimedAudio(blobUrl: string): Promise<HTMLA
     // Ignore autoplay errors if gesture expired
   }
   return el
+}
+
+/**
+ * Immediately stop and reset the persistent primed <audio> element so
+ * switching voices or regenerating never leaves stale/silent playback.
+ */
+export function stopPrimedAudio(): void {
+  if (!sharedPrimerAudio) return
+  try {
+    sharedPrimerAudio.pause()
+    sharedPrimerAudio.currentTime = 0
+    sharedPrimerAudio.removeAttribute("src")
+    sharedPrimerAudio.load()
+  } catch {
+    // Ignore reset errors
+  }
 }
 
 export interface WavAudioRecorderHandle {

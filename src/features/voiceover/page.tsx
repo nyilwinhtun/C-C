@@ -41,6 +41,7 @@ import {
   getAudioContextConstructor,
   setIosAudioSessionPlayback,
   shareAudioFile,
+  stopPrimedAudio,
   unlockIosAudio,
   type WavAudioRecorderHandle,
 } from "@/lib/iosAudio"
@@ -371,6 +372,7 @@ export function VoiceoverPage() {
   const [isMergingSegments, setIsMergingSegments] = useState(false)
   const [playingSegmentId, setPlayingSegmentId] = useState<string | null>(null)
   const segmentAudioRef = useRef<HTMLAudioElement | null>(null)
+  const segmentAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     setEditableSegments(generatedAudioSegments)
@@ -383,6 +385,8 @@ export function VoiceoverPage() {
 
   useEffect(() => {
     return () => {
+      segmentAbortRef.current?.abort()
+      segmentAbortRef.current = null
       if (segmentAudioRef.current) {
         segmentAudioRef.current.pause()
         segmentAudioRef.current = null
@@ -688,6 +692,12 @@ export function VoiceoverPage() {
   const handleReadWithNarrator = async () => {
     setIosAudioSessionPlayback()
     unlockIosAudio()
+    stopPrimedAudio()
+    if (segmentAudioRef.current) {
+      segmentAudioRef.current.pause()
+      segmentAudioRef.current = null
+      setPlayingSegmentId(null)
+    }
     triggerHaptic(10)
 
     let scriptOverride: string | undefined
@@ -787,7 +797,12 @@ export function VoiceoverPage() {
 
     setIosAudioSessionPlayback()
     unlockIosAudio()
+    stopPrimedAudio()
     triggerHaptic(8)
+
+    segmentAbortRef.current?.abort()
+    const controller = new AbortController()
+    segmentAbortRef.current = controller
     setRegeneratingSegmentId(targetSeg.id)
 
     const voiceType: BurmeseVoiceType =
@@ -804,8 +819,10 @@ export function VoiceoverPage() {
         speed: voiceSpeed,
         deliveryTone: voiceDeliveryTone,
         customPronunciations,
-        previousChunkText: index > 0 ? editableSegments[index - 1]?.text : undefined,
+        signal: controller.signal,
       })
+
+      if (controller.signal.aborted) return
 
       if (playingSegmentId === targetSeg.id && segmentAudioRef.current) {
         segmentAudioRef.current.pause()
@@ -822,6 +839,9 @@ export function VoiceoverPage() {
           : `Segment #${index + 1} regenerated`
       )
     } catch (err) {
+      if (controller.signal.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+        return
+      }
       const msg =
         err instanceof Error
           ? err.message
@@ -830,7 +850,10 @@ export function VoiceoverPage() {
             : "Failed to regenerate segment"
       toast.error(msg)
     } finally {
-      setRegeneratingSegmentId(null)
+      if (segmentAbortRef.current === controller) {
+        segmentAbortRef.current = null
+        setRegeneratingSegmentId(null)
+      }
     }
   }
 
@@ -1191,9 +1214,19 @@ export function VoiceoverPage() {
               type="button"
               role="tab"
               aria-selected={active}
-              disabled={isRecordingVoice || isGeneratingVoice}
+              disabled={isRecordingVoice}
               onClick={() => {
                 triggerHaptic(6)
+                unlockIosAudio()
+                stopPrimedAudio()
+                segmentAbortRef.current?.abort()
+                segmentAbortRef.current = null
+                setRegeneratingSegmentId(null)
+                if (segmentAudioRef.current) {
+                  segmentAudioRef.current.pause()
+                  segmentAudioRef.current = null
+                  setPlayingSegmentId(null)
+                }
                 setSelectedVoice(pill.id)
               }}
               className={cn(
@@ -1391,7 +1424,6 @@ export function VoiceoverPage() {
               onTouchStart={() => unlockIosAudio()}
               onClick={handleReadWithNarrator}
               disabled={
-                isGeneratingVoice ||
                 isTranscribing ||
                 isRecordingVoice ||
                 (!voiceScriptText.trim() && generatedAudioSource !== "my_voice")

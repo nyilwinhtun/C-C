@@ -72,6 +72,7 @@ export interface BurmeseVoicePreset {
   labelMy: string
   neuralVoice: "my-MM-NilarNeural" | "my-MM-ThihaNeural"
   geminiVoice: string
+  geminiFallbackVoice: string
 }
 
 export const BURMESE_VOICE_PRESETS: Record<BurmeseVoiceType, BurmeseVoicePreset> = {
@@ -81,20 +82,23 @@ export const BURMESE_VOICE_PRESETS: Record<BurmeseVoiceType, BurmeseVoicePreset>
     labelMy: "မိန်းကလေးအသံ (Nilar)",
     neuralVoice: "my-MM-NilarNeural",
     geminiVoice: "Aoede",
+    geminiFallbackVoice: "Kore",
   },
   male: {
     id: "male",
     label: "Male (Thiha)",
     labelMy: "ယောက်ျားလေးအသံ (Thiha)",
     neuralVoice: "my-MM-ThihaNeural",
-    geminiVoice: "Charon",
+    geminiVoice: "Puck",
+    geminiFallbackVoice: "Charon",
   },
   deep_male: {
     id: "deep_male",
     label: "Deep Male (Ko Khant)",
     labelMy: "အသံဩဇာ (ကိုခန့်)",
     neuralVoice: "my-MM-ThihaNeural",
-    geminiVoice: "Orus",
+    geminiVoice: "Charon",
+    geminiFallbackVoice: "Fenrir",
   },
 }
 
@@ -261,67 +265,6 @@ function numericStringToBurmeseWords(rawNum: string): string {
   return `${spokenInt} ဒသမ ${spokenDec}`
 }
 
-const ENGLISH_TO_BURMESE_PHONETICS: ReadonlyArray<[RegExp, string]> = [
-  [/\bfree\s+delivery\b/gi, "ဖရီး ဒယ်လီဗာရီ"],
-  [/\bfree\s+deli\b/gi, "ဖရီး ဒယ်လီဗာရီ"],
-  [/\bdelivery\b/gi, "ဒယ်လီဗာရီ"],
-  [/\bdeli\b/gi, "ဒယ်လီဗာရီ"],
-  [/\bpro\s+max\b/gi, "ပရိုမက်စ်"],
-  [/\bpre[-\s]?order\b/gi, "ပရီအော်ဒါ"],
-  [/\borders?\b/gi, "အော်ဒါ"],
-  [/\biphone\b/gi, "အိုင်ဖုန်း"],
-  [/\btype[-\s]?c\b/gi, "တိုက်ပ်စီ"],
-  [/\bin[-\s]?stock\b/gi, "အင်စတော့ခ်"],
-  [/\bstock\b/gi, "စတော့ခ်"],
-  [/\bonline\b/gi, "အွန်လိုင်း"],
-  [/\bshop\b/gi, "ရှော့ပ်"],
-  [/\bpage\b/gi, "ပေ့ချ်"],
-  [/\bbrand\b/gi, "ဘရန်း"],
-  [/\bsubscribes?\b/gi, "ဆပ်စခရိုက်ဘ်"],
-  [/\bfollows?\b/gi, "ဖောလိုး"],
-  [/\blikes?\b/gi, "လိုက်ခ်"],
-  [/\bshares?\b/gi, "ရှယ်"],
-  [/\bcomments?\b/gi, "ကွန်မန့်"],
-  [/\btutorials?\b/gi, "ကျူတိုရီရယ်"],
-  [/\bcontents?\b/gi, "ကွန်တန့်"],
-  [/\bupdates?\b/gi, "အပ်ဒိတ်"],
-  [/\blinks?\b/gi, "လင့်ခ်"],
-  [/\bapps?\b/gi, "အက်ပ်"],
-  [/\bpro\b/gi, "ပရို"],
-  [/\bplus\b/gi, "ပလပ်စ်"],
-  [/\bpromotions?\b/gi, "ပရိုမိုးရှင်း"],
-  [/\bpromo\b/gi, "ပရိုမိုးရှင်း"],
-  [/\bdiscounts?\b/gi, "ဒစ်စကောင့်"],
-  [/\boriginal\b/gi, "အော်ဂျင်နယ်"],
-  [/\bfacebook\b/gi, "ဖေ့စ်ဘွတ်ခ်"],
-  [/\btiktok\b/gi, "တစ်တော့ခ်"],
-  [/\bquality\b/gi, "ကွာလတီ"],
-  [/\breviews?\b/gi, "ရီဗျူး"],
-  [/\binbox\b/gi, "အင်ဘောက်စ်"],
-  [/\bib\b/gi, "အင်ဘောက်စ်"],
-  [/\breels?\b/gi, "ရီးလ်စ်"],
-  [/\blive\b/gi, "လိုက်ဖ်"],
-  [/\bcod\b/gi, "စီအိုဒီ"],
-  [/\b(?:kbzpay|kpay)\b/gi, "ကေပေး"],
-  [/\bwavepay\b/gi, "ဝေ့ဖ်ပေး"],
-  [/\bvip\b/gi, "ဗီအိုင်ပီ"],
-  [/\bdm\b/gi, "ဒီအမ်"],
-  [/\bygn\b/gi, "ရန်ကုန်"],
-  [/\bmdy\b/gi, "မန္တလေး"],
-  [/\bnpt\b/gi, "နေပြည်တော်"],
-  [/\b(?:ph|tel)\s*[:.]\s*/gi, "ဖုန်းနံပါတ် "],
-  [/\bno\.\s*/gi, "နံပါတ် "],
-  [/\bqty\b/gi, "အရေအတွက်"],
-  [/\bpcs\b/gi, "ခု"],
-  [/\bkg\b/gi, "ကီလိုဂရမ်"],
-  [/\bml\b/gi, "မီလီလီတာ"],
-  [/\bhrs?\b/gi, "နာရီ"],
-  [/\bmins?\b/gi, "မိနစ်"],
-  [/\bsecs?\b/gi, "စက္ကန့်"],
-  [/\betc\.?/gi, "စသည်ဖြင့်"],
-  [/\bvs\.?/gi, "နှင့်"],
-]
-
 export interface PronunciationRule {
   word: string
   phonetic: string
@@ -393,11 +336,6 @@ export function normalizeBurmeseForTTS(
     customRules ?? useContentStore.getState().customPronunciations ?? []
   if (rulesToApply.length > 0) {
     text = applyCustomPronunciations(text, rulesToApply)
-  }
-
-  // Transliterate common English e-commerce & tech terms before hyphen-to-pause conversion
-  for (const [pattern, phonetic] of ENGLISH_TO_BURMESE_PHONETICS) {
-    text = text.replace(pattern, phonetic)
   }
 
   // Convert Myanmar digits (၀-၉) to Arabic digits (0-9) so unified number parsing handles both
@@ -829,18 +767,22 @@ export const GEMINI_SPEECH_PREP_MODEL = "gemini-2.5-flash"
 export async function prepareBurmeseSpeechText(
   rawText: string,
   customRules?: ReadonlyArray<PronunciationRule>,
-  useAiSpeechPrep = true
+  useAiSpeechPrep = true,
+  signal?: AbortSignal
 ): Promise<string> {
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError")
+  }
+
   const deterministic = normalizeBurmeseForTTS(rawText, customRules)
   if (!deterministic || !useAiSpeechPrep || deterministic.length > 1800) return deterministic
 
   const apiKey = getSavedGeminiApiKey()
   if (!apiKey) return deterministic
 
-  // Apply custom rules & strip formatting first, but pass the pre-number-normalized
-  // text to Flash only if rawText has digits/abbreviations/long unpunctuated clauses,
-  // or pass deterministic text so Flash can refine breath pauses (`၊`, `။`) and phrasing.
   const controller = new AbortController()
+  const onParentAbort = () => controller.abort()
+  signal?.addEventListener("abort", onParentAbort, { once: true })
   const timeoutId =
     typeof window !== "undefined"
       ? window.setTimeout(() => controller.abort(), 5500)
@@ -853,7 +795,7 @@ export async function prepareBurmeseSpeechText(
       "You are a Burmese (Myanmar) speech-normalization preprocessor for Text-to-Speech.",
       "Rewrite the input text ONLY for natural spoken Burmese TTS delivery:",
       "1. Convert any remaining numbers, years, prices, currencies, percentages, and symbols into natural spoken Burmese words (e.g., 2026 -> နှစ်ထောင့်နှစ်ဆယ့်ခြောက်, 100% -> ရာနှုန်းပြည့်, 15,000 -> တစ်သောင်းငါးထောင်).",
-      "2. Expand common abbreviations into spoken Burmese.",
+      "2. Keep all English brand names, shop names, product names, and code-switched English words/apostrophes (e.g. \"The Brian's Mobile\", \"iPhone\", \"Order\") in their exact original clean English script—do NOT transliterate or abbreviate them.",
       "3. Ensure natural Burmese breath pauses using `၊` (comma pause) and `။` (sentence end pause) at natural clause boundaries so sentences are never rushed or slurred.",
       "4. Keep the exact meaning and words—do NOT summarize, translate, or add intro/commentary. Return ONLY the normalized Burmese speech text.",
       "",
@@ -892,9 +834,15 @@ export async function prepareBurmeseSpeechText(
     // Run deterministic pass once more to guarantee no stray digits/markdown remain
     const finalClean = normalizeBurmeseForTTS(output, customRules)
     return finalClean || deterministic
-  } catch {
+  } catch (err) {
+    if (signal?.aborted) {
+      throw err instanceof DOMException && err.name === "AbortError"
+        ? err
+        : new DOMException("Aborted", "AbortError")
+    }
     return deterministic
   } finally {
+    signal?.removeEventListener("abort", onParentAbort)
     if (timeoutId !== undefined && typeof window !== "undefined") {
       window.clearTimeout(timeoutId)
     }
@@ -902,9 +850,47 @@ export async function prepareBurmeseSpeechText(
 }
 
 /**
- * Split long scripts cleanly at sentence boundaries (`။` / `.` / newlines / punctuation)
+ * Segment text into Burmese-syllable-safe clusters so hard splitting
+ * never breaks apart a consonant and its vowels/medials/asat/virama stack.
+ */
+function segmentBurmeseClusters(text: string): string[] {
+  if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+    const segmenter = new Intl.Segmenter("my", { granularity: "grapheme" })
+    const clusters: string[] = []
+    let pendingVirama = false
+    for (const seg of segmenter.segment(text)) {
+      const g = seg.segment
+      if (pendingVirama && clusters.length > 0) {
+        clusters[clusters.length - 1] += g
+      } else {
+        clusters.push(g)
+      }
+      // U+1039 MYANMAR SIGN VIRAMA binds the following consonant into the same syllable cluster
+      pendingVirama = g.endsWith("\u1039")
+    }
+    return clusters
+  }
+
+  const codePoints = Array.from(text)
+  const clusters: string[] = []
+  const myanmarCombiningRe =
+    /^[\u102B-\u103E\u1056-\u1059\u105E-\u1060\u1062-\u1064\u1067-\u106D\u1071-\u1074\u1082-\u108D\u108F\u109A-\u109D\uAA7B-\uAA7D\u200D\uFE0F]$/
+  let pendingVirama = false
+  for (const ch of codePoints) {
+    if (clusters.length > 0 && (pendingVirama || myanmarCombiningRe.test(ch))) {
+      clusters[clusters.length - 1] += ch
+    } else {
+      clusters.push(ch)
+    }
+    pendingVirama = ch === "\u1039"
+  }
+  return clusters
+}
+
+/**
+ * Split long scripts cleanly at sentence boundaries (`။` / `.` / newlines / spaces)
  * into balanced chunks (~240 chars / ~2 sentences) so Gemini 2.5 Flash TTS never drifts
- * in pitch or persona mid-script and chunks stitch seamlessly.
+ * in pitch or persona mid-script and never splits inside a Burmese syllable cluster.
  */
 export function splitScriptIntoChunks(text: string, maxChunkChars = 240): string[] {
   const normalized = text.trim()
@@ -917,11 +903,18 @@ export function splitScriptIntoChunks(text: string, maxChunkChars = 240): string
     .filter(Boolean)
 
   const pushHardSplit = (segment: string, out: string[]) => {
-    const chars = Array.from(segment)
-    for (let i = 0; i < chars.length; i += maxChunkChars) {
-      const piece = chars.slice(i, i + maxChunkChars).join("").trim()
-      if (piece) out.push(piece)
+    const clusters = segmentBurmeseClusters(segment)
+    let buf = ""
+    for (const cluster of clusters) {
+      if (buf && buf.length + cluster.length > maxChunkChars) {
+        const trimmed = buf.trim()
+        if (trimmed) out.push(trimmed)
+        buf = cluster
+      } else {
+        buf += cluster
+      }
     }
+    if (buf.trim()) out.push(buf.trim())
   }
 
   const sentences: string[] = []
@@ -1122,39 +1115,58 @@ export async function concatenateAudioBlobsToWav(blobs: Blob[]): Promise<Blob> {
   }
 }
 
+function buildGeminiTtsError(status: number, errText: string): TtsError {
+  if (status === 429) {
+    return new TtsError(
+      "API အသုံးပြုမှု ခဏပြည့်သွားပါသည် — စက္ကန့် ၂၀ ခန့်စောင့်ပြီး ပြန်နှိပ်ပါ"
+    )
+  }
+  if (status === 401 || status === 403) {
+    return new TtsError(
+      "Gemini API Key မှားယွင်းနေပါသည် — Settings တွင် ပြန်လည်စစ်ဆေးပါ"
+    )
+  }
+  const detail = errText.trim().slice(0, 120)
+  return new TtsError(
+    detail
+      ? `Gemini အသံထုတ်ရာတွင် အဆင်မပြေပါ (${status}): ${detail}`
+      : `Gemini အသံထုတ်ရာတွင် အဆင်မပြေပါ (${status}) — ခဏစောင့်ပြီး ပြန်နှိပ်ပါ`
+  )
+}
+
 async function synthesizeGeminiChunk(
   chunkText: string,
   preset: BurmeseVoicePreset,
   speed: VoiceoverSpeed,
   deliveryTone: VoiceDeliveryTone,
   apiKey: string,
-  previousChunkText?: string
+  signal?: AbortSignal
 ): Promise<
   | { kind: "pcm"; pcmBytes: Uint8Array; sampleRate: number }
   | { kind: "blob"; blob: Blob; mimeType: string; fileExtension: "wav" | "mp3" }
 > {
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError")
+  }
+
   const cleanKey = apiKey.trim()
   const standardUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TTS_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
   const tonePreset = VOICE_DELIVERY_PRESETS[deliveryTone] ?? VOICE_DELIVERY_PRESETS.normal
   const narratorName =
     preset.id === "deep_male"
-      ? "ကိုခန့် (Ko Khant)"
+      ? "Ko Khant"
       : preset.id === "male"
-        ? "သီဟ (Thiha)"
-        : "နီလာ (Nilar)"
+        ? "Thiha"
+        : "Nilar"
 
-  const previousContextLine = previousChunkText?.trim()
-    ? `Reference context from previous sentence (DO NOT speak this aloud — match its exact vocal pitch, warmth, and steady cadence seamlessly): "${previousChunkText.trim()}"`
-    : null
-
+  // Send ONLY the exact clean script text to be spoken—never include previous-sentence
+  // reference text, which causes Gemini TTS to read it aloud or stutter/repeat syllables.
   const prompt = [
     `You are ${narratorName}, a native Yangon Myanmar (Burmese) professional voiceover narrator.`,
     tonePreset.styleInstruction,
-    "Voice Stability & Consistency Anchor (CRITICAL): Maintain the exact same vocal pitch, calm steady speaking rate, volume, and natural Burmese vocal timbre from the first syllable to the last. Do NOT shift pitch, whisper, dramatize, rush, or change persona mid-sentence or across chunks.",
-    "Pronunciation & Prosody Direction: Speak in clear, articulate, warm native Yangon Myanmar pronunciation with crisp consonant endings (အသတ်သံများ ပီသကြည်လင်စွာ) and accurate Burmese tonal contours. Use natural Yangon spoken intonation—never stiff, robotic, or English-accented cadence.",
-    `Pacing & Breath Pauses: Pause briefly and naturally after every \`၊\` and take a full, calm breath pause after every \`။\` so sentences are never rushed or slurred. ${getSpeedPromptInstruction(speed)}`,
-    ...(previousContextLine ? [previousContextLine] : []),
-    "Read ONLY the following Burmese script aloud. Do not add any intro, commentary, or extra words.",
+    `Maintain a steady, consistent vocal pitch and pace. ${getSpeedPromptInstruction(speed)}`,
+    "Speak natural Yangon Burmese, and pronounce any English brand or shop names cleanly in natural English.",
+    "Read ONLY the exact script below aloud without adding any intro or extra words:",
     "",
     chunkText,
   ].join("\n")
@@ -1163,67 +1175,112 @@ async function synthesizeGeminiChunk(
     "Content-Type": "application/json",
     "x-goog-api-key": cleanKey,
   }
-  const requestBody = JSON.stringify({
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseModalities: ["AUDIO"],
-      speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: {
-            voiceName: preset.geminiVoice,
+
+  const voiceCandidates = Array.from(
+    new Set([preset.geminiVoice, preset.geminiFallbackVoice].filter(Boolean))
+  )
+
+  let response: Response | null = null
+  let lastErrorText = ""
+
+  for (let voiceIdx = 0; voiceIdx < voiceCandidates.length; voiceIdx += 1) {
+    const voiceName = voiceCandidates[voiceIdx]
+    const requestBody = JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName,
+            },
           },
         },
       },
-    },
-  })
+    })
 
-  let response: Response | null = null
-  const maxAttempts = 2
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    response = null
-    if (cleanKey.startsWith("AQ.")) {
-      const vertexUrl = `https://aiplatform.googleapis.com/v1/publishers/google/models/${GEMINI_TTS_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
-      try {
-        const vertexRes = await fetch(vertexUrl, {
-          method: "POST",
-          headers,
-          body: requestBody,
-        })
-        if (vertexRes.ok) {
-          response = vertexRes
+    const maxAttempts = 2
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      if (signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError")
+      }
+      response = null
+      if (cleanKey.startsWith("AQ.")) {
+        const vertexUrl = `https://aiplatform.googleapis.com/v1/publishers/google/models/${GEMINI_TTS_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
+        try {
+          const vertexRes = await fetch(vertexUrl, {
+            method: "POST",
+            headers,
+            body: requestBody,
+            signal,
+          })
+          if (vertexRes.ok) {
+            response = vertexRes
+          }
+        } catch (err) {
+          if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+            throw err
+          }
+          // Fall back to generativelanguage.googleapis.com
         }
-      } catch {
-        // Fall back to generativelanguage.googleapis.com
       }
-    }
 
-    if (!response) {
-      try {
-        response = await fetch(standardUrl, {
-          method: "POST",
-          headers,
-          body: requestBody,
-        })
-      } catch (err) {
-        if (attempt === maxAttempts - 1) throw err
+      if (!response) {
+        try {
+          response = await fetch(standardUrl, {
+            method: "POST",
+            headers,
+            body: requestBody,
+            signal,
+          })
+        } catch (err) {
+          if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+            throw err
+          }
+          if (attempt === maxAttempts - 1 && voiceIdx === voiceCandidates.length - 1) {
+            throw new TtsError("အင်တာနက် ချိတ်ဆက်မှု အဆင်မပြေပါ — ခဏနေပြီး ပြန်နှိပ်ပါ")
+          }
+        }
       }
+
+      if (response?.ok) break
+      if (response && !response.ok) {
+        lastErrorText = await response.text().catch(() => "")
+        // If voice ID is rejected (400), break retry loop to try fallback voice immediately
+        if (response.status === 400 && voiceIdx < voiceCandidates.length - 1) {
+          break
+        }
+        // Do not retry 429 blindly if we want immediate user feedback, or retry once on 5xx
+        if (response.status === 429) {
+          throw buildGeminiTtsError(429, lastErrorText)
+        }
+      }
+      if (attempt < maxAttempts - 1 && (!response || response.status >= 500)) {
+        await new Promise<void>((resolve, reject) => {
+          const timer = window.setTimeout(resolve, 600 * (attempt + 1))
+          signal?.addEventListener(
+            "abort",
+            () => {
+              window.clearTimeout(timer)
+              reject(new DOMException("Aborted", "AbortError"))
+            },
+            { once: true }
+          )
+        })
+        continue
+      }
+      break
     }
 
     if (response?.ok) break
-    if (attempt < maxAttempts - 1 && (!response || response.status === 429 || response.status >= 500)) {
-      await new Promise((resolve) => window.setTimeout(resolve, 600 * (attempt + 1)))
-      continue
-    }
-    break
   }
 
   if (!response) {
-    throw new TtsError("Gemini audio generation failed: network error.")
+    throw new TtsError("အင်တာနက် ချိတ်ဆက်မှု အဆင်မပြေပါ — ခဏနေပြီး ပြန်နှိပ်ပါ")
   }
 
   if (!response.ok) {
-    const errText = await response.text().catch(() => "")
-    throw new TtsError(`Gemini audio generation failed (${response.status}): ${errText.slice(0, 180)}`)
+    throw buildGeminiTtsError(response.status, lastErrorText)
   }
 
   const data = (await response.json()) as {
@@ -1273,7 +1330,8 @@ async function synthesizeWithGemini(
   speed: VoiceoverSpeed,
   deliveryTone: VoiceDeliveryTone,
   apiKey: string,
-  onChunkProgress?: (currentChunk: number, totalChunks: number) => void
+  onChunkProgress?: (currentChunk: number, totalChunks: number) => void,
+  signal?: AbortSignal
 ): Promise<{
   blob: Blob
   mimeType: string
@@ -1283,10 +1341,12 @@ async function synthesizeWithGemini(
   const chunks = splitScriptIntoChunks(cleanedText, 240)
   const chunkResults = []
   for (let i = 0; i < chunks.length; i += 1) {
+    if (signal?.aborted) {
+      throw new DOMException("Aborted", "AbortError")
+    }
     onChunkProgress?.(i + 1, chunks.length)
-    const previousContext = i > 0 ? chunks[i - 1] : undefined
     chunkResults.push(
-      await synthesizeGeminiChunk(chunks[i], preset, speed, deliveryTone, apiKey, previousContext)
+      await synthesizeGeminiChunk(chunks[i], preset, speed, deliveryTone, apiKey, signal)
     )
   }
 
@@ -1368,8 +1428,13 @@ function generateRequestId(): string {
 async function synthesizeWithNeuralTts(
   cleanedText: string,
   preset: BurmeseVoicePreset,
-  speed: VoiceoverSpeed
+  speed: VoiceoverSpeed,
+  signal?: AbortSignal
 ): Promise<{ blob: Blob; mimeType: string; fileExtension: "mp3" }> {
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError")
+  }
+
   const endpoint =
     "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4"
 
@@ -1378,9 +1443,22 @@ async function synthesizeWithNeuralTts(
     const chunks: Uint8Array[] = []
     let ws: WebSocket | null = null
 
+    const onAbort = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      try {
+        ws?.close()
+      } catch {
+        // Ignore close errors
+      }
+      reject(new DOMException("Aborted", "AbortError"))
+    }
+
     const timeout = window.setTimeout(() => {
       if (settled) return
       settled = true
+      cleanup()
       try {
         ws?.close()
       } catch {
@@ -1391,7 +1469,10 @@ async function synthesizeWithNeuralTts(
 
     const cleanup = () => {
       window.clearTimeout(timeout)
+      signal?.removeEventListener("abort", onAbort)
     }
+
+    signal?.addEventListener("abort", onAbort, { once: true })
 
     try {
       ws = new WebSocket(endpoint)
@@ -1550,6 +1631,7 @@ export interface GenerateVoiceoverOptions {
   customPronunciations?: ReadonlyArray<PronunciationRule>
   introSfx?: SoundEffectType
   useAiSpeechPrep?: boolean
+  signal?: AbortSignal
   onStageChange?: (stage: "preparing" | "generating") => void
   onProgress?: (progress: VoiceoverProgress) => void
 }
@@ -1721,7 +1803,8 @@ async function synthesizeSpeechSegmentBlob(
   preset: BurmeseVoicePreset,
   speed: VoiceoverSpeed,
   deliveryTone: VoiceDeliveryTone,
-  onChunkProgress?: (currentChunk: number, totalChunks: number) => void
+  onChunkProgress?: (currentChunk: number, totalChunks: number) => void,
+  signal?: AbortSignal
 ): Promise<{
   blob: Blob
   mimeType: string
@@ -1730,6 +1813,10 @@ async function synthesizeSpeechSegmentBlob(
   provider: "gemini" | "neural-tts" | "speech-synthesis"
   segments: VoiceoverSegmentItem[]
 }> {
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError")
+  }
+
   const geminiKey = getSavedGeminiApiKey()
 
   if (geminiKey) {
@@ -1740,15 +1827,26 @@ async function synthesizeSpeechSegmentBlob(
         speed,
         deliveryTone,
         geminiKey,
-        onChunkProgress
+        onChunkProgress,
+        signal
       )
       return {
         ...geminiResult,
         voiceName: `${preset.label} · Gemini`,
         provider: "gemini",
       }
-    } catch {
-      // Silently fall back to free Myanmar Neural TTS on any Gemini error
+    } catch (err) {
+      if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+        throw err
+      }
+      if (err instanceof TtsError) {
+        throw err
+      }
+      throw new TtsError(
+        err instanceof Error
+          ? err.message
+          : "Gemini အသံထုတ်ရာတွင် အဆင်မပြေပါ — ခဏစောင့်ပြီး ပြန်နှိပ်ပါ"
+      )
     }
   }
 
@@ -1762,7 +1860,7 @@ async function synthesizeSpeechSegmentBlob(
 
     if (neuralChunks.length <= 1) {
       onChunkProgress?.(1, 1)
-      const single = await synthesizeWithNeuralTts(cleanedText, preset, speed)
+      const single = await synthesizeWithNeuralTts(cleanedText, preset, speed, signal)
       neuralBlob = single.blob
       neuralMime = single.mimeType
       neuralExt = single.fileExtension
@@ -1777,8 +1875,11 @@ async function synthesizeSpeechSegmentBlob(
     } else {
       const chunkBlobs: Blob[] = []
       for (let i = 0; i < neuralChunks.length; i += 1) {
+        if (signal?.aborted) {
+          throw new DOMException("Aborted", "AbortError")
+        }
         onChunkProgress?.(i + 1, neuralChunks.length)
-        const res = await synthesizeWithNeuralTts(neuralChunks[i], preset, speed)
+        const res = await synthesizeWithNeuralTts(neuralChunks[i], preset, speed, signal)
         chunkBlobs.push(res.blob)
         segments.push({
           id: `seg-${timestamp}-${i}`,
@@ -1802,7 +1903,10 @@ async function synthesizeSpeechSegmentBlob(
       provider: "neural-tts",
       segments,
     }
-  } catch {
+  } catch (err) {
+    if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+      throw err
+    }
     onChunkProgress?.(1, 1)
     const speechResult = synthesizeWithSpeechSynthesis(cleanedText, preset, speed)
     return {
@@ -1917,7 +2021,12 @@ export async function generateBurmeseVoiceover(
   const deliveryTone = options.deliveryTone ?? "normal"
   const introSfx = options.introSfx ?? "none"
   const useAiSpeechPrep = options.useAiSpeechPrep ?? true
+  const signal = options.signal
   const preset = BURMESE_VOICE_PRESETS[voiceType]
+
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError")
+  }
 
   options.onStageChange?.("preparing")
 
@@ -1936,7 +2045,8 @@ export async function generateBurmeseVoiceover(
       const normalized = await prepareBurmeseSpeechText(
         seg.text,
         options.customPronunciations,
-        useAiSpeechPrep
+        useAiSpeechPrep,
+        signal
       )
       if (normalized) {
         normalizedTimeline.push({ kind: "speech", text: normalized })
@@ -1974,7 +2084,8 @@ export async function generateBurmeseVoiceover(
       deliveryTone,
       onProgress
         ? (currentChunk, totalChunks) => onProgress({ currentChunk, totalChunks })
-        : undefined
+        : undefined,
+      signal
     )
     const audioBuffer = await decodeBlobToAudioBuffer(single.blob)
     const audioUrl = URL.createObjectURL(single.blob)
@@ -2032,7 +2143,8 @@ export async function generateBurmeseVoiceover(
                 totalChunks: totalChunksAllSegments,
               })
             }
-          : undefined
+          : undefined,
+        signal
       )
       completedChunksBeforeSegment += segChunksCount
       speechIdx += 1
@@ -2135,6 +2247,7 @@ export async function generateBurmeseDialogueVoiceover(
       introSfx: "none",
       customPronunciations: options.customPronunciations,
       useAiSpeechPrep,
+      signal: options.signal,
     })
     lastProvider = res.provider
     cleanedParts.push(`${turn.speaker === "female" ? "Nilar" : "Thiha"}: ${res.cleanedText}`)
@@ -2324,8 +2437,12 @@ export async function regenerateSingleVoiceoverSegment(params: {
   speed: VoiceoverSpeed
   deliveryTone?: VoiceDeliveryTone
   customPronunciations?: ReadonlyArray<PronunciationRule>
-  previousChunkText?: string
+  signal?: AbortSignal
 }): Promise<VoiceoverSegmentItem> {
+  if (params.signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError")
+  }
+
   const trimmed = params.text.trim()
   if (!trimmed) {
     throw new TtsError("Segment text cannot be empty.")
@@ -2345,7 +2462,7 @@ export async function regenerateSingleVoiceoverSegment(params: {
         params.speed,
         deliveryTone,
         geminiKey,
-        params.previousChunkText
+        params.signal
       )
       const blob =
         res.kind === "pcm"
@@ -2364,13 +2481,23 @@ export async function regenerateSingleVoiceoverSegment(params: {
         provider: "gemini",
         pcmBytes: res.kind === "pcm" ? res.pcmBytes : undefined,
       }
-    } catch {
-      // Fall back to Neural TTS
+    } catch (err) {
+      if (params.signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+        throw err
+      }
+      if (err instanceof TtsError) {
+        throw err
+      }
+      throw new TtsError(
+        err instanceof Error
+          ? err.message
+          : "Gemini အသံထုတ်ရာတွင် အဆင်မပြေပါ — ခဏစောင့်ပြီး ပြန်နှိပ်ပါ"
+      )
     }
   }
 
   try {
-    const res = await synthesizeWithNeuralTts(normalized, preset, params.speed)
+    const res = await synthesizeWithNeuralTts(normalized, preset, params.speed, params.signal)
     return {
       id,
       text: trimmed,
@@ -2379,7 +2506,10 @@ export async function regenerateSingleVoiceoverSegment(params: {
       durationSeconds: Math.max(0.5, estimateSpokenDurationSeconds(normalized, params.speed)),
       provider: "neural-tts",
     }
-  } catch {
+  } catch (err) {
+    if (params.signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+      throw err
+    }
     const speechResult = synthesizeWithSpeechSynthesis(normalized, preset, params.speed)
     return {
       id,

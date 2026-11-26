@@ -31,9 +31,11 @@ import {
   type VoiceoverSegmentItem,
   type VoiceoverSpeed,
 } from "@/api/ttsService"
-import { playBlobUrlWithPrimedAudio } from "@/lib/iosAudio"
+import { playBlobUrlWithPrimedAudio, stopPrimedAudio } from "@/lib/iosAudio"
 import type { BackgroundMusicPreset } from "@/lib/videoAudioMerger"
 import { toast } from "@/components/ui/sonner"
+
+let activeTtsAbortController: AbortController | null = null
 
 export type StudioVoiceChoice = "self" | "nilar" | "thiha" | "ko_khant"
 export type TtsStatus = "idle" | "preparing" | "generating" | "done" | "error"
@@ -240,6 +242,7 @@ interface ContentState {
     scriptOverride?: string,
     options?: { useAiSpeechPrep?: boolean; customTitle?: string }
   ) => Promise<void>
+  cancelStudioVoiceover: () => void
   setMergedStudioAudio: (params: {
     audioUrl: string
     blob: Blob
@@ -435,7 +438,19 @@ export const useContentStore = create<ContentState>()(
         set({ generatedVideoResult }),
       setVoiceScriptText: (voiceScriptText) => set({ voiceScriptText }),
       setVoiceoverDraftScript: (voiceScriptText) => set({ voiceScriptText }),
-      setSelectedVoice: (selectedVoice) => set({ selectedVoice }),
+      setSelectedVoice: (selectedVoice) => {
+        if (activeTtsAbortController) {
+          activeTtsAbortController.abort()
+          activeTtsAbortController = null
+        }
+        stopPrimedAudio()
+        set((state) => ({
+          selectedVoice,
+          ...(state.ttsStatus === "preparing" || state.ttsStatus === "generating"
+            ? { ttsStatus: "idle" as const, ttsProgress: null, ttsError: null }
+            : {}),
+        }))
+      },
       setVoiceSpeed: (voiceSpeed) => set({ voiceSpeed }),
       setVoiceDialogueMode: (voiceDialogueMode) => set({ voiceDialogueMode }),
       setVoiceMusicPreset: (voiceMusicPreset) => set({ voiceMusicPreset }),
@@ -548,12 +563,26 @@ export const useContentStore = create<ContentState>()(
           return false
         }
       },
-      generateStudioVoiceover: async (scriptOverride, options) => {
-        const state = get()
-        if (state.ttsStatus === "preparing" || state.ttsStatus === "generating") {
-          return
+      cancelStudioVoiceover: () => {
+        if (activeTtsAbortController) {
+          activeTtsAbortController.abort()
+          activeTtsAbortController = null
         }
+        stopPrimedAudio()
+        set((state) =>
+          state.ttsStatus === "preparing" || state.ttsStatus === "generating"
+            ? { ttsStatus: "idle" as const, ttsProgress: null, ttsError: null }
+            : state
+        )
+      },
+      generateStudioVoiceover: async (scriptOverride, options) => {
+        if (activeTtsAbortController) {
+          activeTtsAbortController.abort()
+          activeTtsAbortController = null
+        }
+        stopPrimedAudio()
 
+        const state = get()
         const rawScript = scriptOverride ?? state.voiceScriptText
         const cleaned = cleanVoiceoverText(rawScript)
         if (!cleaned) {
@@ -562,6 +591,9 @@ export const useContentStore = create<ContentState>()(
           toast.error(msg)
           return
         }
+
+        const controller = new AbortController()
+        activeTtsAbortController = controller
 
         const voiceType: BurmeseVoiceType =
           state.selectedVoice === "ko_khant"
@@ -588,10 +620,13 @@ export const useContentStore = create<ContentState>()(
                 deliveryTone: state.voiceDeliveryTone ?? "normal",
                 customPronunciations,
                 useAiSpeechPrep,
+                signal: controller.signal,
                 onStageChange: (stage) => {
+                  if (controller.signal.aborted || activeTtsAbortController !== controller) return
                   set({ ttsStatus: stage })
                 },
                 onProgress: (p) => {
+                  if (controller.signal.aborted || activeTtsAbortController !== controller) return
                   set({
                     ttsStatus: "generating",
                     ttsProgress: { current: p.currentChunk, total: p.totalChunks },
@@ -602,16 +637,24 @@ export const useContentStore = create<ContentState>()(
                 deliveryTone: state.voiceDeliveryTone ?? "normal",
                 customPronunciations,
                 useAiSpeechPrep,
+                signal: controller.signal,
                 onStageChange: (stage) => {
+                  if (controller.signal.aborted || activeTtsAbortController !== controller) return
                   set({ ttsStatus: stage })
                 },
                 onProgress: (p) => {
+                  if (controller.signal.aborted || activeTtsAbortController !== controller) return
                   set({
                     ttsStatus: "generating",
                     ttsProgress: { current: p.currentChunk, total: p.totalChunks },
                   })
                 },
               })
+
+          if (controller.signal.aborted || activeTtsAbortController !== controller) {
+            URL.revokeObjectURL(result.audioUrl)
+            return
+          }
 
           if (musicPreset !== "none") {
             const mixed = await mixVoiceoverWithAutoDuckingMusic({
@@ -621,6 +664,10 @@ export const useContentStore = create<ContentState>()(
               musicVolume: 0.34,
             })
             URL.revokeObjectURL(result.audioUrl)
+            if (controller.signal.aborted || activeTtsAbortController !== controller) {
+              URL.revokeObjectURL(mixed.audioUrl)
+              return
+            }
             result = {
               ...result,
               audioUrl: mixed.audioUrl,
@@ -676,6 +723,15 @@ export const useContentStore = create<ContentState>()(
             void playBlobUrlWithPrimedAudio(result.audioUrl)
           }
         } catch (err) {
+          if (
+            controller.signal.aborted ||
+            (err instanceof DOMException && err.name === "AbortError")
+          ) {
+            if (activeTtsAbortController === controller) {
+              set({ ttsStatus: "idle", ttsProgress: null, ttsError: null })
+            }
+            return
+          }
           const msg = err instanceof Error ? err.message : tt("store.audioFailed")
           set({
             ttsStatus: "error",
@@ -683,6 +739,10 @@ export const useContentStore = create<ContentState>()(
             ttsError: msg,
           })
           toast.error(msg)
+        } finally {
+          if (activeTtsAbortController === controller) {
+            activeTtsAbortController = null
+          }
         }
       },
       setVoiceDnaSamples: (voiceDnaSamples) =>
