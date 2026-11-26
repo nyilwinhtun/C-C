@@ -317,7 +317,7 @@ export function GeneratorPage() {
       return
     }
 
-    if (liveModeEnabled && !useUIStore.getState().apiKeys.gemini?.trim()) {
+    if (liveModeEnabled && useContentStore.getState().getGeminiKeyPool().length === 0) {
       toast.error(
         t(language, "postWriter.toast.liveNeedsKey")
       )

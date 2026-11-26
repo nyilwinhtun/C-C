@@ -20,6 +20,34 @@ const SILENT_WAV_DATA_URI =
 
 let sharedUnlockCtx: AudioContext | null = null
 let sharedPrimerAudio: HTMLAudioElement | null = null
+const activeAudioStoppers = new Map<string, () => void>()
+
+/**
+ * Register a managed audio player's stop/pause callback so only one active
+ * audio element plays across the entire app at any time.
+ */
+export function registerManagedAudio(id: string, stopFn: () => void): () => void {
+  activeAudioStoppers.set(id, stopFn)
+  return () => {
+    if (activeAudioStoppers.get(id) === stopFn) {
+      activeAudioStoppers.delete(id)
+    }
+  }
+}
+
+/**
+ * Pause/stop all registered audio players (except the optional caller id).
+ */
+export function stopAllManagedAudio(exceptId?: string): void {
+  for (const [id, stopFn] of activeAudioStoppers.entries()) {
+    if (exceptId && id === exceptId) continue
+    try {
+      stopFn()
+    } catch {
+      // Ignore player cleanup errors
+    }
+  }
+}
 
 /**
  * Configure iOS Safari / WebKit AudioSession to 'playback' so audio plays
@@ -102,10 +130,29 @@ export async function applyStudioVocalEqToFloat32(
     return encodeMonoWav16Bit(samples, sampleRate)
   }
 
+  // iOS Safari OfflineAudioContext throws NotSupportedError for sample rates < 44100 Hz
+  // (such as Gemini's 24kHz PCM). Resample to 44100 Hz before rendering so Studio EQ
+  // always runs reliably on iPhone/iPad.
+  const targetSampleRate = sampleRate < 44100 ? 44100 : sampleRate
+  let inputSamples = samples
+  if (targetSampleRate !== sampleRate) {
+    const ratio = sampleRate / targetSampleRate
+    const targetLength = Math.max(1, Math.round(samples.length / ratio))
+    const resampled = new Float32Array(targetLength)
+    for (let i = 0; i < targetLength; i += 1) {
+      const srcPos = i * ratio
+      const idx0 = Math.floor(srcPos)
+      const idx1 = Math.min(samples.length - 1, idx0 + 1)
+      const frac = srcPos - idx0
+      resampled[i] = samples[idx0] * (1 - frac) + samples[idx1] * frac
+    }
+    inputSamples = resampled
+  }
+
   try {
-    const offlineCtx = new OfflineCtx(1, samples.length, sampleRate)
-    const buffer = offlineCtx.createBuffer(1, samples.length, sampleRate)
-    buffer.copyToChannel(new Float32Array(samples), 0)
+    const offlineCtx = new OfflineCtx(1, inputSamples.length, targetSampleRate)
+    const buffer = offlineCtx.createBuffer(1, inputSamples.length, targetSampleRate)
+    buffer.copyToChannel(new Float32Array(inputSamples), 0)
 
     const source = offlineCtx.createBufferSource()
     source.buffer = buffer
@@ -125,9 +172,18 @@ export async function applyStudioVocalEqToFloat32(
     compressor.attack.value = 0.005
     compressor.release.value = 0.12
 
+    // Gentle -1 dBFS peak limiter after the +2.5 dB presence boost to prevent digital clipping
+    const limiter = offlineCtx.createDynamicsCompressor()
+    limiter.threshold.value = -1.0
+    limiter.knee.value = 0
+    limiter.ratio.value = 20
+    limiter.attack.value = 0.001
+    limiter.release.value = 0.05
+
     source.connect(presenceFilter)
     presenceFilter.connect(compressor)
-    compressor.connect(offlineCtx.destination)
+    compressor.connect(limiter)
+    limiter.connect(offlineCtx.destination)
 
     source.start(0)
     const rendered = await offlineCtx.startRendering()
@@ -318,6 +374,7 @@ export function resolveRecordedAudioMime(
  * element (call unlockIosAudio() synchronously inside the tap handler first).
  */
 export async function playBlobUrlWithPrimedAudio(blobUrl: string): Promise<HTMLAudioElement | null> {
+  stopAllManagedAudio("primed")
   const el = getSharedPrimerAudio()
   if (!el) return null
   setIosAudioSessionPlayback()

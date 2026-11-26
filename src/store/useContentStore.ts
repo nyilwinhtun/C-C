@@ -870,6 +870,9 @@ export const useContentStore = create<ContentState>()(
             }
             return
           }
+          if (activeTtsAbortController !== controller) {
+            return
+          }
           const msg = err instanceof Error ? err.message : tt("store.audioFailed")
           set({
             ttsStatus: "error",

@@ -1,9 +1,15 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { Download, Pause, Play, RotateCcw, RotateCw, Share2 } from "lucide-react"
 import { cn, triggerHaptic } from "@/lib/utils"
-import { setIosAudioSessionPlayback, unlockIosAudio } from "@/lib/iosAudio"
+import {
+  registerManagedAudio,
+  setIosAudioSessionPlayback,
+  stopAllManagedAudio,
+  stopPrimedAudio,
+  unlockIosAudio,
+} from "@/lib/iosAudio"
 
 interface IosAudioPlayerProps {
   src: string
@@ -60,6 +66,7 @@ export function IosAudioPlayer({
   compact = false,
   className,
 }: IosAudioPlayerProps) {
+  const playerId = useId()
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const playbackSpeedRef = useRef<number>(1.0)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -68,6 +75,38 @@ export function IosAudioPlayer({
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0)
 
   const bars = useMemo(() => generateWaveformHeights(src || title || "voice-memo"), [src, title])
+
+  const syncMediaSessionPosition = useCallback(
+    (audio: HTMLAudioElement | null, fallbackDuration = duration) => {
+      if (
+        typeof navigator === "undefined" ||
+        !("mediaSession" in navigator) ||
+        typeof navigator.mediaSession.setPositionState !== "function" ||
+        !audio
+      ) {
+        return
+      }
+      const dur =
+        Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : fallbackDuration
+      if (!Number.isFinite(dur) || dur <= 0) return
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: dur,
+          playbackRate: playbackSpeedRef.current || 1,
+          position: Math.max(0, Math.min(dur, audio.currentTime || 0)),
+        })
+      } catch {
+        // Ignore unsupported or transient positionState errors
+      }
+    },
+    [duration]
+  )
+
+  useEffect(() => {
+    return registerManagedAudio(playerId, () => {
+      audioRef.current?.pause()
+    })
+  }, [playerId])
 
   useEffect(() => {
     setIsPlaying(false)
@@ -80,7 +119,8 @@ export function IosAudioPlayer({
     const audio = audioRef.current
     if (!audio) return
     audio.playbackRate = playbackSpeed
-  }, [playbackSpeed, src])
+    syncMediaSessionPosition(audio)
+  }, [playbackSpeed, src, syncMediaSessionPosition])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -97,19 +137,28 @@ export function IosAudioPlayer({
     const syncDuration = () => {
       if (Number.isFinite(audio.duration) && audio.duration > 0) {
         setDuration(audio.duration)
+        syncMediaSessionPosition(audio, audio.duration)
       }
     }
     const onTimeUpdate = () => {
       setCurrentTime(audio.currentTime)
+      syncMediaSessionPosition(audio)
     }
     const onEnded = () => {
       setIsPlaying(false)
       setCurrentTime(0)
+      syncMediaSessionPosition(audio)
     }
-    const onPause = () => setIsPlaying(false)
+    const onPause = () => {
+      setIsPlaying(false)
+      syncMediaSessionPosition(audio)
+    }
     const onPlay = () => {
+      stopPrimedAudio()
+      stopAllManagedAudio(playerId)
       audio.playbackRate = playbackSpeedRef.current
       setIsPlaying(true)
+      syncMediaSessionPosition(audio)
     }
 
     audio.addEventListener("loadedmetadata", syncDuration)
@@ -155,6 +204,8 @@ export function IosAudioPlayer({
     const handlePlay = () => {
       const audio = audioRef.current
       if (!audio) return
+      stopPrimedAudio()
+      stopAllManagedAudio(playerId)
       setIosAudioSessionPlayback()
       unlockIosAudio()
       audio.playbackRate = playbackSpeedRef.current
@@ -170,6 +221,7 @@ export function IosAudioPlayer({
       const next = Math.max(0, Math.min(maxDur || 0, audio.currentTime + delta))
       audio.currentTime = next
       setCurrentTime(next)
+      syncMediaSessionPosition(audio, maxDur)
     }
 
     try {
@@ -207,6 +259,8 @@ export function IosAudioPlayer({
       audio.pause()
     } else {
       try {
+        stopPrimedAudio()
+        stopAllManagedAudio(playerId)
         setIosAudioSessionPlayback()
         audio.playbackRate = playbackSpeed
         await audio.play()
@@ -251,9 +305,14 @@ export function IosAudioPlayer({
       onDownload()
       return
     }
+    const safeTitle =
+      (title || "recording")
+        .trim()
+        .replace(/[\\/:*?"<>|\x00-\x1F]+/g, "_")
+        .replace(/\s+/g, "_") || "recording"
     const link = document.createElement("a")
     link.href = src
-    link.download = `${(title || "recording").replace(/[^a-zA-Z0-9_-]+/g, "_")}.${fileExtension || "wav"}`
+    link.download = `${safeTitle}.${fileExtension || "wav"}`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -339,13 +398,13 @@ export function IosAudioPlayer({
       </div>
 
       {/* Transport Controls & Tactile Utility Pills */}
-      <div className="flex items-center justify-between gap-2 pt-0.5">
-        <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+        <div className="flex items-center gap-1 sm:gap-1.5">
           <button
             type="button"
             onClick={() => skipBy(-15)}
             aria-label="Skip back 15 seconds"
-            className="inline-flex h-8 items-center gap-1 px-2.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] transition-all active:scale-95 cursor-pointer tabular-nums"
+            className="inline-flex h-8 items-center gap-0.5 sm:gap-1 px-2 sm:px-2.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] transition-all active:scale-95 cursor-pointer tabular-nums"
           >
             <RotateCcw className="h-3 w-3" strokeWidth={1.75} />
             <span>15s</span>
@@ -355,7 +414,7 @@ export function IosAudioPlayer({
             type="button"
             onClick={togglePlay}
             aria-label={isPlaying ? "Pause" : "Play"}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B] hover:bg-[#292524] dark:hover:bg-[#E7E5E4] transition-all active:scale-95 cursor-pointer"
+            className="inline-flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B] hover:bg-[#292524] dark:hover:bg-[#E7E5E4] transition-all active:scale-95 cursor-pointer"
           >
             {isPlaying ? (
               <Pause className="h-4 w-4 fill-current" strokeWidth={1.75} />
@@ -368,7 +427,7 @@ export function IosAudioPlayer({
             type="button"
             onClick={() => skipBy(15)}
             aria-label="Skip forward 15 seconds"
-            className="inline-flex h-8 items-center gap-1 px-2.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] transition-all active:scale-95 cursor-pointer tabular-nums"
+            className="inline-flex h-8 items-center gap-0.5 sm:gap-1 px-2 sm:px-2.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] transition-all active:scale-95 cursor-pointer tabular-nums"
           >
             <span>15s</span>
             <RotateCw className="h-3 w-3" strokeWidth={1.75} />
@@ -378,7 +437,7 @@ export function IosAudioPlayer({
             type="button"
             onClick={toggleSpeed}
             aria-label={`Playback speed ${playbackSpeed.toFixed(1)}x`}
-            className="inline-flex h-8 items-center justify-center rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-2.5 text-[11px] font-semibold text-[#57534E] dark:text-[#A1A1AA] hover:text-[#1C1917] dark:hover:text-[#F5F5F4] transition-all active:scale-95 cursor-pointer tabular-nums"
+            className="inline-flex h-8 items-center justify-center rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-2 sm:px-2.5 text-[11px] font-semibold text-[#57534E] dark:text-[#A1A1AA] hover:text-[#1C1917] dark:hover:text-[#F5F5F4] transition-all active:scale-95 cursor-pointer tabular-nums"
           >
             {playbackSpeed.toFixed(1)}x
           </button>
@@ -390,7 +449,7 @@ export function IosAudioPlayer({
             <button
               type="button"
               onClick={handleBuiltInDownload}
-              className="inline-flex h-8 items-center gap-1.5 rounded-full bg-white dark:bg-[#27272A] px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] border border-[#E7E5E4] dark:border-[#3F3F46] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] transition-all active:scale-95 cursor-pointer"
+              className="inline-flex h-8 items-center gap-1 sm:gap-1.5 rounded-full bg-white dark:bg-[#27272A] px-2.5 sm:px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] border border-[#E7E5E4] dark:border-[#3F3F46] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] transition-all active:scale-95 cursor-pointer"
             >
               <Download className="h-3.5 w-3.5 text-[#57534E] dark:text-[#A1A1AA]" strokeWidth={1.75} />
               <span className="font-myanmar">{downloadLabel || "WAV"}</span>
@@ -403,7 +462,7 @@ export function IosAudioPlayer({
                 triggerHaptic(10)
                 onShare()
               }}
-              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#F0EDE8] dark:bg-[#27272A] px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#E7E5E4] dark:hover:bg-[#3F3F46] transition-all active:scale-95 cursor-pointer"
+              className="inline-flex h-8 items-center gap-1 sm:gap-1.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#F0EDE8] dark:bg-[#27272A] px-2.5 sm:px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#E7E5E4] dark:hover:bg-[#3F3F46] transition-all active:scale-95 cursor-pointer"
             >
               <Share2 className="h-3.5 w-3.5" strokeWidth={1.75} />
               <span className="font-myanmar">{shareLabel || "Share"}</span>

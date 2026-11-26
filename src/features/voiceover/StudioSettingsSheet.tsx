@@ -41,7 +41,7 @@ import { t } from "@/locales/translations"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
 
-const STUDIO_SPEEDS: VoiceoverSpeed[] = [0.85, 1.0, 1.15]
+const STUDIO_SPEEDS: VoiceoverSpeed[] = [0.85, 1.0, 1.05, 1.15]
 
 const MUSIC_PRESET_OPTIONS: Array<{
   id: BackgroundMusicPreset
@@ -238,7 +238,7 @@ export function StudioSettingsSheet({
             <Label className="text-xs font-semibold text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
               {t(language, "booth.speedLabel")}
             </Label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-2">
               {STUDIO_SPEEDS.map((option) => {
                 const active = speed === option
                 return (

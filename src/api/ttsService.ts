@@ -6,7 +6,11 @@ import {
   getAudioContextConstructor,
   unlockIosAudio,
 } from "@/lib/iosAudio"
-import { executeWithGeminiKeyRotation } from "@/api/aiService"
+import {
+  executeWithGeminiKeyRotation,
+  isGeminiQuotaOrRateLimitError,
+} from "@/api/aiService"
+import { toast } from "@/components/ui/sonner"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
 
@@ -401,6 +405,84 @@ export function applyCustomPronunciations(
  * - Converts Arabic numbers, prices, currencies, and percentages to spoken Burmese
  * - Converts slashes, pipes, and hyphens into natural Burmese pauses
  */
+const MYANMAR_SPOKEN_DIGITS = [
+  "သုည",
+  "တစ်",
+  "နှစ်",
+  "သုံး",
+  "လေး",
+  "ငါး",
+  "ခြောက်",
+  "ခုနစ်",
+  "ရှစ်",
+  "ကိုး",
+] as const
+
+function encodeTokenPlaceholder(index: number): string {
+  // Encode index using A-Z only so placeholders contain zero digits, hyphens, or slashes
+  let n = index
+  let letters = ""
+  do {
+    letters = String.fromCharCode(65 + (n % 26)) + letters
+    n = Math.floor(n / 26) - 1
+  } while (n >= 0)
+  return `\uE000TOK${letters}\uE001`
+}
+
+function maskProtectedTtsTokens(text: string): {
+  maskedText: string
+  tokens: string[]
+} {
+  const tokens: string[] = []
+  const stash = (match: string): string => {
+    const idx = tokens.length
+    tokens.push(match)
+    return encodeTokenPlaceholder(idx)
+  }
+
+  let result = text
+    // 1. 24/7 availability expressions
+    .replace(/\b24\/7\b/g, stash)
+    // 2. Hyphenated/slashed tech terms
+    .replace(/\b(?:Wi-Fi|USB-C|Type-C|E-commerce|B2B|B2C|O2O)\b/gi, stash)
+    // 3. English brand/model phrases with numbers & optional tier suffixes (excluding currency words)
+    .replace(
+      /\b(?!(?:Ks|MMK|Kyats?|USD|THB|Baht)\b)[A-Za-z][A-Za-z0-9]*(?:\s+(?:Pro|Max|Plus|Ultra|Mini|Air|Lite|SE|FE|GT|Ti|XT|Series|Gen|Watch|Pad|Book|Tab|Pixel|Galaxy|iPhone|iPad|MacBook|Surface|Windows|Android|iOS|macOS|RTX|GTX|M[1-9]|A[1-9]\d*|S\d+|[A-Za-z]+))*\s+\d+(?:\.\d+)?[A-Za-z]*(?:\s+(?:Pro|Max|Plus|Ultra|Mini|Air|Lite|SE|FE|GT|Ti|XT|Gen|Series))*\b/g,
+      stash
+    )
+    // 4. Standalone alphanumeric tech tokens (4K, 5G, S24, MP3, 1080p, 60fps, etc.) while preserving 15k / 5000Ks
+    .replace(
+      /\b(?!\d+(?:\.\d+)?\s*(?:k|Ks|MMK|Kyats?|USD|THB|Baht)\b)(?:\d+[A-Za-z]{1,6}(?:\.\d+)?|[A-Za-z]{1,12}\d+[A-Za-z0-9.]*)\b/g,
+      stash
+    )
+
+  return { maskedText: result, tokens }
+}
+
+function convertMyanmarPhoneNumbers(text: string): string {
+  return text.replace(
+    /(?:\+?95[-\s]?0?9|09)(?:[-\s]?\d){7,9}(?!\d)/g,
+    (match) => {
+      const normalizedDigits = match
+        .replace(/^\+?95[-\s]?0?9/, "09")
+        .replace(/[^\d]/g, "")
+      return normalizedDigits
+        .split("")
+        .map((ch) => MYANMAR_SPOKEN_DIGITS[Number.parseInt(ch, 10)] ?? ch)
+        .join(" ")
+    }
+  )
+}
+
+/**
+ * Deterministic Burmese + English TTS preprocessor (V2):
+ * - Strips markdown, emojis, bullet points, and bracketed timestamp tags
+ * - Applies user-defined custom pronunciation dictionary rules
+ * - Masks alphanumeric/tech/brand tokens (4K, 5G, S24, MP3, Wi-Fi, USB-C, 24/7, iPhone 15 Pro Max)
+ * - Converts Myanmar phone numbers (09-777-123-456, +959...) digit-by-digit before splitting hyphens
+ * - Converts Arabic numbers, prices, currencies, and percentages to spoken Burmese
+ * - Converts slashes, pipes, and hyphens into natural Burmese pauses
+ */
 export function normalizeBurmeseForTTS(
   rawText: string,
   customRules?: ReadonlyArray<PronunciationRule>
@@ -433,8 +515,15 @@ export function normalizeBurmeseForTTS(
     text = applyCustomPronunciations(text, rulesToApply)
   }
 
-  // Convert Myanmar digits (၀-၉) to Arabic digits (0-9) so unified number parsing handles both
+  // Convert Myanmar digits (၀-၉) to Arabic digits (0-9) so unified number/phone parsing handles both
   text = myanmarDigitsToArabic(text)
+
+  // Mask alphanumeric/tech/brand tokens BEFORE phone, price, number, or hyphen/slash passes
+  const { maskedText, tokens } = maskProtectedTtsTokens(text)
+  text = maskedText
+
+  // Parse Myanmar phone numbers digit-by-digit BEFORE splitting hyphens/spaces
+  text = convertMyanmarPhoneNumbers(text)
 
   // Expand shorthand k/K thousands (e.g. 15k -> 15000, 1.5k -> 1500)
   text = text.replace(/(?<![\d.])(\d+(?:\.\d+)?)\s*[kK]\b/g, (_match, num: string) => {
@@ -510,6 +599,18 @@ export function normalizeBurmeseForTTS(
     .replace(/[;,]\s*/g, "၊ ")
     .replace(/\s*([၊။])\s*/g, "$1 ")
     .replace(/([၊။])(?:\s*[၊။])+/g, "$1 ")
+
+  // Restore protected alphanumeric/tech/brand tokens
+  if (tokens.length > 0) {
+    text = text.replace(/\uE000TOK([A-Z]+)\uE001/g, (_match, letters: string) => {
+      let decoded = 0
+      for (let i = 0; i < letters.length; i += 1) {
+        decoded = decoded * 26 + (letters.charCodeAt(i) - 65 + 1)
+      }
+      decoded -= 1
+      return tokens[decoded] ?? ""
+    })
+  }
 
   return text
     .split(/\r?\n/)
@@ -885,9 +986,9 @@ export async function prepareBurmeseSpeechText(
   const deterministic = normalizeBurmeseForTTS(rawText, customRules)
   if (!deterministic || !useAiSpeechPrep || deterministic.length > 1800) return deterministic
 
-  // Only invoke an extra Gemini speech-prep request if unexpanded digits or symbols remain;
-  // otherwise save the user's Free Tier quota so a 30s script uses 1 single TTS API request.
-  const needsAiNormalization = /[\d$%฿€£¥]/.test(deterministic)
+  // Check the raw input BEFORE deterministic normalization strips digits/symbols
+  // so scripts with numbers/prices still benefit from Gemini's natural Burmese phrasing pass.
+  const needsAiNormalization = /[\d၀-၉$%฿€£¥]/.test(rawText)
   if (!needsAiNormalization) return deterministic
 
   const apiKey = getSavedGeminiApiKey()
@@ -1806,7 +1907,8 @@ async function synthesizeWithNeuralTts(
         }),
       ].join("\r\n")
 
-      const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='my-MM'><voice name='${preset.neuralVoice}'><prosody rate='${formatEdgeRate(speed)}' pitch='+0Hz'>${escapeXml(cleanedText)}</prosody></voice></speak>`
+      const pitch = preset.id === "deep_male" ? "-8Hz" : "+0Hz"
+      const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='my-MM'><voice name='${preset.neuralVoice}'><prosody rate='${formatEdgeRate(speed)}' pitch='${pitch}'>${escapeXml(cleanedText)}</prosody></voice></speak>`
 
       const ssmlMessage = [
         `X-RequestId:${requestId}`,
@@ -2161,14 +2263,20 @@ async function synthesizeSpeechSegmentBlob(
       if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
         throw err
       }
-      if (err instanceof TtsError) {
+      if (isGeminiQuotaOrRateLimitError(err)) {
+        // All Gemini keys exhausted/cooling down — fall through to Tier-2 Edge Neural TTS
+        toast.info(
+          "Gemini quota ပြည့်နေပါသဖြင့် Tier-2 Neural TTS ဖြင့် အလိုအလျောက် ထုတ်ပေးနေပါသည်..."
+        )
+      } else if (err instanceof TtsError) {
         throw err
+      } else {
+        throw new TtsError(
+          err instanceof Error
+            ? err.message
+            : "Gemini အသံထုတ်ရာတွင် အဆင်မပြေပါ — ခဏစောင့်ပြီး ပြန်နှိပ်ပါ"
+        )
       }
-      throw new TtsError(
-        err instanceof Error
-          ? err.message
-          : "Gemini အသံထုတ်ရာတွင် အဆင်မပြေပါ — ခဏစောင့်ပြီး ပြန်နှိပ်ပါ"
-      )
     }
   }
 
@@ -2822,22 +2930,61 @@ export async function mixVoiceoverWithAutoDuckingMusic(params: {
   const baseVol = Math.max(0.05, Math.min(0.8, params.musicVolume ?? 0.3))
   const duckedVol = baseVol * 0.22
 
-  // Compute 100ms RMS speech envelope for GainNode auto-ducking
+  // Smooth auto-ducking envelope: Attack (~80ms) + Hold (~350ms) + Release (~500ms)
+  // plus a clean 0.5s fade-out at the end of the track.
   const voiceChannel = voiceBuffer.getChannelData(0)
-  const windowSize = Math.max(1, Math.floor(sampleRate * 0.1))
+  const frameDurationSec = 0.05 // 50ms analysis frames
+  const windowSize = Math.max(1, Math.floor(sampleRate * frameDurationSec))
+  const attackSec = 0.08
+  const holdSec = 0.35
+  const releaseSec = 0.5
+  const fadeOutSec = Math.min(0.5, durationSeconds * 0.25)
+  const fadeStartSec = Math.max(0, durationSeconds - fadeOutSec)
+
   musicGain.gain.setValueAtTime(baseVol, 0)
+  let isDucking = false
+  let holdRemainingSec = 0
+  let currentTargetGain = baseVol
 
   for (let start = 0; start < voiceChannel.length; start += windowSize) {
+    const timeSec = start / sampleRate
+    if (timeSec >= fadeStartSec) break
+
     const end = Math.min(voiceChannel.length, start + windowSize)
     let sumSq = 0
     for (let i = start; i < end; i += 1) {
       sumSq += voiceChannel[i] * voiceChannel[i]
     }
     const rms = Math.sqrt(sumSq / Math.max(1, end - start))
-    const targetGain = rms > 0.015 ? duckedVol : baseVol
-    const timeSec = Math.min(durationSeconds, (start + windowSize * 0.5) / sampleRate)
-    musicGain.gain.linearRampToValueAtTime(targetGain, timeSec)
+
+    if (rms > 0.015) {
+      holdRemainingSec = holdSec
+      if (!isDucking) {
+        isDucking = true
+        currentTargetGain = duckedVol
+        musicGain.gain.setValueAtTime(baseVol, timeSec)
+        musicGain.gain.linearRampToValueAtTime(
+          duckedVol,
+          Math.min(fadeStartSec, timeSec + attackSec)
+        )
+      }
+    } else if (isDucking) {
+      holdRemainingSec -= frameDurationSec
+      if (holdRemainingSec <= 0) {
+        isDucking = false
+        currentTargetGain = baseVol
+        musicGain.gain.setValueAtTime(duckedVol, timeSec)
+        musicGain.gain.linearRampToValueAtTime(
+          baseVol,
+          Math.min(fadeStartSec, timeSec + releaseSec)
+        )
+      }
+    }
   }
+
+  // Smooth 0.5s fade-out at the end
+  musicGain.gain.setValueAtTime(currentTargetGain, fadeStartSec)
+  musicGain.gain.linearRampToValueAtTime(0, durationSeconds)
 
   musicSrc.connect(musicGain)
   musicGain.connect(offlineCtx.destination)
@@ -2945,14 +3092,19 @@ export async function regenerateSingleVoiceoverSegment(params: {
       if (params.signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
         throw err
       }
-      if (err instanceof TtsError) {
+      if (isGeminiQuotaOrRateLimitError(err)) {
+        toast.info(
+          "Gemini quota ပြည့်နေပါသဖြင့် Tier-2 Neural TTS ဖြင့် အလိုအလျောက် ထုတ်ပေးနေပါသည်..."
+        )
+      } else if (err instanceof TtsError) {
         throw err
+      } else {
+        throw new TtsError(
+          err instanceof Error
+            ? err.message
+            : "Gemini အသံထုတ်ရာတွင် အဆင်မပြေပါ — ခဏစောင့်ပြီး ပြန်နှိပ်ပါ"
+        )
       }
-      throw new TtsError(
-        err instanceof Error
-          ? err.message
-          : "Gemini အသံထုတ်ရာတွင် အဆင်မပြေပါ — ခဏစောင့်ပြီး ပြန်နှိပ်ပါ"
-      )
     }
   }
 
@@ -3005,10 +3157,14 @@ export async function mergeVoiceoverSegments(params: {
 
   let mergedBlob: Blob
   if (params.segments.every((seg) => seg.pcmBytes && seg.pcmBytes.byteLength > 0)) {
-    mergedBlob = concatenatePcmBuffersToWav(
+    const mergedRawWav = concatenatePcmBuffersToWav(
       params.segments.map((seg) => seg.pcmBytes as Uint8Array),
       120
     )
+    const parsedMerged = extractPcmFromWavBytes(new Uint8Array(await mergedRawWav.arrayBuffer()))
+    mergedBlob = parsedMerged
+      ? await applyStudioVocalEqToPcm16(parsedMerged.pcmBytes, TTS_SAMPLE_RATE)
+      : mergedRawWav
   } else {
     mergedBlob = await concatenateAudioBlobsToWav(params.segments.map((seg) => seg.blob))
   }

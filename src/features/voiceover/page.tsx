@@ -40,8 +40,10 @@ import {
   MIN_VALID_RECORDING_BYTES,
   createWavAudioRecorder,
   getAudioContextConstructor,
+  registerManagedAudio,
   setIosAudioSessionPlayback,
   shareAudioFile,
+  stopAllManagedAudio,
   stopPrimedAudio,
   unlockIosAudio,
   type WavAudioRecorderHandle,
@@ -243,8 +245,7 @@ export function VoiceoverPage() {
       return
     }
 
-    const geminiKey = useUIStore.getState().apiKeys.gemini?.trim()
-    if (!geminiKey) {
+    if (useContentStore.getState().getGeminiKeyPool().length === 0) {
       toast.error(
         t(language, "postWriter.toast.liveNeedsKey")
       )
@@ -371,6 +372,7 @@ export function VoiceoverPage() {
   // Segment-by-Segment Studio state
   const [segmentsExpanded, setSegmentsExpanded] = useState(false)
   const [editableSegments, setEditableSegments] = useState<VoiceoverSegmentItem[]>([])
+  const [editedSegmentIds, setEditedSegmentIds] = useState<Record<string, boolean>>({})
   const [regeneratingSegmentId, setRegeneratingSegmentId] = useState<string | null>(null)
   const [isMergingSegments, setIsMergingSegments] = useState(false)
   const [playingSegmentId, setPlayingSegmentId] = useState<string | null>(null)
@@ -378,7 +380,18 @@ export function VoiceoverPage() {
   const segmentAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
+    return registerManagedAudio("segment-preview", () => {
+      if (segmentAudioRef.current) {
+        segmentAudioRef.current.pause()
+        segmentAudioRef.current = null
+      }
+      setPlayingSegmentId(null)
+    })
+  }, [])
+
+  useEffect(() => {
     setEditableSegments(generatedAudioSegments)
+    setEditedSegmentIds({})
     setPlayingSegmentId(null)
     if (segmentAudioRef.current) {
       segmentAudioRef.current.pause()
@@ -444,10 +457,12 @@ export function VoiceoverPage() {
     setWaveformBars(Array(WAVEFORM_BAR_COUNT).fill(14))
   }, [releaseWakeLock])
 
-  // Only stop active mic stream on unmount; never revoke generatedAudioUrl here
+  // Only stop active mic stream/recorder on unmount; never revoke generatedAudioUrl here
   useEffect(() => {
     return () => {
       stopRecorderResources()
+      wavRecorderRef.current?.cancel()
+      wavRecorderRef.current = null
     }
   }, [stopRecorderResources])
 
@@ -502,6 +517,7 @@ export function VoiceoverPage() {
         finalExt = "wav"
         finalMime = "audio/wav"
         finalDuration = mixed.durationSeconds
+        URL.revokeObjectURL(mixed.audioUrl)
       } catch {
         // Fallback to raw recording if mixing fails
       }
@@ -788,6 +804,9 @@ export function VoiceoverPage() {
       return
     }
 
+    stopPrimedAudio()
+    stopAllManagedAudio("segment-preview")
+
     if (segmentAudioRef.current) {
       segmentAudioRef.current.pause()
       segmentAudioRef.current = null
@@ -814,6 +833,7 @@ export function VoiceoverPage() {
     setEditableSegments((prev) =>
       prev.map((seg) => (seg.id === id ? { ...seg, text: nextText } : seg))
     )
+    setEditedSegmentIds((prev) => (prev[id] ? prev : { ...prev, [id]: true }))
   }
 
   const handleRegenerateSegment = async (index: number) => {
@@ -867,6 +887,12 @@ export function VoiceoverPage() {
       setEditableSegments((prev) =>
         prev.map((seg, idx) => (idx === index ? updated : seg))
       )
+      setEditedSegmentIds((prev) => {
+        if (!prev[targetSeg.id]) return prev
+        const next = { ...prev }
+        delete next[targetSeg.id]
+        return next
+      })
       toast.success(
         language === "my"
           ? `အပိုင်း ${toBurmeseDigits(index + 1)} အသံပြန်ထုတ်ပြီးပါပြီ`
@@ -939,17 +965,17 @@ export function VoiceoverPage() {
   return (
     <div className="mx-auto w-full max-w-2xl pb-8 space-y-5">
       {/* Minimal Editorial Header */}
-      <div className="flex items-center justify-between gap-3 px-0.5">
-        <div className="min-w-0">
-          <h1 className="text-lg sm:text-xl font-semibold tracking-tight text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-0.5">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-base sm:text-xl font-semibold tracking-tight text-[#1C1917] dark:text-[#F5F5F4] font-myanmar truncate">
             {t(language, "nav.voiceover")}
           </h1>
-          <p className="text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+          <p className="text-[11px] sm:text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar truncate">
             {t(language, "booth.scriptPlaceholder")}
           </p>
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
           <button
             type="button"
             onClick={() => {
@@ -958,20 +984,20 @@ export function VoiceoverPage() {
             }}
             aria-pressed={liveModeEnabled}
             className={cn(
-              "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-all active:scale-95 cursor-pointer font-myanmar",
+              "inline-flex h-8 sm:h-9 shrink-0 items-center gap-1 sm:gap-1.5 rounded-full border px-2.5 sm:px-3 text-[11px] sm:text-xs font-medium transition-all active:scale-95 cursor-pointer font-myanmar",
               liveModeEnabled
                 ? "border-[#E11D48] bg-[#E11D48]/10 text-[#E11D48]"
                 : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46]"
             )}
           >
-            <Radio className={cn("h-3.5 w-3.5", liveModeEnabled && "animate-pulse")} />
+            <Radio className={cn("h-3 w-3 sm:h-3.5 sm:w-3.5", liveModeEnabled && "animate-pulse")} />
             <span>{t(language, "booth.liveMode")}</span>
           </button>
 
           <button
             type="button"
             onClick={() => setHistoryOpen(true)}
-            className="relative inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-3.5 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] transition-all hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] active:scale-95 cursor-pointer font-myanmar"
+            className="relative inline-flex h-8 sm:h-9 shrink-0 items-center gap-1 sm:gap-1.5 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-2.5 sm:px-3.5 text-[11px] sm:text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] transition-all hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] active:scale-95 cursor-pointer font-myanmar"
           >
             <span>{t(language, "booth.historyBtn")}</span>
           </button>
@@ -980,11 +1006,11 @@ export function VoiceoverPage() {
             type="button"
             onClick={() => setSettingsOpen(true)}
             className={cn(
-              "relative inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-all active:scale-95 cursor-pointer font-myanmar",
+              "relative inline-flex h-8 sm:h-9 shrink-0 items-center gap-1 sm:gap-1.5 rounded-full border px-2.5 sm:px-3.5 text-[11px] sm:text-xs font-medium transition-all active:scale-95 cursor-pointer font-myanmar",
               "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46]"
             )}
           >
-            <Settings2 className="h-3.5 w-3.5 text-[#57534E] dark:text-[#A1A1AA]" />
+            <Settings2 className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-[#57534E] dark:text-[#A1A1AA]" />
             <span>{t(language, "booth.settingsBtn")}</span>
             {hasActiveSettings && (
               <span className="h-1.5 w-1.5 rounded-full bg-amber-600 dark:bg-amber-400" />
@@ -1607,7 +1633,7 @@ export function VoiceoverPage() {
                           className="rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-2.5 space-y-2"
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
                               <span className="inline-flex items-center rounded-md bg-[#F0EDE8] dark:bg-[#3F3F46] px-2 py-0.5 text-[11px] font-semibold tabular-nums text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
                                 {language === "my"
                                   ? `အပိုင်း ${toBurmeseDigits(idx + 1)}`
@@ -1616,6 +1642,13 @@ export function VoiceoverPage() {
                               <span className="text-[11px] tabular-nums text-[#57534E] dark:text-[#A1A1AA]">
                                 {seg.durationSeconds.toFixed(1)}s
                               </span>
+                              {editedSegmentIds[seg.id] && (
+                                <span className="inline-flex items-center rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300 font-myanmar">
+                                  {language === "my"
+                                    ? "ပြင်ဆင်ထားသည် — ပြန်ထုတ်ရန်လိုသည်"
+                                    : "Edited — Regenerate"}
+                                </span>
+                              )}
                             </div>
 
                             <div className="flex items-center gap-1.5">

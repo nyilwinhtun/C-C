@@ -319,8 +319,16 @@ export function TranscriberPage() {
       })
       setPolishedResult({ kind: "voice_content", text: res.content })
 
-      const tts = await generateBurmeseVoiceover(res.content, "female", 1.0, {
-        deliveryTone: "storytelling",
+      const { selectedVoice, voiceSpeed, voiceDeliveryTone } = useContentStore.getState()
+      const voiceType: "female" | "male" | "deep_male" =
+        selectedVoice === "ko_khant"
+          ? "deep_male"
+          : selectedVoice === "thiha"
+            ? "male"
+            : "female"
+
+      const tts = await generateBurmeseVoiceover(res.content, voiceType, voiceSpeed, {
+        deliveryTone: voiceDeliveryTone ?? "normal",
       })
       if (polishedAudioUrlRef.current) {
         URL.revokeObjectURL(polishedAudioUrlRef.current)
@@ -621,6 +629,34 @@ export function TranscriberPage() {
                     : "Polish & Record Voice"}
                 </span>
               </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!transcript.trim()}
+                onClick={() => {
+                  setVoiceoverDraftScript(transcript)
+                  setActivePageKey("voiceover")
+                }}
+                className="gap-1.5 text-xs rounded-full"
+              >
+                <span>{isMy ? "🎙️ အသံသွင်းခန်းသို့ ပို့မည်" : "🎙️ Send to Studio"}</span>
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!transcript.trim()}
+                onClick={() => {
+                  setDraftInput({ topic: transcript, platform: "facebook", contentType: "post_caption" })
+                  setActivePageKey("text")
+                }}
+                className="gap-1.5 text-xs rounded-full"
+              >
+                <span>{isMy ? "✍️ Post Writer သို့ ပို့မည်" : "✍️ Send to Post Writer"}</span>
+              </Button>
             </div>
           </div>
         </CardContent>
@@ -659,7 +695,12 @@ export function TranscriberPage() {
             {polishedAudio && (
               <IosAudioPlayer
                 src={polishedAudio.audioUrl}
-                title={isMy ? "စာဖတ်သူ - နီလာ" : "Narrator - Nilar"}
+                title={(() => {
+                  const v = useContentStore.getState().selectedVoice
+                  if (v === "ko_khant") return isMy ? "စာဖတ်သူ - ကိုခန့်" : "Narrator - Ko Khant"
+                  if (v === "thiha") return isMy ? "စာဖတ်သူ - သီဟ" : "Narrator - Thiha"
+                  return isMy ? "စာဖတ်သူ - နီလာ" : "Narrator - Nilar"
+                })()}
                 initialDuration={polishedAudio.durationSeconds}
                 fileExtension={polishedAudio.fileExtension}
                 compact
@@ -714,7 +755,11 @@ export function TranscriberPage() {
                   type="button"
                   size="sm"
                   onClick={() => {
-                    setDraftInput({ topic: transcript, platform: "facebook", contentType: "post_caption" })
+                    setDraftInput({
+                      topic: polishedResult.text.trim() || transcript,
+                      platform: "facebook",
+                      contentType: "post_caption",
+                    })
                     setActivePageKey("text")
                   }}
                   className="gap-1.5 text-xs"

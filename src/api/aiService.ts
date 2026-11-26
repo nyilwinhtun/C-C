@@ -555,6 +555,9 @@ export function isGeminiQuotaOrRateLimitError(err: unknown): boolean {
   if (err instanceof ApiError) {
     if (err.status === 429 || err.isQuotaExceeded) return true
   }
+  if (typeof err === "object" && err !== null && "status" in err) {
+    if ((err as { status?: unknown }).status === 429) return true
+  }
   if (err instanceof Error) {
     const msg = err.message.toLowerCase()
     return (
@@ -564,6 +567,7 @@ export function isGeminiQuotaOrRateLimitError(err: unknown): boolean {
       msg.includes("resource_exhausted") ||
       msg.includes("too many requests") ||
       msg.includes("perday") ||
+      msg.includes("per_day") ||
       msg.includes("perminute") ||
       err.message.includes("အခမဲ့ အသုံးပြုခွင့် ပြည့်သွားပါပြီ") ||
       err.message.includes("ကန့်သတ်ချက် ပြည့်သွားပါသည်")
@@ -572,12 +576,30 @@ export function isGeminiQuotaOrRateLimitError(err: unknown): boolean {
   return false
 }
 
+const DAILY_QUOTA_COOLDOWN_MS = 6 * 60 * 60 * 1000
+const MINUTE_RATE_LIMIT_COOLDOWN_MS = 60_000
+
+function getGeminiQuotaCooldownMs(err: unknown): number {
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase()
+    if (
+      msg.includes("perday") ||
+      msg.includes("per_day") ||
+      msg.includes("requestsperday") ||
+      msg.includes("daily")
+    ) {
+      return DAILY_QUOTA_COOLDOWN_MS
+    }
+  }
+  return MINUTE_RATE_LIMIT_COOLDOWN_MS
+}
+
 /**
  * Shared Gemini Multi-Key Auto-Rotation wrapper.
  * Starts at `activeGeminiKeyIndex` in `getGeminiKeyPool()`.
  * When a request fails with HTTP 429 / quota exceeded, marks that key as cooling down,
  * rotates to the next key in the pool, shows a subtle non-blocking toast, and retries seamlessly.
- * Only throws the quota-exhausted error if every saved key in the pool has been tried and failed.
+ * Fails fast without toast spam if all keys in the pool are cooling down.
  */
 export async function executeWithGeminiKeyRotation<T>(
   fn: (apiKey: string, keyIndex: number) => Promise<T>,
@@ -593,6 +615,15 @@ export async function executeWithGeminiKeyRotation<T>(
 
   if (pool.length === 0) {
     return await fn(extraFallback, 0)
+  }
+
+  // Fail fast without firing doomed requests or spamming rotation toasts
+  if (pool.every((k) => store.isGeminiKeyCoolingDown(k))) {
+    throw new ApiError(
+      429,
+      "Gemini API Key အားလုံး ခေတ္တကန့်သတ်ချက် ပြည့်နေပါသည် — ခဏစောင့်ပြီး ပြန်စမ်းပါ။",
+      true
+    )
   }
 
   let currentIdx =
@@ -626,25 +657,29 @@ export async function executeWithGeminiKeyRotation<T>(
       }
 
       if (isGeminiQuotaOrRateLimitError(err)) {
-        if (attempt < pool.length - 1) {
-          const rotatedIdx = useContentStore
-            .getState()
-            .rotateGeminiKey(currentKey)
+        const cooldownMs = getGeminiQuotaCooldownMs(err)
+        const rotatedIdx = useContentStore
+          .getState()
+          .rotateGeminiKey(currentKey, cooldownMs)
+        const updatedStore = useContentStore.getState()
+        const hasReadyKey = pool.some((k) => !updatedStore.isGeminiKeyCoolingDown(k))
+
+        if (attempt < pool.length - 1 && hasReadyKey) {
           const nextIdx =
-            rotatedIdx !== currentIdx
+            rotatedIdx !== currentIdx && !updatedStore.isGeminiKeyCoolingDown(pool[rotatedIdx])
               ? rotatedIdx
-              : (currentIdx + 1) % pool.length
-          if (nextIdx !== rotatedIdx) {
-            useContentStore.getState().setActiveGeminiKeyIndex(nextIdx)
+              : pool.findIndex((k) => !updatedStore.isGeminiKeyCoolingDown(k))
+          if (nextIdx >= 0) {
+            if (nextIdx !== rotatedIdx) {
+              updatedStore.setActiveGeminiKeyIndex(nextIdx)
+            }
+            currentIdx = nextIdx
+            toast.info(
+              `🔄 API Key #${currentIdx + 1} သို့ အလိုအလျောက် ပြောင်းလဲထုတ်ပေးနေပါသည်...`
+            )
+            continue
           }
-          currentIdx = nextIdx
-          toast.info(
-            `🔄 API Key #${currentIdx + 1} သို့ အလိုအလျောက် ပြောင်းလဲထုတ်ပေးနေပါသည်...`
-          )
-          continue
         }
-        // Final key in the pool also hit 429 — record its cooldown before rethrowing
-        useContentStore.getState().rotateGeminiKey(currentKey)
       }
       throw err
     }
