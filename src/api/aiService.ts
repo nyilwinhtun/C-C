@@ -2780,6 +2780,46 @@ Output ONLY the refined plain text.`
   return sanitizePlainText(raw)
 }
 
+/**
+ * Rewrite formal written Burmese scripts into natural, everyday spoken Burmese
+ * with breathing commas (၊) and sentence breaks (။) for studio-grade AI TTS.
+ */
+export async function polishSpokenBurmeseForTTS(rawScript: string): Promise<string> {
+  const current = rawScript.trim()
+  if (!current) return ""
+
+  const { apiKey } = getAiConfig()
+  if (!apiKey.trim()) {
+    throw new ApiError(401, "API Key ထည့်သွင်းထားခြင်းမရှိသေးပါ — Settings တွင် API Key ထည့်ပေးပါ။")
+  }
+
+  const systemPrompt = `You are a native Yangon Myanmar voiceover script adapter.
+Your job is to convert formal written Burmese scripts into natural, everyday spoken Burmese (စကားပြောဟန်) ready for AI voiceover synthesis.
+
+Strict Rules:
+- Replace formal literary/written Burmese particles and connectors with natural spoken equivalents:
+  - "သည်" / "ဖြစ်ပါသည်" -> "တယ်" / "ဖြစ်ပါတယ်"
+  - "၏" -> "ရဲ့"
+  - "၌" / "တွင်" -> "မှာ"
+  - "၍" -> "ပြီး" / "လို့"
+  - "သော်လည်း" / "သို့သော်" -> "ဒါပေမဲ့"
+  - "ပြုလုပ်နိုင်ပါသည်" -> "လုပ်လို့ရပါတယ်"
+- Insert natural breathing commas ("၊") at clause boundaries and clear sentence breaks ("။") at the end of thoughts so TTS pauses naturally.
+- Preserve 100% of the core meaning, facts, numbers, prices, phone numbers, and English brand/product names exactly.
+- Keep any [pause Xs] tags or speaker labels (e.g. "Nilar:", "Thiha:") intact if present.
+- NEVER use Markdown (*, **, #, backticks) or add any preamble, quotes, or explanation.
+- Output ONLY the rewritten spoken Burmese script.`
+
+  const userPrompt = `Rewrite this script into natural everyday spoken Burmese with breathing commas (၊) and sentence breaks (။):
+
+"""
+${current}
+"""`
+
+  const raw = await runEditorialModelCall(systemPrompt, userPrompt, false)
+  return sanitizePlainText(raw)
+}
+
 export async function generateEditorialHooks(
   request: EditorialHooksRequest
 ): Promise<string[]> {

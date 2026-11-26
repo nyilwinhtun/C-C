@@ -74,6 +74,86 @@ export function getAudioContextConstructor(): typeof AudioContext | null {
   )
 }
 
+function getOfflineAudioContextConstructor(): typeof OfflineAudioContext | null {
+  if (typeof window === "undefined") return null
+  return (
+    window.OfflineAudioContext ||
+    (window as unknown as { webkitOfflineAudioContext?: typeof OfflineAudioContext })
+      .webkitOfflineAudioContext ||
+    null
+  )
+}
+
+/**
+ * Apply lightweight studio vocal clarity EQ (+2.5 dB peaking at 3500 Hz, Q 1.2)
+ * and gentle dynamic leveling via OfflineAudioContext, then encode to 16-bit mono WAV.
+ * Falls back cleanly to raw encodeMonoWav16Bit if OfflineAudioContext is unavailable.
+ */
+export async function applyStudioVocalEqToFloat32(
+  samples: Float32Array,
+  sampleRate: number
+): Promise<Blob> {
+  if (samples.length === 0) {
+    return encodeMonoWav16Bit(samples, sampleRate)
+  }
+
+  const OfflineCtx = getOfflineAudioContextConstructor()
+  if (!OfflineCtx) {
+    return encodeMonoWav16Bit(samples, sampleRate)
+  }
+
+  try {
+    const offlineCtx = new OfflineCtx(1, samples.length, sampleRate)
+    const buffer = offlineCtx.createBuffer(1, samples.length, sampleRate)
+    buffer.copyToChannel(new Float32Array(samples), 0)
+
+    const source = offlineCtx.createBufferSource()
+    source.buffer = buffer
+
+    // Vocal presence boost so Burmese consonants sound crisp on iPhone speakers
+    const presenceFilter = offlineCtx.createBiquadFilter()
+    presenceFilter.type = "peaking"
+    presenceFilter.frequency.value = 3500
+    presenceFilter.gain.value = 2.5
+    presenceFilter.Q.value = 1.2
+
+    // Gentle dynamic leveling
+    const compressor = offlineCtx.createDynamicsCompressor()
+    compressor.threshold.value = -18
+    compressor.knee.value = 12
+    compressor.ratio.value = 3
+    compressor.attack.value = 0.005
+    compressor.release.value = 0.12
+
+    source.connect(presenceFilter)
+    presenceFilter.connect(compressor)
+    compressor.connect(offlineCtx.destination)
+
+    source.start(0)
+    const rendered = await offlineCtx.startRendering()
+    return encodeMonoWav16Bit(rendered.getChannelData(0), rendered.sampleRate)
+  } catch {
+    return encodeMonoWav16Bit(samples, sampleRate)
+  }
+}
+
+/**
+ * Convert 16-bit signed little-endian mono PCM bytes into a studio-EQ'd WAV Blob.
+ */
+export async function applyStudioVocalEqToPcm16(
+  pcmBytes: Uint8Array,
+  sampleRate = 24000
+): Promise<Blob> {
+  const sampleCount = Math.floor(pcmBytes.byteLength / 2)
+  const floats = new Float32Array(sampleCount)
+  const view = new DataView(pcmBytes.buffer, pcmBytes.byteOffset, sampleCount * 2)
+  for (let i = 0; i < sampleCount; i += 1) {
+    const int16 = view.getInt16(i * 2, true)
+    floats[i] = int16 < 0 ? int16 / 0x8000 : int16 / 0x7fff
+  }
+  return applyStudioVocalEqToFloat32(floats, sampleRate)
+}
+
 /**
  * Synchronously unlock Web Audio and HTML5 <audio> playback inside a user
  * gesture (onClick / onTouchStart) so iOS Safari allows audio playback and
@@ -470,7 +550,7 @@ export function createWavAudioRecorder(
         offset += chunk.length
       }
 
-      const blob = encodeMonoWav16Bit(merged, sampleRate)
+      const blob = await applyStudioVocalEqToFloat32(merged, sampleRate)
       const durationSeconds = merged.length / sampleRate
 
       return {

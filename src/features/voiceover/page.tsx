@@ -13,11 +13,12 @@ import {
   Radio,
   RefreshCw,
   Settings2,
+  Sparkles,
   Square,
   Upload,
 } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
-import { transcribeAudioWithGemini } from "@/api/aiService"
+import { polishSpokenBurmeseForTTS, transcribeAudioWithGemini } from "@/api/aiService"
 import {
   VOICE_DELIVERY_PRESETS,
   cleanVoiceoverText,
@@ -470,7 +471,9 @@ export function VoiceoverPage() {
   }, [showTeleprompter, teleprompterScrolling, teleprompterSpeed])
 
   const hasActiveSettings =
-    voiceSpeed !== 1.0 || voiceDialogueMode || voiceMusicPreset !== "none"
+    voiceSpeed !== 1.05 || voiceDialogueMode || voiceMusicPreset !== "none"
+
+  const [isPolishingSpoken, setIsPolishingSpoken] = useState(false)
 
   const finalizeMyVoiceBlob = async (
     rawBlob: Blob,
@@ -722,6 +725,35 @@ export function VoiceoverPage() {
     }
 
     await generateStudioVoiceover(scriptOverride)
+  }
+
+  const handlePolishSpokenBurmese = async () => {
+    const raw = voiceScriptText.trim()
+    if (!raw || isPolishingSpoken) return
+    triggerHaptic(8)
+    setIsPolishingSpoken(true)
+    try {
+      const polished = await polishSpokenBurmeseForTTS(raw)
+      if (polished) {
+        setSelfRecordedNeedsTranscribe(false)
+        setVoiceScriptText(polished)
+        toast.success(
+          language === "my"
+            ? "စကားပြောဟန်သို့ ပြောင်းလဲပြီးပါပြီ"
+            : "Polished into natural spoken Burmese"
+        )
+      }
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : language === "my"
+            ? "စကားပြောဟန်ပြောင်းရာတွင် အဆင်မပြေပါ"
+            : "Could not polish script"
+      toast.error(msg)
+    } finally {
+      setIsPolishingSpoken(false)
+    }
   }
 
   const handleDownloadActiveAudio = () => {
@@ -1131,6 +1163,29 @@ export function VoiceoverPage() {
           </div>
         ) : (
           <div className="flex flex-col">
+            <div className="flex items-center justify-between gap-2 border-b border-[#E7E5E4]/70 dark:border-[#3F3F46]/70 bg-[#FAF8F5]/60 dark:bg-[#18181B]/40 px-4 py-2">
+              <span className="text-xs font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                {language === "my" ? "အသံသွင်းစာသား" : "Recording Script"}
+              </span>
+              <button
+                type="button"
+                onClick={() => void handlePolishSpokenBurmese()}
+                disabled={!voiceScriptText.trim() || isPolishingSpoken || ttsStatus === "generating"}
+                title="စကားပြောဟန်ပြောင်းမည် (Spoken Burmese Polish)"
+                className={cn(
+                  "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium transition-all active:scale-95 cursor-pointer font-myanmar",
+                  "border-amber-200 dark:border-amber-800/60 bg-amber-50/90 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/50",
+                  "disabled:opacity-45 disabled:pointer-events-none"
+                )}
+              >
+                {isPolishingSpoken ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3 w-3" />
+                )}
+                <span>✨ ပြောဟန်ပြောင်းမည်</span>
+              </button>
+            </div>
             <Textarea
               value={voiceScriptText}
               onChange={(e) => {

@@ -1,11 +1,16 @@
 import { sanitizeSpeechText } from "@/components/shared/read-aloud-button"
 import { encodeMonoWav16Bit } from "@/lib/audioProcessor"
-import { decodeAudioBlob, getAudioContextConstructor, unlockIosAudio } from "@/lib/iosAudio"
+import {
+  applyStudioVocalEqToPcm16,
+  decodeAudioBlob,
+  getAudioContextConstructor,
+  unlockIosAudio,
+} from "@/lib/iosAudio"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
 
 export type BurmeseVoiceType = "female" | "male" | "deep_male"
-export type VoiceoverSpeed = 0.85 | 0.9 | 1.0 | 1.1 | 1.15 | 1.2
+export type VoiceoverSpeed = 0.85 | 0.9 | 1.0 | 1.05 | 1.1 | 1.15 | 1.2
 export type VoiceDeliveryTone = "normal" | "promo" | "storytelling" | "educational"
 export type SoundEffectType = "none" | "pop" | "whoosh" | "cash_ding"
 
@@ -81,8 +86,8 @@ export const BURMESE_VOICE_PRESETS: Record<BurmeseVoiceType, BurmeseVoicePreset>
     label: "Female (Nilar)",
     labelMy: "မိန်းကလေးအသံ (Nilar)",
     neuralVoice: "my-MM-NilarNeural",
-    geminiVoice: "Aoede",
-    geminiFallbackVoice: "Kore",
+    geminiVoice: "Zephyr",
+    geminiFallbackVoice: "Aoede",
   },
   male: {
     id: "male",
@@ -90,19 +95,19 @@ export const BURMESE_VOICE_PRESETS: Record<BurmeseVoiceType, BurmeseVoicePreset>
     labelMy: "ယောက်ျားလေးအသံ (Thiha)",
     neuralVoice: "my-MM-ThihaNeural",
     geminiVoice: "Puck",
-    geminiFallbackVoice: "Charon",
+    geminiFallbackVoice: "Fenrir",
   },
   deep_male: {
     id: "deep_male",
     label: "Deep Male (Ko Khant)",
     labelMy: "အသံဩဇာ (ကိုခန့်)",
     neuralVoice: "my-MM-ThihaNeural",
-    geminiVoice: "Charon",
-    geminiFallbackVoice: "Fenrir",
+    geminiVoice: "Fenrir",
+    geminiFallbackVoice: "Puck",
   },
 }
 
-export const VOICEOVER_SPEEDS: VoiceoverSpeed[] = [0.9, 1.0, 1.1, 1.2]
+export const VOICEOVER_SPEEDS: VoiceoverSpeed[] = [0.9, 1.0, 1.05, 1.1, 1.2]
 
 export interface VoiceoverSegmentItem {
   id: string
@@ -744,6 +749,10 @@ function getSpeedPromptInstruction(speed: VoiceoverSpeed): string {
       return "Speak at a calm, unhurried, deliberate pace (0.85x speed)."
     case 0.9:
       return "Speak at a slightly slower, relaxed, clear pace (0.9x speed)."
+    case 1.0:
+      return "Speak at a natural, conversational pace (1.0x speed)."
+    case 1.05:
+      return "Speak at a crisp, natural, lively conversational pace (1.05x baseline speed) so Burmese syllables flow smoothly without dragging."
     case 1.1:
       return "Speak at a slightly brisk, energetic social-media pace (1.1x speed)."
     case 1.15:
@@ -751,7 +760,7 @@ function getSpeedPromptInstruction(speed: VoiceoverSpeed): string {
     case 1.2:
       return "Speak at a fast, engaging, punchy TikTok/Reels pace (1.2x speed)."
     default:
-      return "Speak at a natural, conversational pace (1.0x speed)."
+      return "Speak at a crisp, natural, lively conversational pace (1.05x baseline speed) so Burmese syllables flow smoothly without dragging."
   }
 }
 
@@ -1159,17 +1168,26 @@ async function synthesizeGeminiChunk(
         ? "Thiha"
         : "Nilar"
 
+  const characterCadenceNote =
+    preset.id === "deep_male"
+      ? "Speak with a brisk, articulate, confident male narrator cadence—clear and energetic, never slow or flat."
+      : ""
+
   // Send ONLY the exact clean script text to be spoken—never include previous-sentence
   // reference text, which causes Gemini TTS to read it aloud or stutter/repeat syllables.
   const prompt = [
     `You are ${narratorName}, a native Yangon Myanmar (Burmese) professional voiceover narrator.`,
     tonePreset.styleInstruction,
+    characterCadenceNote,
     `Maintain a steady, consistent vocal pitch and pace. ${getSpeedPromptInstruction(speed)}`,
+    "Pause briefly at Burmese comma marks (၊) for natural breaths and pause clearly at sentence-ending marks (။).",
     "Speak natural Yangon Burmese, and pronounce any English brand or shop names cleanly in natural English.",
     "Read ONLY the exact script below aloud without adding any intro or extra words:",
     "",
     chunkText,
-  ].join("\n")
+  ]
+    .filter((line, idx) => idx >= 4 || line !== "")
+    .join("\n")
 
   const headers = {
     "Content-Type": "application/json",
@@ -1351,25 +1369,27 @@ async function synthesizeWithGemini(
   }
 
   const timestamp = Date.now()
-  const segments: VoiceoverSegmentItem[] = chunkResults.map((res, idx) => {
-    const segBlob =
-      res.kind === "pcm"
-        ? pcmToWavBlob(res.pcmBytes, TTS_SAMPLE_RATE, TTS_NUM_CHANNELS, TTS_BITS_PER_SAMPLE)
-        : res.blob
-    const durationSeconds =
-      res.kind === "pcm"
-        ? res.pcmBytes.byteLength / TTS_BYTE_RATE
-        : Math.max(0.5, estimateSpokenDurationSeconds(chunks[idx], speed))
-    return {
-      id: `seg-${timestamp}-${idx}`,
-      text: chunks[idx],
-      blob: segBlob,
-      audioUrl: URL.createObjectURL(segBlob),
-      durationSeconds,
-      provider: "gemini",
-      pcmBytes: res.kind === "pcm" ? res.pcmBytes : undefined,
-    }
-  })
+  const segments: VoiceoverSegmentItem[] = await Promise.all(
+    chunkResults.map(async (res, idx) => {
+      const segBlob =
+        res.kind === "pcm"
+          ? await applyStudioVocalEqToPcm16(res.pcmBytes, TTS_SAMPLE_RATE)
+          : res.blob
+      const durationSeconds =
+        res.kind === "pcm"
+          ? res.pcmBytes.byteLength / TTS_BYTE_RATE
+          : Math.max(0.5, estimateSpokenDurationSeconds(chunks[idx], speed))
+      return {
+        id: `seg-${timestamp}-${idx}`,
+        text: chunks[idx],
+        blob: segBlob,
+        audioUrl: URL.createObjectURL(segBlob),
+        durationSeconds,
+        provider: "gemini" as const,
+        pcmBytes: res.kind === "pcm" ? res.pcmBytes : undefined,
+      }
+    })
+  )
 
   if (chunkResults.length === 1) {
     const single = chunkResults[0]
@@ -1391,8 +1411,13 @@ async function synthesizeWithGemini(
 
   if (chunkResults.every((r) => r.kind === "pcm")) {
     const pcmChunks = chunkResults.map((r) => (r.kind === "pcm" ? r.pcmBytes : new Uint8Array(0)))
+    const mergedRawWav = concatenatePcmBuffersToWav(pcmChunks, 120)
+    const parsedMerged = extractPcmFromWavBytes(new Uint8Array(await mergedRawWav.arrayBuffer()))
+    const studioMergedBlob = parsedMerged
+      ? await applyStudioVocalEqToPcm16(parsedMerged.pcmBytes, TTS_SAMPLE_RATE)
+      : mergedRawWav
     return {
-      blob: concatenatePcmBuffersToWav(pcmChunks, 120),
+      blob: studioMergedBlob,
       mimeType: "audio/wav",
       fileExtension: "wav",
       segments,
@@ -2466,7 +2491,7 @@ export async function regenerateSingleVoiceoverSegment(params: {
       )
       const blob =
         res.kind === "pcm"
-          ? pcmToWavBlob(res.pcmBytes, TTS_SAMPLE_RATE, TTS_NUM_CHANNELS, TTS_BITS_PER_SAMPLE)
+          ? await applyStudioVocalEqToPcm16(res.pcmBytes, TTS_SAMPLE_RATE)
           : res.blob
       const durationSeconds =
         res.kind === "pcm"

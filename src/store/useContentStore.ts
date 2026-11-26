@@ -318,7 +318,7 @@ export const useContentStore = create<ContentState>()(
       generatedVideoResult: null,
       voiceScriptText: "",
       selectedVoice: "self",
-      voiceSpeed: 1.0,
+      voiceSpeed: 1.05,
       voiceDialogueMode: false,
       voiceMusicPreset: "none",
       voiceDeliveryTone: "normal",
