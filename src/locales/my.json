@@ -719,5 +719,8 @@
   "presenter3d.noPhotoError": "ဇာတ်ကောင်ဓာတ်ပုံ အရင်တင်ပါ။",
   "presenter3d.captionToggle": "စာတန်းထိုး ပြမည်",
   "presenter3d.captionPlaceholder": "ဗီဒီယိုပေါ်တွင် ပြမည့် စာတန်း...",
-  "presenter3d.uploadPhotoFirst": "စတင်ရန် ဇာတ်ကောင်ဓာတ်ပုံ တင်ပါ"
+  "presenter3d.uploadPhotoFirst": "စတင်ရန် ဇာတ်ကောင်ဓာတ်ပုံ တင်ပါ",
+  "dropzone.dropHere": "📂 ဖိုင်ကို ဒီနေရာသို့ ဆွဲချပါ (Drop file here)",
+  "dropzone.unsupported": "ဤဖိုင်အမျိုးအစားကို မထောက်ပံ့ပါ။ ထောက်ပံ့သော ဖိုင်ကို ဆွဲချပါ။",
+  "dropzone.pasted": "📋 ပုံကို Paste ထည့်သွင်းပြီးပါပြီ"
 }

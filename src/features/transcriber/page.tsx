@@ -44,6 +44,7 @@ import { Label } from "@/components/ui/label"
 import { toast } from "@/components/ui/sonner"
 import { Textarea } from "@/components/ui/textarea"
 import { useContentStore } from "@/store/useContentStore"
+import { FileDropzone } from "@/components/shared/file-dropzone"
 import { useUIStore } from "@/store/useUIStore"
 import { IosAudioPlayer } from "@/components/shared/IosAudioPlayer"
 
@@ -281,9 +282,9 @@ export function TranscriberPage() {
     }
   }
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ""
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement> | File) => {
+    const file = e instanceof File ? e : e.target.files?.[0]
+    if (!(e instanceof File)) e.target.value = ""
     if (!file) return
 
     setPreviewFromBlob(file, file.name)
@@ -462,6 +463,11 @@ export function TranscriberPage() {
           </div>
 
           {/* Mobile Recorder Box */}
+          <FileDropzone
+            accept={[".mp3", ".wav", ".m4a", ".webm", ".ogg", "audio/*"]}
+            disabled={isRecording || isTranscribing}
+            onFiles={(f) => void handleFileUpload(f[0])}
+          >
           <div className="rounded-xl border border-border/60 bg-muted/20 p-4 flex flex-col items-center gap-3">
             {/* Waveform Pulse */}
             <div className="flex items-center justify-center gap-1 h-12 w-full max-w-xs">
@@ -536,6 +542,7 @@ export function TranscriberPage() {
               </div>
             )}
           </div>
+          </FileDropzone>
 
           {/* Audio Preview */}
           {audioPreviewUrl && (

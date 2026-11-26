@@ -719,5 +719,8 @@
   "presenter3d.noPhotoError": "Please upload a character photo first.",
   "presenter3d.captionToggle": "Show Live Captions",
   "presenter3d.captionPlaceholder": "Subtitle text shown on the video...",
-  "presenter3d.uploadPhotoFirst": "Upload a character photo to start"
+  "presenter3d.uploadPhotoFirst": "Upload a character photo to start",
+  "dropzone.dropHere": "📂 Drop file here",
+  "dropzone.unsupported": "Unsupported file type. Please drop a supported file.",
+  "dropzone.pasted": "📋 Image pasted successfully"
 }

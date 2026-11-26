@@ -19,6 +19,8 @@ import {
 } from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
 import { toast } from "@/components/ui/sonner"
+import { FileDropzone } from "@/components/shared/file-dropzone"
+import { useImagePaste } from "@/lib/use-image-paste"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -600,9 +602,9 @@ export function Presenter3DPage() {
     swapAvatarController(createBuiltinPresenterController(id))
   }
 
-  const handleUploadAvatarFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ""
+  const handleUploadAvatarFile = async (e: React.ChangeEvent<HTMLInputElement> | File) => {
+    const file = e instanceof File ? e : e.target.files?.[0]
+    if (!(e instanceof File)) e.target.value = ""
     if (!file) return
 
     const ext = file.name.split(".").pop()?.toLowerCase()
@@ -626,9 +628,9 @@ export function Presenter3DPage() {
     }
   }
 
-  const handleUploadCharacterPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ""
+  const handleUploadCharacterPhoto = (e: React.ChangeEvent<HTMLInputElement> | File) => {
+    const file = e instanceof File ? e : e.target.files?.[0]
+    if (!(e instanceof File)) e.target.value = ""
     if (!file) return
     if (!/^image\/(jpeg|png|webp)$/.test(file.type) && !/\.(jpe?g|png|webp)$/i.test(file.name)) {
       toast.error(t(language, "presenter3d.photoInvalid"))
@@ -665,9 +667,9 @@ export function Presenter3DPage() {
     setMouthY(Math.min(1, Math.max(0, (cy - rect.y) / rect.h)))
   }
 
-  const handleUploadBackdropPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ""
+  const handleUploadBackdropPhoto = (e: React.ChangeEvent<HTMLInputElement> | File) => {
+    const file = e instanceof File ? e : e.target.files?.[0]
+    if (!(e instanceof File)) e.target.value = ""
     if (!file) return
 
     const url = URL.createObjectURL(file)
@@ -687,13 +689,18 @@ export function Presenter3DPage() {
     img.src = url
   }
 
-  const handleUploadLocalAudio = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ""
+  const handleUploadLocalAudio = (e: React.ChangeEvent<HTMLInputElement> | File) => {
+    const file = e instanceof File ? e : e.target.files?.[0]
+    if (!(e instanceof File)) e.target.value = ""
     if (!file) return
     stopAudioPlayback()
     setLocalAudioFile({ blob: file, title: file.name })
   }
+
+  useImagePaste((file) => handleUploadCharacterPhoto(file), {
+    enabled: characterKind === "photo",
+    message: t(language, "dropzone.pasted"),
+  })
 
   const handleTogglePreviewPlay = async () => {
     triggerHaptic(10)
@@ -950,6 +957,11 @@ export function Presenter3DPage() {
           </div>
 
           {/* Canvas Preview Container */}
+          <FileDropzone
+            accept={[".jpg", ".jpeg", ".png", ".webp"]}
+            disabled={characterKind !== "photo"}
+            onFiles={(f) => handleUploadCharacterPhoto(f[0])}
+          >
           <div className="flex items-center justify-center rounded-2xl bg-[#EFEAE1]/70 dark:bg-[#09090B]/70 p-3 border border-[#E7E5E4]/80 dark:border-[#27272A]">
             <div
               ref={stageRef}
@@ -1008,6 +1020,7 @@ export function Presenter3DPage() {
               )}
             </div>
           </div>
+          </FileDropzone>
 
           {/* Linked Audio Transport */}
           <div className="rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-3 space-y-2.5">
@@ -1020,16 +1033,18 @@ export function Presenter3DPage() {
                   {activeAudioSource ? activeAudioSource.title : t(language, "presenter3d.noAudioYet")}
                 </p>
               </div>
-              <label className="shrink-0 cursor-pointer inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] px-2.5 py-1.5 text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#FAF8F5] dark:hover:bg-[#18181B]">
-                <Upload className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>{t(language, "presenter3d.uploadAudio")}</span>
-                <input
-                  type="file"
-                  accept="audio/*"
-                  onChange={handleUploadLocalAudio}
-                  className="hidden"
-                />
-              </label>
+              <FileDropzone accept={["audio/*", ".mp3", ".wav", ".m4a", ".ogg", ".webm"]} onFiles={(f) => handleUploadLocalAudio(f[0])}>
+                <label className="shrink-0 cursor-pointer inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] px-2.5 py-1.5 text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#FAF8F5] dark:hover:bg-[#18181B]">
+                  <Upload className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>{t(language, "presenter3d.uploadAudio")}</span>
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={handleUploadLocalAudio}
+                    className="hidden"
+                  />
+                </label>
+              </FileDropzone>
             </div>
 
             {activeAudioSource && (
@@ -1198,16 +1213,18 @@ export function Presenter3DPage() {
 
             {characterKind === "photo" && (
               <div className="space-y-3">
-                <label className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-white/70 dark:bg-[#27272A]/70 py-2.5 px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
-                  <ImagePlus className="h-3.5 w-3.5" />
-                  <span>{t(language, "presenter3d.photoUpload")}</span>
-                  <input
-                    type="file"
-                    accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-                    onChange={handleUploadCharacterPhoto}
-                    className="hidden"
-                  />
-                </label>
+                <FileDropzone accept={[".jpg", ".jpeg", ".png", ".webp"]} onFiles={(f) => handleUploadCharacterPhoto(f[0])}>
+                  <label className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-white/70 dark:bg-[#27272A]/70 py-2.5 px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
+                    <ImagePlus className="h-3.5 w-3.5" />
+                    <span>{t(language, "presenter3d.photoUpload")}</span>
+                    <input
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                      onChange={handleUploadCharacterPhoto}
+                      className="hidden"
+                    />
+                  </label>
+                </FileDropzone>
 
                 {photoDims && (
                   <div className="space-y-2.5 rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-3">
@@ -1319,16 +1336,18 @@ export function Presenter3DPage() {
               </button>
             </div>
 
-            <label className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-white/70 dark:bg-[#27272A]/70 py-2.5 px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
-              <Upload className="h-3.5 w-3.5" />
-              <span>{t(language, "presenter3d.uploadCustomAvatar")}</span>
-              <input
-                type="file"
-                accept=".vrm,.glb"
-                onChange={handleUploadAvatarFile}
-                className="hidden"
-              />
-            </label>
+            <FileDropzone accept={[".vrm", ".glb"]} onFiles={(f) => handleUploadAvatarFile(f[0])}>
+              <label className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-white/70 dark:bg-[#27272A]/70 py-2.5 px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
+                <Upload className="h-3.5 w-3.5" />
+                <span>{t(language, "presenter3d.uploadCustomAvatar")}</span>
+                <input
+                  type="file"
+                  accept=".vrm,.glb"
+                  onChange={handleUploadAvatarFile}
+                  className="hidden"
+                />
+              </label>
+            </FileDropzone>
             </>
             )}
           </div>
@@ -1442,16 +1461,18 @@ export function Presenter3DPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <label className="inline-flex items-center gap-1.5 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-3 py-2 text-xs font-medium cursor-pointer font-myanmar">
-                <ImagePlus className="h-3.5 w-3.5" />
-                <span>{t(language, "presenter3d.uploadBackdropPhoto")}</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleUploadBackdropPhoto}
-                  className="hidden"
-                />
-              </label>
+              <FileDropzone accept={["image/*"]} onFiles={(f) => handleUploadBackdropPhoto(f[0])}>
+                <label className="inline-flex items-center gap-1.5 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-3 py-2 text-xs font-medium cursor-pointer font-myanmar">
+                  <ImagePlus className="h-3.5 w-3.5" />
+                  <span>{t(language, "presenter3d.uploadBackdropPhoto")}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleUploadBackdropPhoto}
+                    className="hidden"
+                  />
+                </label>
+              </FileDropzone>
 
               {backdrop === "photo" && (
                 <button

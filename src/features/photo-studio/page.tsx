@@ -33,6 +33,8 @@ import { cn } from "@/lib/utils"
 import { t } from "@/locales/translations"
 import { generateProductScene, suggestFromPhoto } from "@/api/aiService"
 import { useContentStore } from "@/store/useContentStore"
+import { FileDropzone } from "@/components/shared/file-dropzone"
+import { useImagePaste } from "@/lib/use-image-paste"
 import { useUIStore } from "@/store/useUIStore"
 import { isShoppingCategory } from "@/types"
 import { renderPosterCanvas } from "./posterRenderer"
@@ -398,6 +400,10 @@ export function PhotoStudioPage() {
     [isMy]
   )
 
+  useImagePaste((file) => handleImageFile(file, "primary"), {
+    message: t(language, "dropzone.pasted"),
+  })
+
   const handleRemoveBackground = useCallback(async () => {
     const sourceUrl = originalPrimaryDataUrl ?? primaryDataUrl
     if (!sourceUrl) {
@@ -716,6 +722,7 @@ export function PhotoStudioPage() {
             />
           </div>
 
+          <FileDropzone accept={["image/*"]} onFiles={(f) => handleImageFile(f[0], "primary")}>
           {/* Quick Image Upload Strip */}
           <input
             ref={primaryInputRef}
@@ -859,6 +866,7 @@ export function PhotoStudioPage() {
             )}
             </>
           )}
+          </FileDropzone>
         </div>
 
         {/* Compact Horizontal-Pill Tabbed Controls */}

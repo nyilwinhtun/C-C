@@ -52,6 +52,7 @@ import { cn, triggerHaptic } from "@/lib/utils"
 import { t } from "@/locales/translations"
 import { getAudioBlobDurationSeconds } from "@/lib/videoAudioMerger"
 import { useContentStore } from "@/store/useContentStore"
+import { FileDropzone } from "@/components/shared/file-dropzone"
 import { useUIStore } from "@/store/useUIStore"
 import { RecentHistorySheet } from "@/components/shared/recent-history-sheet"
 import { StudioSettingsSheet } from "./StudioSettingsSheet"
@@ -642,9 +643,9 @@ export function VoiceoverPage() {
     }
   }
 
-  const handleUploadAudioFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ""
+  const handleUploadAudioFile = async (e: React.ChangeEvent<HTMLInputElement> | File) => {
+    const file = e instanceof File ? e : e.target.files?.[0]
+    if (!(e instanceof File)) e.target.value = ""
     if (!file) return
 
     const mimeType = file.type || "audio/mpeg"
@@ -1368,6 +1369,21 @@ export function VoiceoverPage() {
       {/* 3. Dynamic Single Primary Action Control */}
       <div className="rounded-[20px] border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] px-5 py-6">
         {selectedVoice === "self" ? (
+          <FileDropzone
+            accept={[".txt", "audio/*", ".mp3", ".wav", ".m4a", ".webm", ".ogg"]}
+            disabled={isRecordingVoice || isTranscribing}
+            onFiles={(f) => {
+              const file = f[0]
+              if (/\.txt$/i.test(file.name) || file.type === "text/plain") {
+                void file.text().then((text) => {
+                  setVoiceScriptText(text)
+                  toast.success(t(language, "booth.toast.audioAdded"))
+                })
+              } else {
+                void handleUploadAudioFile(file)
+              }
+            }}
+          >
           <div className="space-y-4">
             {/* Compact Side-by-Side Record Control + Live Reactive Waveform + Tabular Timer */}
             <div className="flex items-center gap-3.5 sm:gap-4">
@@ -1501,6 +1517,7 @@ export function VoiceoverPage() {
               )}
             </div>
           </div>
+          </FileDropzone>
         ) : (
           <div className="space-y-3">
             <Button
