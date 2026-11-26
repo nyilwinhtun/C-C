@@ -169,6 +169,7 @@ function normalizePageKey(key: string): string {
     case "audiobook":
     case "autocut":
     case "studio":
+    case "presenter3d":
     case "vault":
       return key
     default:

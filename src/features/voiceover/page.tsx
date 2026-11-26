@@ -1576,6 +1576,17 @@ export function VoiceoverPage() {
             shareLabel="Share"
           />
 
+          <Button
+            type="button"
+            onClick={() => {
+              triggerHaptic(10)
+              useUIStore.getState().setActivePageKey("presenter3d")
+            }}
+            className="w-full h-10 rounded-2xl bg-[#1C1917] hover:bg-[#292524] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:hover:bg-[#E7E5E4] dark:text-[#18181B] text-xs sm:text-sm font-semibold font-myanmar cursor-pointer"
+          >
+            <span>{t(language, "booth.create3dVideoBtn")}</span>
+          </Button>
+
           {generatedAudioSource === "my_voice" && (
             <Button
               type="button"

@@ -7,6 +7,7 @@ import {
   Mic,
   PenLine,
   Scissors,
+  Sparkles,
   Video,
   type LucideIcon,
 } from "lucide-react"
@@ -95,6 +96,7 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
     activePillClass: "bg-[#1C1917]/10 dark:bg-[#F5F5F4]/12",
     tabs: [
       { key: "studio", labelKey: "nav.studio", labelMy: "ဓာတ်ပုံစတူဒီယို", labelEn: "Photo Studio", icon: Camera },
+      { key: "presenter3d", labelKey: "nav.presenter3d", labelMy: "3D တင်ဆက်သူ", labelEn: "3D Presenter", icon: Sparkles },
       { key: "autocut", labelKey: "nav.autocut", labelMy: "ဗီဒီယို အသံတိတ်ဖြတ်စက်", labelEn: "Highlight Cutter", icon: Scissors },
     ],
   },

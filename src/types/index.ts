@@ -8,6 +8,7 @@ export type NavItemKey =
   | 'audiobook'
   | 'autocut'
   | 'studio'
+  | 'presenter3d'
   | 'vault'
 
 export interface NavItem {

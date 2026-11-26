@@ -1,0 +1,1237 @@
+"use client"
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import * as THREE from "three"
+import {
+  Download,
+  Film,
+  ImagePlus,
+  Loader2,
+  Mic,
+  Pause,
+  Play,
+  Share2,
+  Sparkles,
+  Square,
+  Upload,
+  User,
+  Video,
+} from "lucide-react"
+import { useShallow } from "zustand/react/shallow"
+import { toast } from "@/components/ui/sonner"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { cn, triggerHaptic } from "@/lib/utils"
+import { t } from "@/locales/translations"
+import { useContentStore } from "@/store/useContentStore"
+import { useUIStore } from "@/store/useUIStore"
+import { formatAudioClockDuration } from "@/api/ttsService"
+import {
+  getAudioContextConstructor,
+  unlockIosAudio,
+} from "@/lib/iosAudio"
+import {
+  createBuiltinPresenterController,
+  createLipSyncAnalyzer,
+  loadCustomAvatarFromFile,
+  type AvatarController,
+  type BuiltinPresenterId,
+  type LipSyncAnalyzer,
+} from "@/lib/vrmLipSync"
+
+type AspectPreset = "9:16" | "1:1"
+type FramingPreset = "upper_body" | "close_up"
+type BackdropPreset = "warm_paper" | "soft_charcoal" | "solid_color" | "photo"
+
+interface ExportedVideoState {
+  url: string
+  blob: Blob
+  mimeType: string
+  extension: "mp4" | "webm"
+  fileName: string
+}
+
+const CANVAS_DIMENSIONS: Record<AspectPreset, { width: number; height: number }> = {
+  "9:16": { width: 720, height: 1280 },
+  "1:1": { width: 1080, height: 1080 },
+}
+
+const VIDEO_MIME_CANDIDATES = [
+  "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+  "video/mp4;codecs=avc1,mp4a",
+  "video/mp4",
+  "video/webm;codecs=vp9,opus",
+  "video/webm;codecs=vp8,opus",
+  "video/webm",
+] as const
+
+function pickVideoRecorderMimeType(): { mimeType: string; extension: "mp4" | "webm" } {
+  if (typeof MediaRecorder === "undefined") {
+    throw new Error("MediaRecorder is not supported in this browser.")
+  }
+  for (const candidate of VIDEO_MIME_CANDIDATES) {
+    try {
+      if (MediaRecorder.isTypeSupported(candidate)) {
+        return {
+          mimeType: candidate,
+          extension: candidate.startsWith("video/mp4") ? "mp4" : "webm",
+        }
+      }
+    } catch {
+      // Ignore unsupported codec query errors
+    }
+  }
+  return { mimeType: "", extension: "webm" }
+}
+
+function createSafeRecorder(stream: MediaStream, mimeType: string): MediaRecorder {
+  const attempts: MediaRecorderOptions[] = mimeType
+    ? [
+        { mimeType, videoBitsPerSecond: 3_500_000, audioBitsPerSecond: 128_000 },
+        { mimeType, videoBitsPerSecond: 3_500_000 },
+        { mimeType },
+      ]
+    : [{ videoBitsPerSecond: 3_500_000 }]
+
+  for (const opts of attempts) {
+    try {
+      return new MediaRecorder(stream, opts)
+    } catch {
+      // Try next fallback option
+    }
+  }
+  return new MediaRecorder(stream)
+}
+
+export function Presenter3DPage() {
+  const { language, setActivePageKey } = useUIStore(
+    useShallow((state) => ({
+      language: state.language,
+      setActivePageKey: state.setActivePageKey,
+    }))
+  )
+
+  const {
+    generatedAudioUrl,
+    generatedAudioBlob,
+    generatedAudioTitle,
+    generatedAudioDuration,
+    selectedVoice,
+    shopProfile,
+  } = useContentStore(
+    useShallow((state) => ({
+      generatedAudioUrl: state.generatedAudioUrl,
+      generatedAudioBlob: state.generatedAudioBlob,
+      generatedAudioTitle: state.generatedAudioTitle,
+      generatedAudioDuration: state.generatedAudioDuration,
+      selectedVoice: state.selectedVoice,
+      shopProfile: state.shopProfile,
+    }))
+  )
+
+  const defaultPreset: BuiltinPresenterId = useMemo(() => {
+    const voice = String(selectedVoice || "").toLowerCase()
+    if (voice.includes("khant") || voice.includes("thiha") || voice.includes("male")) {
+      return "male_kokhant"
+    }
+    return "female_nilar"
+  }, [selectedVoice])
+
+  // Character & Scene state
+  const [avatarMode, setAvatarMode] = useState<"preset" | "custom">("preset")
+  const [presetId, setPresetId] = useState<BuiltinPresenterId>(defaultPreset)
+  const [customAvatarName, setCustomAvatarName] = useState<string>("")
+  const [isLoadingAvatar, setIsLoadingAvatar] = useState(false)
+
+  const [aspectRatio, setAspectRatio] = useState<AspectPreset>("9:16")
+  const [framing, setFraming] = useState<FramingPreset>("upper_body")
+  const [backdrop, setBackdrop] = useState<BackdropPreset>("warm_paper")
+  const [solidColor, setSolidColor] = useState("#F5EFE6")
+  const [blurPhotoBackdrop, setBlurPhotoBackdrop] = useState(true)
+  const [showShopBadge, setShowShopBadge] = useState(Boolean(shopProfile.name.trim()))
+  const [badgeText, setBadgeText] = useState(shopProfile.name.trim() || "")
+
+  // Audio state (linked from Recording Booth or local upload)
+  const [localAudioFile, setLocalAudioFile] = useState<{
+    blob: Blob
+    title: string
+  } | null>(null)
+  const [audioDuration, setAudioDuration] = useState<number>(generatedAudioDuration || 0)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [playbackTime, setPlaybackTime] = useState(0)
+
+  // Video Export state
+  const [isRenderingVideo, setIsRenderingVideo] = useState(false)
+  const [renderProgress, setRenderProgress] = useState(0)
+  const [exportedVideo, setExportedVideo] = useState<ExportedVideoState | null>(null)
+
+  // Refs for Three.js & Canvas compositing
+  const displayCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const glCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
+  const sceneRef = useRef<THREE.Scene | null>(null)
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
+  const avatarRef = useRef<AvatarController | null>(null)
+  const backdropImageRef = useRef<HTMLImageElement | null>(null)
+  const backdropImageUrlRef = useRef<string | null>(null)
+
+  // Refs for Web Audio & Render loop
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const audioBufferRef = useRef<AudioBuffer | null>(null)
+  const activeSourceRef = useRef<AudioBufferSourceNode | null>(null)
+  const lipSyncRef = useRef<LipSyncAnalyzer | null>(null)
+  const playbackStartCtxTimeRef = useRef<number>(0)
+  const isPlayingRef = useRef(false)
+  const isRenderingRef = useRef(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+
+  // Scene appearance refs so animation loop reads latest values without re-creating WebGL context
+  const sceneSettingsRef = useRef({
+    aspectRatio,
+    framing,
+    backdrop,
+    solidColor,
+    blurPhotoBackdrop,
+    showShopBadge,
+    badgeText,
+  })
+  sceneSettingsRef.current = {
+    aspectRatio,
+    framing,
+    backdrop,
+    solidColor,
+    blurPhotoBackdrop,
+    showShopBadge,
+    badgeText,
+  }
+
+  const activeAudioSource = useMemo(() => {
+    if (localAudioFile) {
+      return {
+        blob: localAudioFile.blob,
+        url: null as string | null,
+        title: localAudioFile.title,
+      }
+    }
+    if (generatedAudioBlob || generatedAudioUrl) {
+      return {
+        blob: generatedAudioBlob,
+        url: generatedAudioUrl,
+        title: generatedAudioTitle || t(language, "booth.audioFallbackTitle"),
+      }
+    }
+    return null
+  }, [localAudioFile, generatedAudioBlob, generatedAudioUrl, generatedAudioTitle, language])
+
+  // Keep exported video URL clean
+  useEffect(() => {
+    return () => {
+      if (exportedVideo?.url) {
+        URL.revokeObjectURL(exportedVideo.url)
+      }
+    }
+  }, [exportedVideo])
+
+  // Decode active audio into an AudioBuffer whenever source changes
+  useEffect(() => {
+    let cancelled = false
+    audioBufferRef.current = null
+
+    const decodeSource = async () => {
+      if (!activeAudioSource) {
+        setAudioDuration(0)
+        return
+      }
+      try {
+        const AudioCtx = getAudioContextConstructor()
+        if (!AudioCtx) return
+        if (!audioCtxRef.current) {
+          audioCtxRef.current = new AudioCtx()
+        }
+        let arrayBuf: ArrayBuffer
+        if (activeAudioSource.blob) {
+          arrayBuf = await activeAudioSource.blob.arrayBuffer()
+        } else if (activeAudioSource.url) {
+          const res = await fetch(activeAudioSource.url)
+          arrayBuf = await res.arrayBuffer()
+        } else {
+          return
+        }
+        const decoded = await audioCtxRef.current.decodeAudioData(arrayBuf.slice(0))
+        if (!cancelled) {
+          audioBufferRef.current = decoded
+          setAudioDuration(decoded.duration)
+        }
+      } catch (err) {
+        console.warn("Failed to decode audio for 3D lip-sync:", err)
+      }
+    }
+
+    void decodeSource()
+    return () => {
+      cancelled = true
+    }
+  }, [activeAudioSource])
+
+  const stopAudioPlayback = useCallback(() => {
+    isPlayingRef.current = false
+    setIsPlaying(false)
+    setPlaybackTime(0)
+
+    if (activeSourceRef.current) {
+      try {
+        activeSourceRef.current.onended = null
+        activeSourceRef.current.stop()
+        activeSourceRef.current.disconnect()
+      } catch {
+        // Ignore already stopped source
+      }
+      activeSourceRef.current = null
+    }
+    if (lipSyncRef.current) {
+      lipSyncRef.current.dispose()
+      lipSyncRef.current = null
+    }
+  }, [])
+
+  // Update camera framing when framing or aspect ratio changes
+  const applyCameraFraming = useCallback(
+    (camera: THREE.PerspectiveCamera, currentFraming: FramingPreset, currentAspect: AspectPreset) => {
+      const dims = CANVAS_DIMENSIONS[currentAspect]
+      camera.aspect = dims.width / dims.height
+      camera.fov = currentAspect === "9:16" ? 32 : 30
+
+      if (currentFraming === "close_up") {
+        camera.position.set(0, 1.44, 0.72)
+        camera.lookAt(0, 1.42, 0)
+      } else {
+        camera.position.set(0, 1.28, 1.38)
+        camera.lookAt(0, 1.22, 0)
+      }
+      camera.updateProjectionMatrix()
+    },
+    []
+  )
+
+  // Initialize Three.js WebGLRenderer, Scene, Camera, and Animation/Composite Loop
+  useEffect(() => {
+    const displayCanvas = displayCanvasRef.current
+    if (!displayCanvas) return
+
+    const glCanvas = document.createElement("canvas")
+    glCanvasRef.current = glCanvas
+
+    const renderer = new THREE.WebGLRenderer({
+      canvas: glCanvas,
+      alpha: true,
+      antialias: true,
+      preserveDrawingBuffer: true,
+      powerPreference: "high-performance",
+    })
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+    renderer.outputColorSpace = THREE.SRGBColorSpace
+    renderer.toneMapping = THREE.ACESFilmicToneMapping
+    renderer.toneMappingExposure = 1.08
+    rendererRef.current = renderer
+
+    const scene = new THREE.Scene()
+    sceneRef.current = scene
+
+    // Warm 3-point Studio Lighting
+    const ambientLight = new THREE.AmbientLight(0xfffaf3, 1.25)
+    scene.add(ambientLight)
+
+    const keyLight = new THREE.DirectionalLight(0xfff4e6, 1.85)
+    keyLight.position.set(1.5, 2.4, 2.2)
+    scene.add(keyLight)
+
+    const fillLight = new THREE.DirectionalLight(0xe4e4e7, 0.75)
+    fillLight.position.set(-1.8, 1.6, 1.4)
+    scene.add(fillLight)
+
+    const rimLight = new THREE.DirectionalLight(0xfef3c7, 0.85)
+    rimLight.position.set(0, 2.0, -2.0)
+    scene.add(rimLight)
+
+    const camera = new THREE.PerspectiveCamera(32, 9 / 16, 0.1, 30)
+    cameraRef.current = camera
+
+    // Load initial preset avatar
+    const initialAvatar = createBuiltinPresenterController(defaultPreset)
+    scene.add(initialAvatar.object)
+    avatarRef.current = initialAvatar
+
+    const clock = new THREE.Clock()
+    let rafId = 0
+
+    const renderFrame = () => {
+      rafId = requestAnimationFrame(renderFrame)
+
+      const delta = Math.min(clock.getDelta(), 0.05)
+      const elapsed = clock.elapsedTime
+      const settings = sceneSettingsRef.current
+      const dims = CANVAS_DIMENSIONS[settings.aspectRatio]
+
+      if (displayCanvas.width !== dims.width || displayCanvas.height !== dims.height) {
+        displayCanvas.width = dims.width
+        displayCanvas.height = dims.height
+      }
+      if (glCanvas.width !== dims.width || glCanvas.height !== dims.height) {
+        renderer.setSize(dims.width, dims.height, false)
+        applyCameraFraming(camera, settings.framing, settings.aspectRatio)
+      }
+
+      // Lip-sync weights from active AnalyserNode
+      const lip = lipSyncRef.current
+        ? lipSyncRef.current.update(delta)
+        : { aa: 0, oh: 0, ee: 0, ih: 0, energy: 0 }
+
+      // Update playback progress if playing
+      if (isPlayingRef.current && audioCtxRef.current && audioBufferRef.current) {
+        const current = Math.max(0, audioCtxRef.current.currentTime - playbackStartCtxTimeRef.current)
+        const total = audioBufferRef.current.duration || 1
+        setPlaybackTime(Math.min(current, total))
+        if (isRenderingRef.current) {
+          setRenderProgress(Math.min(99, Math.round((current / total) * 100)))
+        }
+      }
+
+      if (avatarRef.current) {
+        avatarRef.current.update(delta, elapsed, lip)
+      }
+
+      renderer.render(scene, camera)
+
+      // Composite Backdrop + WebGL 3D Character + Shop Badge onto displayCanvas
+      const ctx = displayCanvas.getContext("2d")
+      if (!ctx) return
+
+      ctx.clearRect(0, 0, dims.width, dims.height)
+
+      // 1. Draw Backdrop
+      if (settings.backdrop === "photo" && backdropImageRef.current) {
+        const img = backdropImageRef.current
+        const scale = Math.max(dims.width / img.width, dims.height / img.height)
+        const drawW = img.width * scale
+        const drawH = img.height * scale
+        const drawX = (dims.width - drawW) / 2
+        const drawY = (dims.height - drawH) / 2
+
+        ctx.save()
+        if (settings.blurPhotoBackdrop) {
+          ctx.filter = "blur(14px) brightness(0.92)"
+        }
+        ctx.drawImage(img, drawX - 16, drawY - 16, drawW + 32, drawH + 32)
+        ctx.restore()
+      } else if (settings.backdrop === "soft_charcoal") {
+        const grad = ctx.createRadialGradient(
+          dims.width * 0.5,
+          dims.height * 0.35,
+          dims.width * 0.1,
+          dims.width * 0.5,
+          dims.height * 0.5,
+          dims.height * 0.75
+        )
+        grad.addColorStop(0, "#27272A")
+        grad.addColorStop(1, "#18181B")
+        ctx.fillStyle = grad
+        ctx.fillRect(0, 0, dims.width, dims.height)
+      } else if (settings.backdrop === "solid_color") {
+        ctx.fillStyle = settings.solidColor || "#F5EFE6"
+        ctx.fillRect(0, 0, dims.width, dims.height)
+      } else {
+        // Warm Studio Paper
+        const grad = ctx.createRadialGradient(
+          dims.width * 0.5,
+          dims.height * 0.35,
+          dims.width * 0.1,
+          dims.width * 0.5,
+          dims.height * 0.5,
+          dims.height * 0.8
+        )
+        grad.addColorStop(0, "#FFFDF9")
+        grad.addColorStop(1, "#EFEAE1")
+        ctx.fillStyle = grad
+        ctx.fillRect(0, 0, dims.width, dims.height)
+      }
+
+      // 2. Draw 3D Character WebGL layer
+      ctx.drawImage(glCanvas, 0, 0, dims.width, dims.height)
+
+      // 3. Draw optional Shop Name Badge Overlay
+      const cleanBadge = settings.badgeText.trim()
+      if (settings.showShopBadge && cleanBadge) {
+        const paddingX = 24
+        const badgeHeight = 46
+        ctx.save()
+        ctx.font = "600 22px system-ui, -apple-system, sans-serif"
+        const textWidth = ctx.measureText(cleanBadge).width
+        const pillWidth = Math.min(dims.width - 48, textWidth + paddingX * 2)
+        const pillX = 28
+        const pillY = 28
+
+        ctx.fillStyle =
+          settings.backdrop === "soft_charcoal"
+            ? "rgba(250, 248, 245, 0.92)"
+            : "rgba(24, 24, 27, 0.86)"
+        ctx.beginPath()
+        ctx.roundRect(pillX, pillY, pillWidth, badgeHeight, 23)
+        ctx.fill()
+
+        ctx.fillStyle = settings.backdrop === "soft_charcoal" ? "#18181B" : "#FAF8F5"
+        ctx.textBaseline = "middle"
+        ctx.fillText(cleanBadge, pillX + paddingX, pillY + badgeHeight / 2 + 1, pillWidth - paddingX * 2)
+        ctx.restore()
+      }
+    }
+
+    rafId = requestAnimationFrame(renderFrame)
+
+    return () => {
+      cancelAnimationFrame(rafId)
+      stopAudioPlayback()
+      if (avatarRef.current) {
+        scene.remove(avatarRef.current.object)
+        avatarRef.current.dispose()
+        avatarRef.current = null
+      }
+      renderer.dispose()
+      rendererRef.current = null
+      sceneRef.current = null
+      cameraRef.current = null
+      if (backdropImageUrlRef.current) {
+        URL.revokeObjectURL(backdropImageUrlRef.current)
+        backdropImageUrlRef.current = null
+      }
+      if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
+        void audioCtxRef.current.close()
+        audioCtxRef.current = null
+      }
+    }
+  }, [applyCameraFraming, defaultPreset, stopAudioPlayback])
+
+  // Re-apply camera framing whenever user toggles Upper-Body / Close-Up or Aspect Ratio
+  useEffect(() => {
+    if (cameraRef.current) {
+      applyCameraFraming(cameraRef.current, framing, aspectRatio)
+    }
+  }, [applyCameraFraming, framing, aspectRatio])
+
+  const swapAvatarController = useCallback((next: AvatarController) => {
+    const scene = sceneRef.current
+    if (!scene) {
+      next.dispose()
+      return
+    }
+    if (avatarRef.current) {
+      scene.remove(avatarRef.current.object)
+      avatarRef.current.dispose()
+    }
+    scene.add(next.object)
+    avatarRef.current = next
+  }, [])
+
+  const handleSelectPreset = (id: BuiltinPresenterId) => {
+    triggerHaptic(8)
+    setPresetId(id)
+    setAvatarMode("preset")
+    setCustomAvatarName("")
+    swapAvatarController(createBuiltinPresenterController(id))
+  }
+
+  const handleUploadAvatarFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+
+    const ext = file.name.split(".").pop()?.toLowerCase()
+    if (ext !== "vrm" && ext !== "glb") {
+      toast.error(t(language, "presenter3d.invalidAvatarFile"))
+      return
+    }
+
+    setIsLoadingAvatar(true)
+    try {
+      const controller = await loadCustomAvatarFromFile(file)
+      swapAvatarController(controller)
+      setAvatarMode("custom")
+      setCustomAvatarName(file.name)
+      toast.success(t(language, "presenter3d.avatarLoaded"))
+    } catch (err) {
+      console.error("Failed to load 3D avatar:", err)
+      toast.error(t(language, "presenter3d.avatarLoadError"))
+    } finally {
+      setIsLoadingAvatar(false)
+    }
+  }
+
+  const handleUploadBackdropPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      if (backdropImageUrlRef.current) {
+        URL.revokeObjectURL(backdropImageUrlRef.current)
+      }
+      backdropImageUrlRef.current = url
+      backdropImageRef.current = img
+      setBackdrop("photo")
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      toast.error(t(language, "presenter3d.photoLoadError"))
+    }
+    img.src = url
+  }
+
+  const handleUploadLocalAudio = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+    stopAudioPlayback()
+    setLocalAudioFile({ blob: file, title: file.name })
+  }
+
+  const handleTogglePreviewPlay = async () => {
+    triggerHaptic(10)
+    if (isPlaying) {
+      stopAudioPlayback()
+      return
+    }
+
+    if (!audioBufferRef.current) {
+      toast.error(t(language, "presenter3d.noAudioError"))
+      return
+    }
+
+    unlockIosAudio()
+    const AudioCtx = getAudioContextConstructor()
+    if (!AudioCtx) return
+    if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+      audioCtxRef.current = new AudioCtx()
+    }
+    const ctx = audioCtxRef.current
+    if (ctx.state === "suspended") {
+      await ctx.resume()
+    }
+
+    const source = ctx.createBufferSource()
+    source.buffer = audioBufferRef.current
+
+    const lipSync = createLipSyncAnalyzer({
+      audioContext: ctx,
+      sourceNode: source,
+    })
+    source.connect(ctx.destination)
+
+    activeSourceRef.current = source
+    lipSyncRef.current = lipSync
+    playbackStartCtxTimeRef.current = ctx.currentTime
+    isPlayingRef.current = true
+    setIsPlaying(true)
+
+    source.onended = () => {
+      if (!isRenderingRef.current) {
+        stopAudioPlayback()
+      }
+    }
+
+    source.start(0)
+  }
+
+  const handleRenderVideo = async () => {
+    triggerHaptic(15)
+    if (isRenderingVideo) {
+      // Cancel active render
+      isRenderingRef.current = false
+      setIsRenderingVideo(false)
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop()
+      }
+      stopAudioPlayback()
+      return
+    }
+
+    if (!audioBufferRef.current || !displayCanvasRef.current) {
+      toast.error(t(language, "presenter3d.noAudioError"))
+      return
+    }
+
+    stopAudioPlayback()
+    unlockIosAudio()
+
+    try {
+      const AudioCtx = getAudioContextConstructor()
+      if (!AudioCtx) throw new Error("AudioContext not supported")
+      if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+        audioCtxRef.current = new AudioCtx()
+      }
+      const ctx = audioCtxRef.current
+      if (ctx.state === "suspended") {
+        await ctx.resume()
+      }
+
+      const canvas = displayCanvasRef.current
+      if (typeof canvas.captureStream !== "function") {
+        throw new Error("Canvas captureStream is not supported in this browser.")
+      }
+
+      const canvasStream = canvas.captureStream(30)
+      const audioDest = ctx.createMediaStreamDestination()
+
+      const source = ctx.createBufferSource()
+      source.buffer = audioBufferRef.current
+
+      const lipSync = createLipSyncAnalyzer({
+        audioContext: ctx,
+        sourceNode: source,
+      })
+
+      // Route audio both to MediaStreamDestination (for video recording) and speakers (live monitor)
+      source.connect(audioDest)
+      source.connect(ctx.destination)
+
+      const combinedStream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...audioDest.stream.getAudioTracks(),
+      ])
+
+      const { mimeType, extension } = pickVideoRecorderMimeType()
+      const recorder = createSafeRecorder(combinedStream, mimeType)
+      const chunks: BlobPart[] = []
+
+      recorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) {
+          chunks.push(ev.data)
+        }
+      }
+
+      recorder.onstop = () => {
+        for (const track of combinedStream.getTracks()) {
+          track.stop()
+        }
+        isRenderingRef.current = false
+        setIsRenderingVideo(false)
+        setRenderProgress(100)
+        stopAudioPlayback()
+
+        if (chunks.length === 0) {
+          toast.error(t(language, "presenter3d.renderFailed"))
+          return
+        }
+
+        const finalMime = recorder.mimeType || mimeType || `video/${extension}`
+        const blob = new Blob(chunks, { type: finalMime })
+        const url = URL.createObjectURL(blob)
+        const baseName = (activeAudioSource?.title || "presenter-video")
+          .replace(/[^\w\s-]/g, "")
+          .trim()
+          .replace(/\s+/g, "-")
+          .toLowerCase() || "presenter-video"
+
+        setExportedVideo((prev) => {
+          if (prev?.url) URL.revokeObjectURL(prev.url)
+          return {
+            url,
+            blob,
+            mimeType: finalMime,
+            extension,
+            fileName: `${baseName}-3d.${extension}`,
+          }
+        })
+        toast.success(t(language, "presenter3d.renderSuccess"))
+      }
+
+      mediaRecorderRef.current = recorder
+      activeSourceRef.current = source
+      lipSyncRef.current = lipSync
+      playbackStartCtxTimeRef.current = ctx.currentTime
+      isPlayingRef.current = true
+      isRenderingRef.current = true
+      setIsPlaying(true)
+      setIsRenderingVideo(true)
+      setRenderProgress(0)
+
+      source.onended = () => {
+        if (recorder.state !== "inactive") {
+          recorder.stop()
+        }
+      }
+
+      recorder.start(250)
+      source.start(0)
+    } catch (err) {
+      console.error("3D video render failed:", err)
+      isRenderingRef.current = false
+      setIsRenderingVideo(false)
+      stopAudioPlayback()
+      toast.error(err instanceof Error ? err.message : t(language, "presenter3d.renderFailed"))
+    }
+  }
+
+  const handleDownloadVideo = () => {
+    if (!exportedVideo) return
+    const link = document.createElement("a")
+    link.href = exportedVideo.url
+    link.download = exportedVideo.fileName
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
+  const handleShareVideo = async () => {
+    if (!exportedVideo) return
+    const file = new File([exportedVideo.blob], exportedVideo.fileName, {
+      type: exportedVideo.mimeType,
+    })
+
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      try {
+        if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: exportedVideo.fileName,
+          })
+          return
+        }
+      } catch (err) {
+        if ((err as Error)?.name === "AbortError") return
+      }
+    }
+    handleDownloadVideo()
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Header Card */}
+      <div className="rounded-3xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] p-4 sm:p-5 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <h1 className="text-lg sm:text-xl font-bold text-[#1C1917] dark:text-[#F5F5F4] font-myanmar flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+              <span>{t(language, "presenter3d.title")}</span>
+            </h1>
+            <p className="text-xs sm:text-sm text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+              {t(language, "presenter3d.subtitle")}
+            </p>
+          </div>
+
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setActivePageKey("voiceover")}
+            className="h-9 rounded-xl border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar"
+          >
+            <Mic className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+            <span>{t(language, "presenter3d.openBooth")}</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* Main Studio Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        {/* Left: Live 3D Stage & Video Export */}
+        <div className="lg:col-span-6 rounded-3xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] p-4 space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+              {t(language, "presenter3d.stagePreview")}
+            </span>
+            <span className="rounded-full bg-[#EFEAE1] dark:bg-[#27272A] px-2.5 py-1 text-[11px] font-medium tabular-nums text-[#1C1917] dark:text-[#F5F5F4]">
+              {aspectRatio} • {framing === "close_up" ? "Close-Up" : "Upper-Body"}
+            </span>
+          </div>
+
+          {/* Canvas Preview Container */}
+          <div className="flex items-center justify-center rounded-2xl bg-[#EFEAE1]/70 dark:bg-[#09090B]/70 p-3 border border-[#E7E5E4]/80 dark:border-[#27272A]">
+            <div
+              className={cn(
+                "relative overflow-hidden rounded-2xl shadow-md border border-black/10 dark:border-white/10 w-full",
+                aspectRatio === "9:16" ? "max-w-[300px] aspect-[9/16]" : "max-w-[380px] aspect-square"
+              )}
+            >
+              <canvas
+                ref={displayCanvasRef}
+                className="w-full h-full block object-contain"
+              />
+              {isLoadingAvatar && (
+                <div className="absolute inset-0 bg-black/45 backdrop-blur-xs flex flex-col items-center justify-center gap-2 text-white text-xs font-myanmar">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <span>{t(language, "presenter3d.loadingAvatar")}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Linked Audio Transport */}
+          <div className="rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-3 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                  {t(language, "presenter3d.linkedAudio")}
+                </p>
+                <p className="text-xs sm:text-sm font-semibold text-[#1C1917] dark:text-[#F5F5F4] truncate font-myanmar">
+                  {activeAudioSource ? activeAudioSource.title : t(language, "presenter3d.noAudioYet")}
+                </p>
+              </div>
+              <label className="shrink-0 cursor-pointer inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] px-2.5 py-1.5 text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#FAF8F5] dark:hover:bg-[#18181B]">
+                <Upload className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>{t(language, "presenter3d.uploadAudio")}</span>
+                <input
+                  type="file"
+                  accept="audio/*"
+                  onChange={handleUploadLocalAudio}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {activeAudioSource && (
+              <div className="flex items-center gap-2.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleTogglePreviewPlay}
+                  disabled={isRenderingVideo}
+                  className="h-9 rounded-xl bg-[#1C1917] text-[#FAF8F5] hover:bg-[#292524] dark:bg-[#F5F5F4] dark:text-[#18181B] dark:hover:bg-[#E7E5E4] px-3 text-xs font-medium"
+                >
+                  {isPlaying ? (
+                    <>
+                      <Pause className="h-3.5 w-3.5 mr-1.5" />
+                      <span>{t(language, "presenter3d.stopPreview")}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-3.5 w-3.5 mr-1.5" />
+                      <span>{t(language, "presenter3d.previewLipSync")}</span>
+                    </>
+                  )}
+                </Button>
+
+                <span className="text-xs tabular-nums text-[#57534E] dark:text-[#A1A1AA]">
+                  {formatAudioClockDuration(playbackTime)} / {formatAudioClockDuration(audioDuration)}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* 1-Tap Render Video Button + Progress */}
+          <div className="space-y-2.5">
+            <Button
+              type="button"
+              onClick={handleRenderVideo}
+              disabled={!activeAudioSource || isLoadingAvatar}
+              className={cn(
+                "w-full h-12 rounded-2xl text-sm font-semibold transition-all font-myanmar cursor-pointer",
+                isRenderingVideo
+                  ? "bg-rose-600 hover:bg-rose-700 text-white"
+                  : "bg-[#1C1917] hover:bg-[#292524] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:hover:bg-[#E7E5E4] dark:text-[#18181B]"
+              )}
+            >
+              {isRenderingVideo ? (
+                <>
+                  <Square className="h-4 w-4 mr-2 fill-current" />
+                  <span>
+                    {t(language, "presenter3d.renderingProgress", {
+                      percent: String(renderProgress),
+                    })}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Film className="h-4 w-4 mr-2" />
+                  <span>{t(language, "presenter3d.renderVideoBtn")}</span>
+                </>
+              )}
+            </Button>
+
+            {isRenderingVideo && (
+              <div className="h-2 w-full rounded-full bg-[#E7E5E4] dark:bg-[#3F3F46] overflow-hidden">
+                <div
+                  className="h-full bg-[#1C1917] dark:bg-[#F5F5F4] transition-all duration-150"
+                  style={{ width: `${renderProgress}%` }}
+                />
+              </div>
+            )}
+
+            {exportedVideo && (
+              <div className="rounded-2xl border border-emerald-300/70 dark:border-emerald-800/70 bg-emerald-50/70 dark:bg-emerald-950/30 p-3 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5 font-myanmar">
+                    <Video className="h-4 w-4" />
+                    <span>{t(language, "presenter3d.videoReady")}</span>
+                  </span>
+                  <span className="text-[11px] uppercase font-mono text-emerald-700 dark:text-emerald-300">
+                    .{exportedVideo.extension}
+                  </span>
+                </div>
+
+                <video
+                  src={exportedVideo.url}
+                  controls
+                  playsInline
+                  className="w-full max-h-[260px] rounded-xl bg-black"
+                />
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleDownloadVideo}
+                    className="h-10 rounded-xl border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-xs font-semibold"
+                  >
+                    <Download className="h-3.5 w-3.5 mr-1.5" />
+                    <span>{t(language, "presenter3d.downloadBtn")}</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleShareVideo}
+                    className="h-10 rounded-xl bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B] text-xs font-semibold"
+                  >
+                    <Share2 className="h-3.5 w-3.5 mr-1.5" />
+                    <span>{t(language, "presenter3d.shareBtn")}</span>
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Controls (Character, Framing, Backdrop & Branding) */}
+        <div className="lg:col-span-6 space-y-4">
+          {/* 1. Character Selector */}
+          <div className="rounded-3xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                {t(language, "presenter3d.characterTitle")}
+              </Label>
+              {avatarMode === "custom" && customAvatarName && (
+                <span className="text-[11px] text-amber-700 dark:text-amber-300 truncate max-w-[180px]">
+                  {customAvatarName}
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => handleSelectPreset("female_nilar")}
+                className={cn(
+                  "flex items-center gap-2.5 rounded-2xl border p-3 text-left transition-all cursor-pointer",
+                  avatarMode === "preset" && presetId === "female_nilar"
+                    ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                    : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
+                )}
+              >
+                <User className="h-4 w-4 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold truncate font-myanmar">
+                    {t(language, "presenter3d.presetNilar")}
+                  </div>
+                  <div className="text-[10px] opacity-75 truncate">Female Presenter</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSelectPreset("male_kokhant")}
+                className={cn(
+                  "flex items-center gap-2.5 rounded-2xl border p-3 text-left transition-all cursor-pointer",
+                  avatarMode === "preset" && presetId === "male_kokhant"
+                    ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                    : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
+                )}
+              >
+                <User className="h-4 w-4 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold truncate font-myanmar">
+                    {t(language, "presenter3d.presetKoKhant")}
+                  </div>
+                  <div className="text-[10px] opacity-75 truncate">Male Presenter</div>
+                </div>
+              </button>
+            </div>
+
+            <label className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-white/70 dark:bg-[#27272A]/70 py-2.5 px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
+              <Upload className="h-3.5 w-3.5" />
+              <span>{t(language, "presenter3d.uploadCustomAvatar")}</span>
+              <input
+                type="file"
+                accept=".vrm,.glb"
+                onChange={handleUploadAvatarFile}
+                className="hidden"
+              />
+            </label>
+          </div>
+
+          {/* 2. Aspect Ratio & Framing */}
+          <div className="rounded-3xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] p-4 space-y-3">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+              {t(language, "presenter3d.framingTitle")}
+            </Label>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              {(["9:16", "1:1"] as AspectPreset[]).map((ratio) => (
+                <button
+                  key={ratio}
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(6)
+                    setAspectRatio(ratio)
+                  }}
+                  className={cn(
+                    "rounded-2xl border py-2.5 px-3 text-xs font-semibold transition-all cursor-pointer",
+                    aspectRatio === ratio
+                      ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                      : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
+                  )}
+                >
+                  {ratio === "9:16" ? "9:16 • TikTok / Reels" : "1:1 • Facebook Square"}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              {(
+                [
+                  { id: "upper_body", labelKey: "presenter3d.framingUpperBody" },
+                  { id: "close_up", labelKey: "presenter3d.framingCloseUp" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(6)
+                    setFraming(opt.id)
+                  }}
+                  className={cn(
+                    "rounded-2xl border py-2.5 px-3 text-xs font-semibold transition-all cursor-pointer font-myanmar",
+                    framing === opt.id
+                      ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                      : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
+                  )}
+                >
+                  {t(language, opt.labelKey)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 3. Backdrop & Shop Branding */}
+          <div className="rounded-3xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] p-4 space-y-3">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+              {t(language, "presenter3d.backdropTitle")}
+            </Label>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setBackdrop("warm_paper")}
+                className={cn(
+                  "rounded-xl border px-3 py-2 text-xs font-medium cursor-pointer font-myanmar",
+                  backdrop === "warm_paper"
+                    ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                    : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A]"
+                )}
+              >
+                {t(language, "presenter3d.backdropWarmPaper")}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setBackdrop("soft_charcoal")}
+                className={cn(
+                  "rounded-xl border px-3 py-2 text-xs font-medium cursor-pointer font-myanmar",
+                  backdrop === "soft_charcoal"
+                    ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                    : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A]"
+                )}
+              >
+                {t(language, "presenter3d.backdropCharcoal")}
+              </button>
+
+              <label
+                className={cn(
+                  "flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium cursor-pointer font-myanmar",
+                  backdrop === "solid_color"
+                    ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                    : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A]"
+                )}
+              >
+                <input
+                  type="color"
+                  value={solidColor}
+                  onChange={(e) => {
+                    setSolidColor(e.target.value)
+                    setBackdrop("solid_color")
+                  }}
+                  className="h-4 w-4 rounded border-0 bg-transparent cursor-pointer"
+                />
+                <span>{t(language, "presenter3d.backdropSolid")}</span>
+              </label>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="inline-flex items-center gap-1.5 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-3 py-2 text-xs font-medium cursor-pointer font-myanmar">
+                <ImagePlus className="h-3.5 w-3.5" />
+                <span>{t(language, "presenter3d.uploadBackdropPhoto")}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleUploadBackdropPhoto}
+                  className="hidden"
+                />
+              </label>
+
+              {backdrop === "photo" && (
+                <button
+                  type="button"
+                  onClick={() => setBlurPhotoBackdrop((v) => !v)}
+                  className="rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-3 py-2 text-xs font-medium cursor-pointer font-myanmar"
+                >
+                  {blurPhotoBackdrop
+                    ? t(language, "presenter3d.photoBlurOn")
+                    : t(language, "presenter3d.photoBlurOff")}
+                </button>
+              )}
+            </div>
+
+            {/* Optional Shop Name Badge */}
+            <div className="pt-2 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                  {t(language, "presenter3d.shopBadgeToggle")}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowShopBadge((v) => !v)}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer transition-colors",
+                    showShopBadge
+                      ? "bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                      : "bg-[#EFEAE1] text-[#57534E] dark:bg-[#27272A] dark:text-[#A1A1AA]"
+                  )}
+                >
+                  {showShopBadge ? "ON" : "OFF"}
+                </button>
+              </div>
+
+              {showShopBadge && (
+                <Input
+                  value={badgeText}
+                  onChange={(e) => setBadgeText(e.target.value)}
+                  placeholder={t(language, "presenter3d.shopBadgePlaceholder")}
+                  className="h-9 rounded-xl bg-white dark:bg-[#27272A] border-[#E7E5E4] dark:border-[#3F3F46] text-xs font-myanmar"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
