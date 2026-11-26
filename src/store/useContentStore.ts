@@ -33,6 +33,7 @@ import {
 } from "@/api/ttsService"
 import { playBlobUrlWithPrimedAudio, stopPrimedAudio } from "@/lib/iosAudio"
 import type { BackgroundMusicPreset } from "@/lib/videoAudioMerger"
+import type { Presenter3dPopMotionPreset } from "@/lib/vrmLipSync"
 import { toast } from "@/components/ui/sonner"
 
 let activeTtsAbortController: AbortController | null = null
@@ -184,6 +185,10 @@ interface ContentState {
   autoAppendShopCta: boolean
   shopLogoDataUrl: string | null
   presenterMascotDataUrl: string | null
+  presenter3dPopEnabled: boolean
+  presenter3dPopDepth: number
+  presenter3dPopCutoutUrl: string | null
+  presenter3dPopMotion: Presenter3dPopMotionPreset
   presenterLogoDataUrl: string | null
   presenterOutfitColor: PresenterOutfitColor
   presenterGestureStyle: PresenterGestureStyle
@@ -254,6 +259,10 @@ interface ContentState {
   setAutoAppendShopCta: (enabled: boolean) => void
   setShopLogoDataUrl: (dataUrl: string | null) => void
   setPresenterMascotDataUrl: (dataUrl: string | null) => void
+  setPresenter3dPopEnabled: (enabled: boolean) => void
+  setPresenter3dPopDepth: (depth: number) => void
+  setPresenter3dPopCutoutUrl: (url: string | null) => void
+  setPresenter3dPopMotion: (motion: Presenter3dPopMotionPreset) => void
   setPresenterLogoDataUrl: (dataUrl: string | null) => void
   setPresenterOutfitColor: (color: PresenterOutfitColor) => void
   setPresenterGestureStyle: (style: PresenterGestureStyle) => void
@@ -357,6 +366,10 @@ export const useContentStore = create<ContentState>()(
       autoAppendShopCta: false,
       shopLogoDataUrl: null,
       presenterMascotDataUrl: null,
+      presenter3dPopEnabled: false,
+      presenter3dPopDepth: 65,
+      presenter3dPopCutoutUrl: null,
+      presenter3dPopMotion: "orbit_sway",
       presenterLogoDataUrl: null,
       presenterOutfitColor: "navy",
       presenterGestureStyle: "natural",
@@ -604,7 +617,19 @@ export const useContentStore = create<ContentState>()(
       setCustomNiche: (customNiche) => set({ customNiche }),
       setAutoAppendShopCta: (autoAppendShopCta) => set({ autoAppendShopCta }),
       setShopLogoDataUrl: (shopLogoDataUrl) => set({ shopLogoDataUrl }),
-      setPresenterMascotDataUrl: (presenterMascotDataUrl) => set({ presenterMascotDataUrl }),
+      setPresenterMascotDataUrl: (presenterMascotDataUrl) =>
+        set((state) => ({
+          presenterMascotDataUrl,
+          presenter3dPopCutoutUrl:
+            state.presenterMascotDataUrl === presenterMascotDataUrl
+              ? state.presenter3dPopCutoutUrl
+              : null,
+        })),
+      setPresenter3dPopEnabled: (presenter3dPopEnabled) => set({ presenter3dPopEnabled }),
+      setPresenter3dPopDepth: (presenter3dPopDepth) =>
+        set({ presenter3dPopDepth: Math.min(100, Math.max(0, Math.round(presenter3dPopDepth))) }),
+      setPresenter3dPopCutoutUrl: (presenter3dPopCutoutUrl) => set({ presenter3dPopCutoutUrl }),
+      setPresenter3dPopMotion: (presenter3dPopMotion) => set({ presenter3dPopMotion }),
       setPresenterLogoDataUrl: (presenterLogoDataUrl) => set({ presenterLogoDataUrl }),
       setPresenterOutfitColor: (presenterOutfitColor) => set({ presenterOutfitColor }),
       setPresenterGestureStyle: (presenterGestureStyle) => set({ presenterGestureStyle }),
@@ -1203,6 +1228,10 @@ export const useContentStore = create<ContentState>()(
         autoAppendShopCta: state.autoAppendShopCta ?? false,
         shopLogoDataUrl: state.shopLogoDataUrl ?? null,
         presenterMascotDataUrl: state.presenterMascotDataUrl ?? null,
+        presenter3dPopEnabled: state.presenter3dPopEnabled ?? false,
+        presenter3dPopDepth: state.presenter3dPopDepth ?? 65,
+        presenter3dPopCutoutUrl: state.presenter3dPopCutoutUrl ?? null,
+        presenter3dPopMotion: state.presenter3dPopMotion ?? "orbit_sway",
         presenterLogoDataUrl: state.presenterLogoDataUrl ?? null,
         presenterOutfitColor: state.presenterOutfitColor ?? "navy",
         presenterGestureStyle: state.presenterGestureStyle ?? "natural",
@@ -1289,6 +1318,25 @@ export const useContentStore = create<ContentState>()(
             typeof persisted.presenterShowCornerLogo === "boolean"
               ? persisted.presenterShowCornerLogo
               : true,
+          presenter3dPopEnabled:
+            typeof persisted.presenter3dPopEnabled === "boolean"
+              ? persisted.presenter3dPopEnabled
+              : false,
+          presenter3dPopDepth:
+            typeof persisted.presenter3dPopDepth === "number" &&
+            Number.isFinite(persisted.presenter3dPopDepth)
+              ? Math.min(100, Math.max(0, Math.round(persisted.presenter3dPopDepth)))
+              : 65,
+          presenter3dPopCutoutUrl:
+            typeof persisted.presenter3dPopCutoutUrl === "string"
+              ? persisted.presenter3dPopCutoutUrl
+              : null,
+          presenter3dPopMotion:
+            persisted.presenter3dPopMotion === "orbit_sway" ||
+            persisted.presenter3dPopMotion === "slow_push" ||
+            persisted.presenter3dPopMotion === "vocal_bounce"
+              ? persisted.presenter3dPopMotion
+              : "orbit_sway",
         }
       },
     }

@@ -471,6 +471,51 @@ export function disposeObject3D(root: THREE.Object3D): void {
   })
 }
 
+export type Presenter3dPopMotionPreset = "orbit_sway" | "slow_push" | "vocal_bounce"
+
+export interface Presenter3dPopOptions {
+  depth: number
+  motionPreset: Presenter3dPopMotionPreset
+}
+
+/**
+ * Draws the glowing reactive audio spectrum bar beneath the 2D Mascot / 2.5D 3D-Pop stage.
+ */
+function drawAudioSpectrumBar(
+  ctx: CanvasRenderingContext2D,
+  canvasW: number,
+  canvasH: number,
+  lip: LipSyncWeights,
+  elapsed: number
+): void {
+  const energy = Math.min(1, Math.max(0, lip.energy))
+  const bars = 28
+  const barAreaX = canvasW * 0.12
+  const barAreaW = canvasW * 0.76
+  const baseY = canvasH * 0.80
+  const maxH = canvasH * 0.07
+  const step = barAreaW / bars
+  ctx.save()
+  ctx.shadowColor = "rgba(251,191,36,0.9)"
+  ctx.shadowBlur = 10 + energy * 14
+  for (let i = 0; i < bars; i++) {
+    const t = i / (bars - 1)
+    const band = t < 0.34 ? lip.aa : t < 0.67 ? lip.oh : lip.ee
+    const wave =
+      0.5 + 0.5 * Math.sin(elapsed * 7 + i * 0.9) * Math.cos(elapsed * 3.1 + i * 0.37)
+    const env = Math.sin(Math.PI * t) * 0.35 + 0.65
+    const h = Math.max(canvasH * 0.004, maxH * (0.06 + (energy * 0.55 + band * 0.45) * wave * env))
+    const grad = ctx.createLinearGradient(0, baseY - h, 0, baseY + h)
+    grad.addColorStop(0, "#fde68a")
+    grad.addColorStop(1, "#f59e0b")
+    ctx.fillStyle = grad
+    ctx.beginPath()
+    ctx.roundRect(barAreaX + i * step + step * 0.18, baseY - h, step * 0.64, h * 2, step * 0.32)
+    ctx.fill()
+  }
+  ctx.restore()
+}
+
 /**
  * "2D Mascot Motion Card" renderer: keeps the uploaded mascot photo 100% crisp
  * (zero mouth warping or synthetic overlays), animating smooth vocal-reactive
@@ -514,32 +559,151 @@ export function drawPresenterCardFrame(
   ctx.drawImage(img, px, py, pw, ph)
   ctx.restore()
 
-  // Glowing audio spectrum bar
-  const bars = 28
-  const barAreaX = canvasW * 0.12
-  const barAreaW = canvasW * 0.76
-  const baseY = canvasH * 0.80
-  const maxH = canvasH * 0.07
-  const step = barAreaW / bars
-  ctx.save()
-  ctx.shadowColor = "rgba(251,191,36,0.9)"
-  ctx.shadowBlur = 10 + energy * 14
-  for (let i = 0; i < bars; i++) {
-    const t = i / (bars - 1)
-    const band = t < 0.34 ? lip.aa : t < 0.67 ? lip.oh : lip.ee
-    const wave =
-      0.5 + 0.5 * Math.sin(elapsed * 7 + i * 0.9) * Math.cos(elapsed * 3.1 + i * 0.37)
-    const env = Math.sin(Math.PI * t) * 0.35 + 0.65
-    const h = Math.max(canvasH * 0.004, maxH * (0.06 + (energy * 0.55 + band * 0.45) * wave * env))
-    const grad = ctx.createLinearGradient(0, baseY - h, 0, baseY + h)
-    grad.addColorStop(0, "#fde68a")
-    grad.addColorStop(1, "#f59e0b")
-    ctx.fillStyle = grad
-    ctx.beginPath()
-    ctx.roundRect(barAreaX + i * step + step * 0.18, baseY - h, step * 0.64, h * 2, step * 0.32)
-    ctx.fill()
+  drawAudioSpectrumBar(ctx, canvasW, canvasH, lip, elapsed)
+}
+
+/**
+ * 0-Cost 2.5D 3D-Pop / Parallax Photo renderer:
+ * - z = back: blurred & slightly overscaled original photo moving slowly opposite to camera sway
+ * - z = front: crisp transparent subject cutout moving with greater parallax amplitude,
+ *   3D drop shadow, soft rim highlight, gentle perspective tilt, and vocal-reactive bounce.
+ */
+export function drawPresenter3dPopFrame(
+  ctx: CanvasRenderingContext2D,
+  originalImg: HTMLImageElement,
+  cutoutImg: HTMLImageElement,
+  canvasW: number,
+  canvasH: number,
+  lip: LipSyncWeights,
+  elapsed: number,
+  options: Presenter3dPopOptions
+): void {
+  const energy = clamp01(lip.energy)
+  const d = clamp01(options.depth / 100)
+
+  const areaX = canvasW * 0.07
+  const areaY = canvasH * 0.08
+  const areaW = canvasW * 0.86
+  const areaH = canvasH * 0.62
+  const fit = Math.min(areaW / originalImg.width, areaH / originalImg.height)
+  const pw = originalImg.width * fit
+  const ph = originalImg.height * fit
+  const px = areaX + (areaW - pw) / 2
+  const py = areaY + (areaH - ph) / 2
+  const cx = px + pw / 2
+  const cy = py + ph / 2
+  const radius = Math.min(pw, ph) * 0.06
+
+  // Compute camera sway, zoom, tilt, and vocal bounce per motion preset
+  let camX = 0
+  let camY = 0
+  let backZoom = 1.08 + 0.06 * d
+  let frontScale = 1.015 + 0.035 * d
+  let tiltRad = 0
+  let vocalLiftY = 0
+
+  if (options.motionPreset === "slow_push") {
+    const push = 0.5 - 0.5 * Math.cos(elapsed * 0.45)
+    camX = Math.sin(elapsed * 0.52) * 0.45
+    camY = Math.cos(elapsed * 0.38) * 0.25
+    backZoom += push * 0.03 * d
+    frontScale += push * 0.085 * d + energy * 0.018
+    tiltRad = Math.sin(elapsed * 0.52) * 0.014 * d
+    vocalLiftY = -energy * canvasH * 0.008
+  } else if (options.motionPreset === "vocal_bounce") {
+    camX = Math.sin(elapsed * 0.78) * 0.45
+    camY = Math.cos(elapsed * 0.58) * 0.3
+    const pop = energy * (0.04 + 0.045 * d)
+    backZoom += energy * 0.012 * d
+    frontScale += pop + Math.sin(elapsed * 1.6) * 0.004
+    tiltRad = Math.sin(elapsed * 3.1) * energy * 0.022 * d + Math.sin(elapsed * 0.78) * 0.008 * d
+    vocalLiftY = -energy * canvasH * (0.008 + 0.014 * d)
+  } else {
+    // orbit_sway (default)
+    camX = Math.sin(elapsed * 0.95)
+    camY = Math.cos(elapsed * 0.65) * 0.55
+    const breathe = Math.sin(elapsed * 0.85) * 0.015 * d
+    backZoom += breathe * 0.5
+    frontScale += breathe + energy * 0.022
+    tiltRad = Math.sin(elapsed * 0.95) * 0.022 * d
+    vocalLiftY = -energy * canvasH * 0.009
   }
+
+  const backShiftX = -camX * canvasW * 0.012 * d
+  const backShiftY = -camY * canvasH * 0.008 * d
+  const frontShiftX = camX * canvasW * 0.024 * d
+  const frontShiftY = camY * canvasH * 0.016 * d + vocalLiftY
+
+  // 1. Card Frame + Back Layer (z = back)
+  ctx.save()
+  ctx.shadowColor = `rgba(245,158,11,${0.18 + energy * 0.45})`
+  ctx.shadowBlur = 18 + energy * 28
+  ctx.fillStyle = "#18181b"
+  ctx.beginPath()
+  ctx.roundRect(px, py, pw, ph, radius)
+  ctx.fill()
+  ctx.shadowBlur = 0
+  ctx.clip()
+
+  ctx.save()
+  ctx.translate(cx + backShiftX, cy + backShiftY)
+  ctx.scale(backZoom, backZoom)
+  ctx.translate(-cx, -cy)
+  const bgBlur = 2 + d * 7
+  ctx.filter = `blur(${bgBlur.toFixed(1)}px) brightness(0.9)`
+  ctx.drawImage(originalImg, px, py, pw, ph)
   ctx.restore()
+
+  // Subtle depth vignette over back layer to accentuate subject separation
+  const vignette = ctx.createRadialGradient(
+    cx,
+    cy * 0.95,
+    Math.min(pw, ph) * 0.18,
+    cx,
+    cy,
+    Math.max(pw, ph) * 0.72
+  )
+  vignette.addColorStop(0, "rgba(0, 0, 0, 0)")
+  vignette.addColorStop(1, `rgba(0, 0, 0, ${(0.18 + 0.16 * d).toFixed(2)})`)
+  ctx.fillStyle = vignette
+  ctx.fillRect(px, py, pw, ph)
+
+  // Subtle inner card border highlight
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.22)"
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.roundRect(px, py, pw, ph, radius)
+  ctx.stroke()
+  ctx.restore()
+
+  // 2. Foreground Subject Cutout (z = front) — pops forward with 3D shadow + soft rim highlight
+  ctx.save()
+  ctx.translate(cx + frontShiftX, cy + frontShiftY)
+  ctx.rotate(tiltRad)
+  // Gentle 2.5D perspective foreshortening along X/Y based on sway
+  const skewX = -camX * 0.012 * d
+  ctx.transform(1, 0, skewX, 1, 0, 0)
+  ctx.scale(frontScale, frontScale)
+  ctx.translate(-cx, -cy)
+
+  // Soft warm rim highlight behind subject
+  ctx.save()
+  ctx.shadowColor = `rgba(253, 230, 138, ${(0.35 + energy * 0.4).toFixed(2)})`
+  ctx.shadowBlur = 12 + energy * 16 + d * 8
+  ctx.shadowOffsetX = 0
+  ctx.shadowOffsetY = -2
+  ctx.drawImage(cutoutImg, px, py, pw, ph)
+  ctx.restore()
+
+  // Deep 3D drop shadow + crisp foreground subject
+  ctx.shadowColor = `rgba(0, 0, 0, ${(0.32 + 0.22 * d).toFixed(2)})`
+  ctx.shadowBlur = 16 + 24 * d
+  ctx.shadowOffsetX = -camX * 14 * d
+  ctx.shadowOffsetY = 10 + 12 * d
+  ctx.drawImage(cutoutImg, px, py, pw, ph)
+  ctx.restore()
+
+  drawAudioSpectrumBar(ctx, canvasW, canvasH, lip, elapsed)
 }
 
 export function drawCaptionBar(

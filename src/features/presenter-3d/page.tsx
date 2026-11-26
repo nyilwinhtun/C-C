@@ -6,6 +6,7 @@ import {
   Download,
   Film,
   ImagePlus,
+  Layers,
   Loader2,
   Mic,
   Pause,
@@ -40,11 +41,13 @@ import {
   drawBroadcastLowerThird,
   drawCaptionBar,
   drawCornerLogoWatermark,
+  drawPresenter3dPopFrame,
   drawPresenterCardFrame,
   loadAvatarController,
   type AvatarController,
   type BuiltinPresenterId,
   type LipSyncAnalyzer,
+  type Presenter3dPopMotionPreset,
   type PresenterStudioSet,
   type StudioBackdropController,
 } from "@/lib/vrmLipSync"
@@ -137,11 +140,19 @@ export function Presenter3DPage() {
     saveMascotPreset,
     deleteMascotPreset,
     presenterMascotDataUrl,
+    presenter3dPopEnabled,
+    presenter3dPopDepth,
+    presenter3dPopCutoutUrl,
+    presenter3dPopMotion,
     presenterLogoDataUrl,
     presenterStudioSet,
     presenterShowLowerThird,
     presenterShowCornerLogo,
     setPresenterMascotDataUrl,
+    setPresenter3dPopEnabled,
+    setPresenter3dPopDepth,
+    setPresenter3dPopCutoutUrl,
+    setPresenter3dPopMotion,
     setPresenterLogoDataUrl,
     setPresenterStudioSet,
     setPresenterShowLowerThird,
@@ -158,11 +169,19 @@ export function Presenter3DPage() {
       saveMascotPreset: state.saveMascotPreset,
       deleteMascotPreset: state.deleteMascotPreset,
       presenterMascotDataUrl: state.presenterMascotDataUrl,
+      presenter3dPopEnabled: state.presenter3dPopEnabled,
+      presenter3dPopDepth: state.presenter3dPopDepth,
+      presenter3dPopCutoutUrl: state.presenter3dPopCutoutUrl,
+      presenter3dPopMotion: state.presenter3dPopMotion,
       presenterLogoDataUrl: state.presenterLogoDataUrl,
       presenterStudioSet: state.presenterStudioSet,
       presenterShowLowerThird: state.presenterShowLowerThird,
       presenterShowCornerLogo: state.presenterShowCornerLogo,
       setPresenterMascotDataUrl: state.setPresenterMascotDataUrl,
+      setPresenter3dPopEnabled: state.setPresenter3dPopEnabled,
+      setPresenter3dPopDepth: state.setPresenter3dPopDepth,
+      setPresenter3dPopCutoutUrl: state.setPresenter3dPopCutoutUrl,
+      setPresenter3dPopMotion: state.setPresenter3dPopMotion,
       setPresenterLogoDataUrl: state.setPresenterLogoDataUrl,
       setPresenterStudioSet: state.setPresenterStudioSet,
       setPresenterShowLowerThird: state.setPresenterShowLowerThird,
@@ -186,7 +205,9 @@ export function Presenter3DPage() {
   const [mascotName, setMascotName] = useState("")
   const [captionsOn, setCaptionsOn] = useState(false)
   const [captionText, setCaptionText] = useState("")
+  const [isExtracting3dPop, setIsExtracting3dPop] = useState(false)
   const characterPhotoRef = useRef<HTMLImageElement | null>(null)
+  const cutoutPhotoRef = useRef<HTMLImageElement | null>(null)
   const characterPhotoUrlRef = useRef<string | null>(null)
   const [avatarMode, setAvatarMode] = useState<"preset" | "custom">("preset")
   const [presetId, setPresetId] = useState<BuiltinPresenterId>(defaultPreset)
@@ -255,6 +276,9 @@ export function Presenter3DPage() {
     mascotName,
     captionsOn,
     captionText,
+    presenter3dPopEnabled,
+    presenter3dPopDepth,
+    presenter3dPopMotion,
   })
   sceneSettingsRef.current = {
     aspectRatio,
@@ -274,6 +298,9 @@ export function Presenter3DPage() {
     mascotName,
     captionsOn,
     captionText,
+    presenter3dPopEnabled,
+    presenter3dPopDepth,
+    presenter3dPopMotion,
   }
 
   const activeAudioSource = useMemo(() => {
@@ -557,11 +584,19 @@ export function Presenter3DPage() {
         ctx.fillRect(0, 0, dims.width, dims.height)
       }
 
-      // 2. Draw character layer: 2D Mascot Motion Card (default) or 3D WebGL (.vrm/.glb)
+      // 2. Draw character layer: 2D Mascot Motion Card / 2.5D 3D-Pop or 3D WebGL (.vrm/.glb)
       if (settings.characterKind === "photo") {
         const photo = characterPhotoRef.current
         if (photo) {
-          drawPresenterCardFrame(ctx, photo, dims.width, dims.height, lip, elapsed)
+          const cutout = cutoutPhotoRef.current
+          if (settings.presenter3dPopEnabled && cutout) {
+            drawPresenter3dPopFrame(ctx, photo, cutout, dims.width, dims.height, lip, elapsed, {
+              depth: settings.presenter3dPopDepth,
+              motionPreset: settings.presenter3dPopMotion,
+            })
+          } else {
+            drawPresenterCardFrame(ctx, photo, dims.width, dims.height, lip, elapsed)
+          }
         }
       } else if (settings.hasLoaded3dAvatar) {
         ctx.drawImage(glCanvas, 0, 0, dims.width, dims.height)
@@ -665,6 +700,87 @@ export function Presenter3DPage() {
       setHasLoaded3dAvatar(false)
     }
   }, [])
+
+  // Sync cached 3D-Pop foreground cutout into an HTMLImageElement ref
+  useEffect(() => {
+    if (!presenter3dPopCutoutUrl) {
+      cutoutPhotoRef.current = null
+      return
+    }
+    let cancelled = false
+    const img = new Image()
+    img.onload = () => {
+      if (!cancelled) {
+        cutoutPhotoRef.current = img
+      }
+    }
+    img.onerror = () => {
+      if (!cancelled) {
+        cutoutPhotoRef.current = null
+      }
+    }
+    img.src = presenter3dPopCutoutUrl
+    return () => {
+      cancelled = true
+    }
+  }, [presenter3dPopCutoutUrl])
+
+  const handleGenerate3dPopLayer = useCallback(
+    async (enableAfter = true) => {
+      const sourceUrl = photoDataUrl || presenterMascotDataUrl
+      if (!sourceUrl) {
+        toast.error(t(language, "presenter3d.noPhotoError"))
+        return
+      }
+      if (isExtracting3dPop) return
+      setIsExtracting3dPop(true)
+      try {
+        const { removeBackground } = await import("@imgly/background-removal")
+        const res = await fetch(sourceUrl)
+        const blob = await res.blob()
+        const cutoutBlob = await removeBackground(blob)
+        const cutoutUrl = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader()
+          r.onload = () =>
+            typeof r.result === "string" ? resolve(r.result) : reject(new Error("Read failed"))
+          r.onerror = () => reject(new Error("Read failed"))
+          r.readAsDataURL(cutoutBlob)
+        })
+        setPresenter3dPopCutoutUrl(cutoutUrl)
+        if (enableAfter) {
+          setPresenter3dPopEnabled(true)
+        }
+        toast.success(t(language, "presenter3d.pop3dSuccess"))
+      } catch (err) {
+        console.error("3D-Pop foreground extraction failed:", err)
+        toast.error(t(language, "presenter3d.pop3dError"))
+      } finally {
+        setIsExtracting3dPop(false)
+      }
+    },
+    [
+      photoDataUrl,
+      presenterMascotDataUrl,
+      isExtracting3dPop,
+      language,
+      setPresenter3dPopCutoutUrl,
+      setPresenter3dPopEnabled,
+    ]
+  )
+
+  const handleToggle3dPop = () => {
+    triggerHaptic(6)
+    const next = !presenter3dPopEnabled
+    setPresenter3dPopEnabled(next)
+    if (
+      next &&
+      !presenter3dPopCutoutUrl &&
+      (photoDataUrl || presenterMascotDataUrl) &&
+      !isExtracting3dPop
+    ) {
+      void handleGenerate3dPopLayer(true)
+    }
+  }
 
   // Restore persisted mascot photo on mount if available
   useEffect(() => {
@@ -1275,6 +1391,12 @@ export function Presenter3DPage() {
                   <span>{t(language, "presenter3d.loadingAvatar")}</span>
                 </div>
               )}
+              {characterKind === "photo" && isExtracting3dPop && (
+                <div className="absolute inset-0 bg-black/45 backdrop-blur-xs flex flex-col items-center justify-center gap-2 text-white text-xs font-myanmar px-4 text-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-amber-400" />
+                  <span>{t(language, "presenter3d.pop3dExtracting")}</span>
+                </div>
+              )}
             </div>
           </div>
           </FileDropzone>
@@ -1514,6 +1636,123 @@ export function Presenter3DPage() {
                         <X className="h-3 w-3" />
                         <span>{t(language, "presenter3d.clearLogo")}</span>
                       </button>
+                    </div>
+
+                    {/* 0-Cost 2.5D 3D-Pop / Parallax Controls */}
+                    <div className="rounded-xl border border-amber-500/25 bg-[#FAF8F5] dark:bg-[#18181B] p-2.5 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-[#1C1917] dark:text-[#F5F5F4] font-myanmar flex items-center gap-1.5">
+                          <Layers className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                          <span>{t(language, "presenter3d.pop3dToggle")}</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleToggle3dPop}
+                          disabled={isExtracting3dPop}
+                          className={cn(
+                            "rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer transition-colors disabled:opacity-60",
+                            presenter3dPopEnabled
+                              ? "bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                              : "bg-[#EFEAE1] text-[#57534E] dark:bg-[#27272A] dark:text-[#A1A1AA]"
+                          )}
+                        >
+                          {presenter3dPopEnabled ? "ON" : "OFF"}
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void handleGenerate3dPopLayer(true)}
+                          disabled={isExtracting3dPop}
+                          className="h-8 rounded-lg border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[11px] font-medium font-myanmar cursor-pointer flex-1"
+                        >
+                          {isExtracting3dPop ? (
+                            <>
+                              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin text-amber-600" />
+                              <span>{t(language, "presenter3d.pop3dExtracting")}</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="h-3.5 w-3.5 mr-1.5 text-amber-600 dark:text-amber-400" />
+                              <span>
+                                {presenter3dPopCutoutUrl
+                                  ? t(language, "presenter3d.pop3dRegenerateBtn")
+                                  : t(language, "presenter3d.pop3dGenerateBtn")}
+                              </span>
+                            </>
+                          )}
+                        </Button>
+
+                        {presenter3dPopCutoutUrl && !isExtracting3dPop && (
+                          <span className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400 shrink-0 font-myanmar">
+                            ✓ {t(language, "presenter3d.pop3dReady")}
+                          </span>
+                        )}
+                      </div>
+
+                      {(presenter3dPopEnabled || presenter3dPopCutoutUrl) && (
+                        <div className="space-y-2.5 pt-1 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80">
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-[11px] font-medium font-myanmar text-[#57534E] dark:text-[#A1A1AA]">
+                              <span>{t(language, "presenter3d.pop3dDepthLabel")}</span>
+                              <span className="tabular-nums text-[#1C1917] dark:text-[#F5F5F4]">
+                                {presenter3dPopDepth}%
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={100}
+                              step={1}
+                              value={presenter3dPopDepth}
+                              onChange={(e) => setPresenter3dPopDepth(Number(e.target.value))}
+                              className="w-full accent-amber-600 cursor-pointer"
+                            />
+                            <div className="flex justify-between text-[10px] text-[#78716C] dark:text-[#A1A1AA] font-myanmar">
+                              <span>{t(language, "presenter3d.pop3dSubtle")}</span>
+                              <span>{t(language, "presenter3d.pop3dDeep")}</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <span className="text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar block">
+                              {t(language, "presenter3d.pop3dMotionLabel")}
+                            </span>
+                            <div className="grid grid-cols-3 gap-1.5">
+                              {(
+                                [
+                                  { id: "orbit_sway", labelKey: "presenter3d.pop3dMotionOrbit" },
+                                  { id: "slow_push", labelKey: "presenter3d.pop3dMotionPush" },
+                                  { id: "vocal_bounce", labelKey: "presenter3d.pop3dMotionBounce" },
+                                ] as const satisfies readonly {
+                                  id: Presenter3dPopMotionPreset
+                                  labelKey: string
+                                }[]
+                              ).map((preset) => (
+                                <button
+                                  key={preset.id}
+                                  type="button"
+                                  onClick={() => {
+                                    triggerHaptic(6)
+                                    setPresenter3dPopMotion(preset.id)
+                                  }}
+                                  className={cn(
+                                    "rounded-lg border py-1.5 px-1.5 text-[10px] font-semibold transition-all cursor-pointer font-myanmar truncate",
+                                    presenter3dPopMotion === preset.id
+                                      ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                                      : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#57534E] dark:text-[#A1A1AA]"
+                                  )}
+                                >
+                                  {t(language, preset.labelKey)}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-1.5 rounded-xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] p-2">
