@@ -6,8 +6,11 @@ import {
   getAudioContextConstructor,
   unlockIosAudio,
 } from "@/lib/iosAudio"
+import { executeWithGeminiKeyRotation } from "@/api/aiService"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
+
+export { executeWithGeminiKeyRotation }
 
 export type BurmeseVoiceType = "female" | "male" | "deep_male"
 export type VoiceoverSpeed = 0.85 | 0.9 | 1.0 | 1.05 | 1.1 | 1.15 | 1.2
@@ -133,10 +136,97 @@ export interface VoiceoverResult {
 }
 
 export class TtsError extends Error {
-  constructor(message: string) {
+  status?: number
+
+  constructor(message: string, status?: number) {
     super(message)
     this.name = "TtsError"
+    this.status = status
   }
+}
+
+const MAX_TTS_AUDIO_CACHE_CLIPS = 15
+
+interface CachedTtsSegmentData {
+  text: string
+  blob: Blob
+  durationSeconds: number
+  provider: "gemini" | "neural-tts" | "speech-synthesis"
+  pcmBytes?: Uint8Array
+}
+
+interface CachedTtsAudioClip {
+  blob: Blob
+  mimeType: string
+  fileExtension: "wav" | "mp3"
+  voiceName: string
+  provider: "gemini" | "neural-tts" | "speech-synthesis"
+  cleanedText: string
+  segments: CachedTtsSegmentData[]
+}
+
+const ttsAudioCache = new Map<string, CachedTtsAudioClip>()
+
+export function buildTtsCacheKey(
+  voiceId: string,
+  deliveryStyle: VoiceDeliveryTone,
+  speed: VoiceoverSpeed,
+  normalizedText: string
+): string {
+  return `${voiceId}:${deliveryStyle}:${speed}:${normalizedText.trim()}`
+}
+
+function getCachedTtsClip(key: string): CachedTtsAudioClip | undefined {
+  const cached = ttsAudioCache.get(key)
+  if (!cached) return undefined
+  // Refresh LRU entry position
+  ttsAudioCache.delete(key)
+  ttsAudioCache.set(key, cached)
+  return cached
+}
+
+function setCachedTtsClip(key: string, clip: CachedTtsAudioClip): void {
+  if (ttsAudioCache.has(key)) {
+    ttsAudioCache.delete(key)
+  }
+  while (ttsAudioCache.size >= MAX_TTS_AUDIO_CACHE_CLIPS) {
+    const oldestKey = ttsAudioCache.keys().next().value
+    if (oldestKey === undefined) break
+    ttsAudioCache.delete(oldestKey)
+  }
+  ttsAudioCache.set(key, clip)
+}
+
+function cloneSegmentsFromCache(
+  cachedSegments: ReadonlyArray<CachedTtsSegmentData>
+): VoiceoverSegmentItem[] {
+  const ts = Date.now()
+  return cachedSegments.map((seg, idx) => ({
+    id: `seg-${ts}-${idx}`,
+    text: seg.text,
+    blob: seg.blob,
+    audioUrl: URL.createObjectURL(seg.blob),
+    durationSeconds: seg.durationSeconds,
+    provider: seg.provider,
+    pcmBytes: seg.pcmBytes,
+  }))
+}
+
+function toCachedSegments(
+  segments?: ReadonlyArray<VoiceoverSegmentItem>
+): CachedTtsSegmentData[] {
+  if (!segments) return []
+  return segments.map((seg) => ({
+    text: seg.text,
+    blob: seg.blob,
+    durationSeconds: seg.durationSeconds,
+    provider: seg.provider,
+    pcmBytes: seg.pcmBytes,
+  }))
+}
+
+export function clearTtsAudioCache(): void {
+  ttsAudioCache.clear()
 }
 
 /**
@@ -430,6 +520,13 @@ export function normalizeBurmeseForTTS(
 }
 
 function getSavedGeminiApiKey(): string {
+  const store = useContentStore.getState()
+  const pool = store.getGeminiKeyPool()
+  if (pool.length > 0) {
+    const idx =
+      ((store.activeGeminiKeyIndex % pool.length) + pool.length) % pool.length
+    if (pool[idx]) return pool[idx]
+  }
   const fromStore = useUIStore.getState().apiKeys.gemini?.trim()
   if (fromStore) return fromStore
   if (typeof window !== "undefined") {
@@ -805,8 +902,6 @@ export async function prepareBurmeseSpeechText(
       : undefined
 
   try {
-    const cleanKey = apiKey.trim()
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_SPEECH_PREP_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
     const prepPrompt = [
       "You are a Burmese (Myanmar) speech-normalization preprocessor for Text-to-Speech.",
       "Rewrite the input text ONLY for natural spoken Burmese TTS delivery:",
@@ -818,29 +913,39 @@ export async function prepareBurmeseSpeechText(
       deterministic,
     ].join("\n")
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": cleanKey,
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prepPrompt }] }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 2048,
+    const data = await executeWithGeminiKeyRotation(async (activeKey) => {
+      const cleanKey = activeKey.trim()
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_SPEECH_PREP_MODEL}:generateContent?key=${encodeURIComponent(cleanKey)}`
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": cleanKey,
         },
-      }),
-    })
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prepPrompt }] }],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 2048,
+          },
+        }),
+      })
 
-    if (!response.ok) return deterministic
+      if (response.status === 429) {
+        const errText = await response.text().catch(() => "")
+        throw buildGeminiTtsError(429, errText)
+      }
+      if (!response.ok) return null
+      return (await response.json()) as {
+        candidates?: Array<{
+          content?: { parts?: Array<{ text?: string }> }
+        }>
+      }
+    }, apiKey)
 
-    const data = (await response.json()) as {
-      candidates?: Array<{
-        content?: { parts?: Array<{ text?: string }> }
-      }>
-    }
+    if (!data) return deterministic
+
     const output = data.candidates?.[0]?.content?.parts
       ?.map((p) => p.text ?? "")
       .join("")
@@ -1236,7 +1341,8 @@ export function buildGeminiTtsError(status: number, errText: string): TtsError {
     if (isDailyOrQuotaExceeded) {
       const detailSuffix = cleanDetail ? ` — [${cleanDetail}]` : ""
       return new TtsError(
-        `ယနေ့အတွက် Gemini TTS အခမဲ့ အသုံးပြုခွင့် ပြည့်သွားပါပြီ (Settings တွင် API Key အသစ် ပြောင်းထည့်သုံးနိုင်ပါသည်)${detailSuffix}`
+        `ယနေ့အတွက် Gemini TTS အခမဲ့ အသုံးပြုခွင့် ပြည့်သွားပါပြီ (Settings တွင် API Key အသစ် ပြောင်းထည့်သုံးနိုင်ပါသည်)${detailSuffix}`,
+        429
       )
     }
 
@@ -1245,21 +1351,47 @@ export function buildGeminiTtsError(status: number, errText: string): TtsError {
       : "Per-minute rate limit reached"
     const detailSuffix = cleanDetail ? ` — ${cleanDetail}` : ""
     return new TtsError(
-      `Gemini TTS တစ်မိနစ်အတွင်း အသုံးပြုမှု ကန့်သတ်ချက် ပြည့်သွားပါသည် (${delayNote})${detailSuffix}`
+      `Gemini TTS တစ်မိနစ်အတွင်း အသုံးပြုမှု ကန့်သတ်ချက် ပြည့်သွားပါသည် (${delayNote})${detailSuffix}`,
+      429
     )
   }
 
   if (status === 400 || status === 404 || status === 403 || status === 401) {
     const statusLabel = statusText ? `${status} ${statusText}` : `HTTP ${status}`
     const detail = cleanDetail || "Request rejected by Gemini API (check API Key, model ID, or voiceName)."
-    return new TtsError(`Gemini TTS Error (${statusLabel}): ${detail}`)
+    return new TtsError(`Gemini TTS Error (${statusLabel}): ${detail}`, status)
   }
 
   const fallbackDetail = cleanDetail || `HTTP ${status}`
-  return new TtsError(`Gemini TTS Error (HTTP ${status}): ${fallbackDetail}`)
+  return new TtsError(`Gemini TTS Error (HTTP ${status}): ${fallbackDetail}`, status)
 }
 
 async function synthesizeGeminiChunk(
+  chunkText: string,
+  preset: BurmeseVoicePreset,
+  speed: VoiceoverSpeed,
+  deliveryTone: VoiceDeliveryTone,
+  apiKey: string,
+  signal?: AbortSignal
+): Promise<
+  | { kind: "pcm"; pcmBytes: Uint8Array; sampleRate: number }
+  | { kind: "blob"; blob: Blob; mimeType: string; fileExtension: "wav" | "mp3" }
+> {
+  return executeWithGeminiKeyRotation(
+    (activeKey) =>
+      synthesizeGeminiChunkWithSingleKey(
+        chunkText,
+        preset,
+        speed,
+        deliveryTone,
+        activeKey,
+        signal
+      ),
+    apiKey
+  )
+}
+
+async function synthesizeGeminiChunkWithSingleKey(
   chunkText: string,
   preset: BurmeseVoicePreset,
   speed: VoiceoverSpeed,
@@ -1983,6 +2115,20 @@ async function synthesizeSpeechSegmentBlob(
     throw new DOMException("Aborted", "AbortError")
   }
 
+  const cacheKey = buildTtsCacheKey(preset.id, deliveryTone, speed, cleanedText)
+  const cachedSeg = getCachedTtsClip(cacheKey)
+  if (cachedSeg) {
+    onChunkProgress?.(1, 1)
+    return {
+      blob: cachedSeg.blob,
+      mimeType: cachedSeg.mimeType,
+      fileExtension: cachedSeg.fileExtension,
+      voiceName: cachedSeg.voiceName,
+      provider: cachedSeg.provider,
+      segments: cloneSegmentsFromCache(cachedSeg.segments),
+    }
+  }
+
   const geminiKey = getSavedGeminiApiKey()
 
   if (geminiKey) {
@@ -1996,9 +2142,19 @@ async function synthesizeSpeechSegmentBlob(
         onChunkProgress,
         signal
       )
+      const voiceName = `${preset.label} · Gemini`
+      setCachedTtsClip(cacheKey, {
+        blob: geminiResult.blob,
+        mimeType: geminiResult.mimeType,
+        fileExtension: geminiResult.fileExtension,
+        voiceName,
+        provider: "gemini",
+        cleanedText,
+        segments: toCachedSegments(geminiResult.segments),
+      })
       return {
         ...geminiResult,
-        voiceName: `${preset.label} · Gemini`,
+        voiceName,
         provider: "gemini",
       }
     } catch (err) {
@@ -2061,11 +2217,22 @@ async function synthesizeSpeechSegmentBlob(
       neuralExt = "wav"
     }
 
+    const voiceName = `${preset.label} · ${preset.neuralVoice}`
+    setCachedTtsClip(cacheKey, {
+      blob: neuralBlob,
+      mimeType: neuralMime,
+      fileExtension: neuralExt,
+      voiceName,
+      provider: "neural-tts",
+      cleanedText,
+      segments: toCachedSegments(segments),
+    })
+
     return {
       blob: neuralBlob,
       mimeType: neuralMime,
       fileExtension: neuralExt,
-      voiceName: `${preset.label} · ${preset.neuralVoice}`,
+      voiceName,
       provider: "neural-tts",
       segments,
     }
@@ -2194,6 +2361,38 @@ export async function generateBurmeseVoiceover(
     throw new DOMException("Aborted", "AbortError")
   }
 
+  const deterministicNormalized = optimizeScriptPreservingPauses(
+    scriptText,
+    options.customPronunciations
+  )
+  const fullVoiceId =
+    introSfx === "none" ? voiceType : `${voiceType}:${introSfx}`
+  const preNormCacheKey = deterministicNormalized
+    ? buildTtsCacheKey(fullVoiceId, deliveryTone, speed, deterministicNormalized)
+    : ""
+
+  if (preNormCacheKey) {
+    const cachedFull = getCachedTtsClip(preNormCacheKey)
+    if (cachedFull) {
+      options.onStageChange?.("generating")
+      options.onProgress?.({ currentChunk: 1, totalChunks: 1 })
+      const audioBuffer = await decodeBlobToAudioBuffer(cachedFull.blob)
+      const audioUrl = URL.createObjectURL(cachedFull.blob)
+      return {
+        audioUrl,
+        blob: cachedFull.blob,
+        audioBuffer,
+        mimeType: cachedFull.mimeType,
+        fileExtension: cachedFull.fileExtension,
+        durationSeconds: audioBuffer.duration,
+        voiceName: cachedFull.voiceName,
+        provider: cachedFull.provider,
+        cleanedText: cachedFull.cleanedText,
+        segments: cloneSegmentsFromCache(cachedFull.segments),
+      }
+    }
+  }
+
   options.onStageChange?.("preparing")
 
   const rawSegments = parseScriptWithPauses(scriptText)
@@ -2255,6 +2454,17 @@ export async function generateBurmeseVoiceover(
     )
     const audioBuffer = await decodeBlobToAudioBuffer(single.blob)
     const audioUrl = URL.createObjectURL(single.blob)
+    if (preNormCacheKey) {
+      setCachedTtsClip(preNormCacheKey, {
+        blob: single.blob,
+        mimeType: single.mimeType,
+        fileExtension: single.fileExtension,
+        voiceName: single.voiceName,
+        provider: single.provider,
+        cleanedText: combinedCleanedText,
+        segments: toCachedSegments(single.segments),
+      })
+    }
     return {
       audioUrl,
       blob: single.blob,
@@ -2325,6 +2535,17 @@ export async function generateBurmeseVoiceover(
 
   const assembled = await assembleSegmentsWithPausesAndSfx(audioTimeline, introSfx)
   const audioUrl = URL.createObjectURL(assembled.blob)
+  if (preNormCacheKey) {
+    setCachedTtsClip(preNormCacheKey, {
+      blob: assembled.blob,
+      mimeType: "audio/wav",
+      fileExtension: "wav",
+      voiceName: lastVoiceName,
+      provider: lastProvider,
+      cleanedText: combinedCleanedText,
+      segments: toCachedSegments(allSegments),
+    })
+  }
   return {
     audioUrl,
     blob: assembled.blob,
@@ -2396,6 +2617,36 @@ export async function generateBurmeseDialogueVoiceover(
   const useAiSpeechPrep = options.useAiSpeechPrep ?? true
   const onProgress = options.onProgress
 
+  const dialogueNormalizedKey = turns
+    .map((t) => `${t.speaker}:${normalizeBurmeseForTTS(t.text, options.customPronunciations)}`)
+    .join("|")
+  const dialogueVoiceId =
+    introSfx === "none" ? "dialogue" : `dialogue:${introSfx}`
+  const dialogueCacheKey = dialogueNormalizedKey
+    ? buildTtsCacheKey(dialogueVoiceId, deliveryTone, speed, dialogueNormalizedKey)
+    : ""
+
+  if (dialogueCacheKey) {
+    const cachedDialogue = getCachedTtsClip(dialogueCacheKey)
+    if (cachedDialogue) {
+      options.onStageChange?.("generating")
+      onProgress?.({ currentChunk: turns.length, totalChunks: turns.length })
+      const audioBuffer = await decodeBlobToAudioBuffer(cachedDialogue.blob)
+      const audioUrl = URL.createObjectURL(cachedDialogue.blob)
+      return {
+        audioUrl,
+        blob: cachedDialogue.blob,
+        audioBuffer,
+        mimeType: cachedDialogue.mimeType,
+        fileExtension: cachedDialogue.fileExtension,
+        durationSeconds: audioBuffer.duration,
+        voiceName: cachedDialogue.voiceName,
+        provider: cachedDialogue.provider,
+        cleanedText: cachedDialogue.cleanedText,
+      }
+    }
+  }
+
   options.onStageChange?.("preparing")
 
   const timeline: Array<
@@ -2428,6 +2679,18 @@ export async function generateBurmeseDialogueVoiceover(
 
   const assembled = await assembleSegmentsWithPausesAndSfx(timeline, introSfx)
   const audioUrl = URL.createObjectURL(assembled.blob)
+  const joinedCleanedText = cleanedParts.join("\n")
+  if (dialogueCacheKey) {
+    setCachedTtsClip(dialogueCacheKey, {
+      blob: assembled.blob,
+      mimeType: "audio/wav",
+      fileExtension: "wav",
+      voiceName: "Nilar + Thiha (Dialogue)",
+      provider: lastProvider,
+      cleanedText: joinedCleanedText,
+      segments: [],
+    })
+  }
   return {
     audioUrl,
     blob: assembled.blob,
@@ -2437,7 +2700,7 @@ export async function generateBurmeseDialogueVoiceover(
     durationSeconds: assembled.audioBuffer.duration,
     voiceName: "Nilar + Thiha (Dialogue)",
     provider: lastProvider,
-    cleanedText: cleanedParts.join("\n"),
+    cleanedText: joinedCleanedText,
   }
 }
 
@@ -2619,8 +2882,27 @@ export async function regenerateSingleVoiceoverSegment(params: {
   const normalized = normalizeBurmeseForTTS(trimmed, params.customPronunciations) || trimmed
   const preset = BURMESE_VOICE_PRESETS[params.voiceType]
   const deliveryTone = params.deliveryTone ?? "normal"
-  const geminiKey = getSavedGeminiApiKey()
   const id = `seg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  const segCacheKey = buildTtsCacheKey(preset.id, deliveryTone, params.speed, normalized)
+  const cachedSeg = getCachedTtsClip(segCacheKey)
+  if (cachedSeg) {
+    const firstCachedSeg = cachedSeg.segments[0]
+    const blob = firstCachedSeg?.blob ?? cachedSeg.blob
+    const durationSeconds =
+      firstCachedSeg?.durationSeconds ??
+      Math.max(0.5, estimateSpokenDurationSeconds(normalized, params.speed))
+    return {
+      id,
+      text: trimmed,
+      blob,
+      audioUrl: URL.createObjectURL(blob),
+      durationSeconds,
+      provider: cachedSeg.provider,
+      pcmBytes: firstCachedSeg?.pcmBytes,
+    }
+  }
+
+  const geminiKey = getSavedGeminiApiKey()
 
   if (geminiKey) {
     try {
@@ -2640,7 +2922,7 @@ export async function regenerateSingleVoiceoverSegment(params: {
         res.kind === "pcm"
           ? res.pcmBytes.byteLength / TTS_BYTE_RATE
           : Math.max(0.5, estimateSpokenDurationSeconds(normalized, params.speed))
-      return {
+      const segItem: VoiceoverSegmentItem = {
         id,
         text: trimmed,
         blob,
@@ -2649,6 +2931,16 @@ export async function regenerateSingleVoiceoverSegment(params: {
         provider: "gemini",
         pcmBytes: res.kind === "pcm" ? res.pcmBytes : undefined,
       }
+      setCachedTtsClip(segCacheKey, {
+        blob,
+        mimeType: "audio/wav",
+        fileExtension: "wav",
+        voiceName: `${preset.label} · Gemini`,
+        provider: "gemini",
+        cleanedText: normalized,
+        segments: toCachedSegments([segItem]),
+      })
+      return segItem
     } catch (err) {
       if (params.signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
         throw err

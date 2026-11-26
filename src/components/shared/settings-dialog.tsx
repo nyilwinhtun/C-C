@@ -121,6 +121,12 @@ const PROVIDER_INFO: Record<
   },
 }
 
+function maskGeminiKey(rawKey: string): string {
+  const trimmed = rawKey.trim()
+  if (trimmed.length <= 10) return trimmed
+  return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`
+}
+
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const {
     language,
@@ -170,6 +176,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     editorialLength,
     editorialFormat,
     shopLogoDataUrl,
+    geminiKeyPool,
+    activeGeminiKeyIndex,
+    geminiKeyCooldowns,
+    getGeminiKeyPool,
+    addGeminiPoolKey,
+    removeGeminiPoolKey,
+    setActiveGeminiKeyIndex,
     setMicFilterMode,
     setLiveModeEnabled,
     setVoiceDnaSamples,
@@ -192,6 +205,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       editorialLength: state.editorialLength,
       editorialFormat: state.editorialFormat,
       shopLogoDataUrl: state.shopLogoDataUrl,
+      geminiKeyPool: state.geminiKeyPool,
+      activeGeminiKeyIndex: state.activeGeminiKeyIndex,
+      geminiKeyCooldowns: state.geminiKeyCooldowns,
+      getGeminiKeyPool: state.getGeminiKeyPool,
+      addGeminiPoolKey: state.addGeminiPoolKey,
+      removeGeminiPoolKey: state.removeGeminiPoolKey,
+      setActiveGeminiKeyIndex: state.setActiveGeminiKeyIndex,
       setMicFilterMode: state.setMicFilterMode,
       setLiveModeEnabled: state.setLiveModeEnabled,
       setVoiceDnaSamples: state.setVoiceDnaSamples,
@@ -203,6 +223,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   // Group 1: API & Model state
   const [selectedProvider, setSelectedProvider] = useState<AIProvider>(aiProvider)
   const [geminiKeyInput, setGeminiKeyInput] = useState(apiKeys.gemini ?? "")
+  const [newPoolKeyInput, setNewPoolKeyInput] = useState("")
   const [geminiModelInput, setGeminiModelInput] = useState(
     models.gemini || DEFAULT_MODELS.gemini
   )
@@ -241,6 +262,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
       setSelectedProvider(aiProvider)
       setGeminiKeyInput(apiKeys.gemini ?? "")
+      setNewPoolKeyInput("")
       setGeminiModelInput(initialGeminiModel)
       setGeminiCustomMode(isGeminiCustom)
       setOpenrouterKeyInput(apiKeys.openrouter ?? "")
@@ -320,6 +342,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       editorialLength,
       editorialFormat,
       shopLogoDataUrl,
+      geminiKeyPool,
+      activeGeminiKeyIndex,
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json",
@@ -350,7 +374,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           Array.isArray(parsed.generatedHistory) ||
           Array.isArray(parsed.voiceDnaSamples) ||
           (typeof parsed.shopProfile === "object" && parsed.shopProfile !== null) ||
-          Array.isArray(parsed.customPronunciations))
+          Array.isArray(parsed.customPronunciations) ||
+          Array.isArray(parsed.geminiKeyPool))
 
       if (!hasValidField) {
         toast.error(t(language, "settings.restoreError"))
@@ -426,11 +451,66 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     }
   }
 
+  const handleAddPoolKey = () => {
+    const trimmed = newPoolKeyInput.trim()
+    if (!trimmed) return
+    if (!isValidGeminiApiKey(trimmed)) {
+      toast.error(t(language, "settings.invalidGeminiKey"))
+      return
+    }
+    if (geminiKeyPool.length >= 5) {
+      toast.error(
+        language === "my"
+          ? "အရန် API Key အများဆုံး ၅ ခုအထိသာ ထည့်သွင်းနိုင်ပါသည်"
+          : "You can add up to 5 Gemini API keys in the pool."
+      )
+      return
+    }
+    if (
+      geminiKeyPool.includes(trimmed) ||
+      geminiKeyInput.trim() === trimmed ||
+      apiKeys.gemini?.trim() === trimmed
+    ) {
+      toast.error(
+        language === "my"
+          ? "ဤ Gemini API Key ကို ထည့်သွင်းပြီးသား ဖြစ်ပါသည်"
+          : "This Gemini API key is already saved."
+      )
+      return
+    }
+    const added = addGeminiPoolKey(trimmed)
+    if (added) {
+      triggerHaptic(8)
+      setNewPoolKeyInput("")
+      toast.success(
+        language === "my"
+          ? "အရန် Gemini API Key အသစ် ထည့်သွင်းပြီးပါပြီ"
+          : "Added Gemini API key to auto-rotation pool"
+      )
+    }
+  }
+
   const handleSaveSettings = () => {
     const trimmedGeminiKey = geminiKeyInput.trim()
     if (trimmedGeminiKey && !isValidGeminiApiKey(trimmedGeminiKey)) {
       toast.error(t(language, "settings.invalidGeminiKey"))
       return
+    }
+
+    const pendingPoolKey = newPoolKeyInput.trim()
+    if (pendingPoolKey) {
+      if (!isValidGeminiApiKey(pendingPoolKey)) {
+        toast.error(t(language, "settings.invalidGeminiKey"))
+        return
+      }
+      if (
+        geminiKeyPool.length < 5 &&
+        !geminiKeyPool.includes(pendingPoolKey) &&
+        pendingPoolKey !== trimmedGeminiKey
+      ) {
+        addGeminiPoolKey(pendingPoolKey)
+      }
+      setNewPoolKeyInput("")
     }
 
     const normalizedGeminiModel = geminiModelInput.trim() || DEFAULT_MODELS.gemini
@@ -465,6 +545,15 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   }
 
   const isGeminiSaved = Boolean(apiKeys.gemini?.trim())
+  const combinedGeminiPool = getGeminiKeyPool()
+  const safeActivePoolIdx =
+    combinedGeminiPool.length > 0
+      ? ((activeGeminiKeyIndex % combinedGeminiPool.length) +
+          combinedGeminiPool.length) %
+        combinedGeminiPool.length
+      : 0
+  const activePoolKey = combinedGeminiPool[safeActivePoolIdx] ?? ""
+  const nowTimestamp = Date.now()
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -541,6 +630,159 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     )}
                   </Button>
                 </div>
+              </div>
+
+              {/* Multi-Key Auto-Rotation Pool Manager */}
+              <div className="rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] p-3.5 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs sm:text-[13px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                    🔄 အရန် Gemini API Key များ (Auto-Rotation Pool)
+                  </p>
+                  <span className="inline-flex items-center rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-2 py-0.5 text-[10px] font-medium text-[#57534E] dark:text-[#A1A1AA]">
+                    {geminiKeyPool.length} / 5 Keys
+                  </span>
+                </div>
+
+                {/* Add Extra Key Input */}
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    id="api-key-gemini-pool-add"
+                    type="password"
+                    value={newPoolKeyInput}
+                    onChange={(e) => setNewPoolKeyInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        handleAddPoolKey()
+                      }
+                    }}
+                    placeholder={
+                      language === "my"
+                        ? "Project အသစ်မှ အရန် API Key ထည့်ပါ (AIzaSy...)"
+                        : "Add backup Gemini API key from new project (AIzaSy...)"
+                    }
+                    disabled={loading || geminiKeyPool.length >= 5}
+                    className="h-9 rounded-xl bg-white dark:bg-[#27272A] border-[#E7E5E4] dark:border-[#3F3F46] text-xs"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAddPoolKey}
+                    disabled={loading || geminiKeyPool.length >= 5 || !newPoolKeyInput.trim()}
+                    className="h-9 shrink-0 rounded-xl border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar"
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    <span>{language === "my" ? "ထည့်မည်" : "Add"}</span>
+                  </Button>
+                </div>
+
+                {/* Saved Keys List */}
+                {combinedGeminiPool.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {combinedGeminiPool.map((poolKey, combinedIdx) => {
+                      const extraPoolIdx = geminiKeyPool.findIndex(
+                        (k) => k.trim() === poolKey
+                      )
+                      const isPrimaryKey =
+                        Boolean(apiKeys.gemini?.trim()) &&
+                        apiKeys.gemini.trim() === poolKey &&
+                        extraPoolIdx === -1
+                      const isCoolingDown =
+                        typeof geminiKeyCooldowns?.[poolKey] === "number" &&
+                        geminiKeyCooldowns[poolKey] > nowTimestamp
+                      const isActive = activePoolKey === poolKey
+
+                      return (
+                        <div
+                          key={`${poolKey.slice(0, 8)}-${combinedIdx}`}
+                          className={cn(
+                            "flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs transition-colors",
+                            isActive
+                              ? "border-emerald-500/40 bg-white dark:bg-[#27272A]"
+                              : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white/70 dark:bg-[#27272A]/60"
+                          )}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              triggerHaptic(6)
+                              setActiveGeminiKeyIndex(combinedIdx)
+                            }}
+                            title={
+                              language === "my"
+                                ? "ဤ Key ကို လက်ရှိ Active အဖြစ် ရွေးချယ်ရန် နှိပ်ပါ"
+                                : "Click to set as active Gemini key"
+                            }
+                            className="flex items-center gap-2 min-w-0 text-left cursor-pointer"
+                          >
+                            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[#FAF8F5] dark:bg-[#18181B] border border-[#E7E5E4] dark:border-[#3F3F46] text-[10px] font-semibold text-[#57534E] dark:text-[#A1A1AA]">
+                              #{combinedIdx + 1}
+                            </span>
+                            <span className="font-mono text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] truncate">
+                              {maskGeminiKey(poolKey)}
+                            </span>
+                            {isPrimaryKey && (
+                              <span className="rounded-md bg-[#FAF8F5] dark:bg-[#18181B] px-1.5 py-0.5 text-[10px] text-[#57534E] dark:text-[#A1A1AA]">
+                                Primary
+                              </span>
+                            )}
+                          </button>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isCoolingDown ? (
+                              <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                                Cooldown
+                              </span>
+                            ) : isActive ? (
+                              <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                                Active
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  triggerHaptic(6)
+                                  setActiveGeminiKeyIndex(combinedIdx)
+                                }}
+                                className="inline-flex items-center rounded-full bg-[#FAF8F5] dark:bg-[#18181B] border border-[#E7E5E4] dark:border-[#3F3F46] px-2 py-0.5 text-[10px] font-medium text-[#57534E] dark:text-[#A1A1AA] hover:text-[#1C1917] dark:hover:text-[#F5F5F4] cursor-pointer"
+                              >
+                                Standby
+                              </button>
+                            )}
+
+                            {extraPoolIdx >= 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  triggerHaptic(8)
+                                  removeGeminiPoolKey(extraPoolIdx)
+                                }}
+                                aria-label={`Delete pool key #${combinedIdx + 1}`}
+                                className="rounded-lg p-1 text-[#57534E] hover:text-destructive dark:text-[#A1A1AA] dark:hover:text-destructive transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                    {language === "my"
+                      ? "အရန် API Key မထည့်ရသေးပါ။ Key အပိုများ ထည့်ထားပါက Quota ပြည့်သွားချိန်တွင် အလိုအလျောက် ပြောင်းလဲပေးပါမည်။"
+                      : "No backup keys added yet. Add extra keys to auto-rotate when a key hits its 429 quota limit."}
+                  </p>
+                )}
+
+                {/* Tip about creating each key in a new Google AI Studio project */}
+                <p className="text-[11px] leading-relaxed text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                  {language === "my"
+                    ? "💡 အကြံပြုချက်: Google AI Studio တွင် Key အသစ်ယူသည့်အခါ \"Create API key in new project\" ဖြင့် Project အသစ်တစ်ခုစီမှ ယူပါ။ သို့မှသာ Key တစ်ခုချင်းစီ သီးခြား Quota ရရှိပြီး 429 ပြည့်သွားချိန်တွင် နောက် Key တစ်ခုသို့ အလိုအလျောက် ပြောင်းလဲထုတ်ပေးပါမည်။"
+                    : "💡 Tip: On Google AI Studio, choose \"Create API key in new project\" for each key so every key gets its own independent daily/minute quota."}
+                </p>
               </div>
 
               {/* Primary Model Selector */}

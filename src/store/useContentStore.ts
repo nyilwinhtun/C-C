@@ -91,6 +91,8 @@ export interface ContentBackupData {
   editorialLength?: EditorialLength
   editorialFormat?: EditorialFormat
   shopLogoDataUrl?: string | null
+  geminiKeyPool?: string[]
+  activeGeminiKeyIndex?: number
 }
 
 export interface PosterDraft {
@@ -200,6 +202,15 @@ interface ContentState {
   micFilterMode: MicFilterMode
   liveModeEnabled: boolean
   isSyncing: boolean
+  geminiKeyPool: string[]
+  activeGeminiKeyIndex: number
+  geminiKeyCooldowns: Record<string, number>
+  getGeminiKeyPool: () => string[]
+  addGeminiPoolKey: (key: string) => boolean
+  removeGeminiPoolKey: (index: number) => void
+  rotateGeminiKey: (failedKey?: string, cooldownMs?: number) => number
+  setActiveGeminiKeyIndex: (index: number) => void
+  isGeminiKeyCoolingDown: (key: string) => boolean
   setDraftInput: (input: Partial<GeneratorFormValues>) => void
   setTextPostResult: (result: GeneratedContent | null) => void
   clearTextPostDraft: () => void
@@ -355,6 +366,133 @@ export const useContentStore = create<ContentState>()(
       micFilterMode: "raw",
       liveModeEnabled: false,
       isSyncing: false,
+      geminiKeyPool: [],
+      activeGeminiKeyIndex: 0,
+      geminiKeyCooldowns: {},
+
+      getGeminiKeyPool: () => {
+        const state = get()
+        const primaryKey = useUIStore.getState().apiKeys.gemini?.trim() ?? ""
+        const envKey =
+          (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ?? ""
+        const poolKeys = (state.geminiKeyPool ?? [])
+          .map((k) => (typeof k === "string" ? k.trim() : ""))
+          .filter(Boolean)
+
+        const seen = new Set<string>()
+        const combined: string[] = []
+        for (const candidate of [primaryKey, ...poolKeys, envKey]) {
+          if (candidate && !seen.has(candidate)) {
+            seen.add(candidate)
+            combined.push(candidate)
+          }
+        }
+        return combined
+      },
+
+      addGeminiPoolKey: (key) => {
+        const trimmed = key.trim()
+        if (!trimmed) return false
+        const state = get()
+        const currentPool = (state.geminiKeyPool ?? [])
+          .map((k) => k.trim())
+          .filter(Boolean)
+        const primaryKey = useUIStore.getState().apiKeys.gemini?.trim() ?? ""
+        if (currentPool.includes(trimmed) || primaryKey === trimmed) {
+          return false
+        }
+        if (currentPool.length >= 5) {
+          return false
+        }
+        set({
+          geminiKeyPool: [...currentPool, trimmed].slice(0, 5),
+        })
+        return true
+      },
+
+      removeGeminiPoolKey: (index) =>
+        set((state) => {
+          const currentPool = (state.geminiKeyPool ?? [])
+            .map((k) => k.trim())
+            .filter(Boolean)
+          if (index < 0 || index >= currentPool.length) return state
+          const nextPool = currentPool.filter((_, idx) => idx !== index)
+          const primaryKey = useUIStore.getState().apiKeys.gemini?.trim() ?? ""
+          const envKey =
+            (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ?? ""
+          const totalAfter = new Set(
+            [primaryKey, ...nextPool, envKey].filter(Boolean)
+          ).size
+          const nextActiveIdx =
+            totalAfter > 0
+              ? Math.min(state.activeGeminiKeyIndex, totalAfter - 1)
+              : 0
+          return {
+            geminiKeyPool: nextPool,
+            activeGeminiKeyIndex: Math.max(0, nextActiveIdx),
+          }
+        }),
+
+      rotateGeminiKey: (failedKey, cooldownMs = 60_000) => {
+        const state = get()
+        const pool = state.getGeminiKeyPool()
+        const now = Date.now()
+        const nextCooldowns: Record<string, number> = {}
+        for (const [k, expiresAt] of Object.entries(state.geminiKeyCooldowns ?? {})) {
+          if (expiresAt > now) {
+            nextCooldowns[k] = expiresAt
+          }
+        }
+
+        if (pool.length === 0) {
+          if (failedKey?.trim()) {
+            nextCooldowns[failedKey.trim()] = now + cooldownMs
+          }
+          set({ activeGeminiKeyIndex: 0, geminiKeyCooldowns: nextCooldowns })
+          return 0
+        }
+
+        const currentIdx =
+          ((state.activeGeminiKeyIndex % pool.length) + pool.length) % pool.length
+        const keyToMark = failedKey?.trim() || pool[currentIdx]
+        if (keyToMark) {
+          nextCooldowns[keyToMark] = now + cooldownMs
+        }
+
+        const failedPoolIdx = keyToMark ? pool.indexOf(keyToMark) : -1
+        const baseIdx = failedPoolIdx >= 0 ? failedPoolIdx : currentIdx
+
+        let nextIdx = (baseIdx + 1) % pool.length
+        for (let offset = 1; offset < pool.length; offset += 1) {
+          const candidateIdx = (baseIdx + offset) % pool.length
+          const candidateKey = pool[candidateIdx]
+          if (!nextCooldowns[candidateKey] || nextCooldowns[candidateKey] <= now) {
+            nextIdx = candidateIdx
+            break
+          }
+        }
+
+        set({
+          activeGeminiKeyIndex: nextIdx,
+          geminiKeyCooldowns: nextCooldowns,
+        })
+        return nextIdx
+      },
+
+      setActiveGeminiKeyIndex: (index) =>
+        set((state) => {
+          const pool = state.getGeminiKeyPool()
+          if (pool.length === 0) return { activeGeminiKeyIndex: 0 }
+          const safeIdx = ((index % pool.length) + pool.length) % pool.length
+          return { activeGeminiKeyIndex: safeIdx }
+        }),
+
+      isGeminiKeyCoolingDown: (key) => {
+        const trimmed = key.trim()
+        if (!trimmed) return false
+        const expiresAt = get().geminiKeyCooldowns?.[trimmed]
+        return typeof expiresAt === "number" && expiresAt > Date.now()
+      },
 
       setDraftInput: (input) =>
         set((state) => ({
@@ -927,6 +1065,22 @@ export const useContentStore = create<ContentState>()(
           generatedHistory: Array.isArray(data.generatedHistory)
             ? data.generatedHistory.slice(0, 10)
             : state.generatedHistory,
+          geminiKeyPool: Array.isArray(data.geminiKeyPool)
+            ? Array.from(
+                new Set(
+                  data.geminiKeyPool
+                    .filter((k): k is string => typeof k === "string")
+                    .map((k) => k.trim())
+                    .filter(Boolean)
+                )
+              ).slice(0, 5)
+            : state.geminiKeyPool,
+          activeGeminiKeyIndex:
+            typeof data.activeGeminiKeyIndex === "number" &&
+            Number.isInteger(data.activeGeminiKeyIndex) &&
+            data.activeGeminiKeyIndex >= 0
+              ? data.activeGeminiKeyIndex
+              : state.activeGeminiKeyIndex,
         })),
 
       loadVaultFromSupabase: async () => {
@@ -997,6 +1151,8 @@ export const useContentStore = create<ContentState>()(
         editorialResult: state.editorialResult ?? null,
         micFilterMode: state.micFilterMode ?? "raw",
         liveModeEnabled: state.liveModeEnabled ?? false,
+        geminiKeyPool: (state.geminiKeyPool ?? []).slice(0, 5),
+        activeGeminiKeyIndex: state.activeGeminiKeyIndex ?? 0,
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState as Partial<ContentState> | undefined) ?? {}

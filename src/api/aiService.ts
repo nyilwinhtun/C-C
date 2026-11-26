@@ -1,4 +1,6 @@
 import { DEFAULT_MODELS, useUIStore } from "@/store/useUIStore"
+import { useContentStore } from "@/store/useContentStore"
+import { toast } from "@/components/ui/sonner"
 import { extractTextFromEpub } from "@/features/audiobook/epubExtractor"
 import {
   normalizeBusinessCategory,
@@ -549,6 +551,108 @@ function isLocationUnsupportedError(err: unknown): boolean {
   )
 }
 
+export function isGeminiQuotaOrRateLimitError(err: unknown): boolean {
+  if (err instanceof ApiError) {
+    if (err.status === 429 || err.isQuotaExceeded) return true
+  }
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase()
+    return (
+      msg.includes("429") ||
+      msg.includes("quota") ||
+      msg.includes("rate limit") ||
+      msg.includes("resource_exhausted") ||
+      msg.includes("too many requests") ||
+      msg.includes("perday") ||
+      msg.includes("perminute") ||
+      err.message.includes("အခမဲ့ အသုံးပြုခွင့် ပြည့်သွားပါပြီ") ||
+      err.message.includes("ကန့်သတ်ချက် ပြည့်သွားပါသည်")
+    )
+  }
+  return false
+}
+
+/**
+ * Shared Gemini Multi-Key Auto-Rotation wrapper.
+ * Starts at `activeGeminiKeyIndex` in `getGeminiKeyPool()`.
+ * When a request fails with HTTP 429 / quota exceeded, marks that key as cooling down,
+ * rotates to the next key in the pool, shows a subtle non-blocking toast, and retries seamlessly.
+ * Only throws the quota-exhausted error if every saved key in the pool has been tried and failed.
+ */
+export async function executeWithGeminiKeyRotation<T>(
+  fn: (apiKey: string, keyIndex: number) => Promise<T>,
+  fallbackSingleKey?: string
+): Promise<T> {
+  const store = useContentStore.getState()
+  const rawPool = store.getGeminiKeyPool()
+  const extraFallback = fallbackSingleKey?.trim() ?? ""
+  const pool =
+    extraFallback && !rawPool.includes(extraFallback)
+      ? [...rawPool, extraFallback]
+      : rawPool
+
+  if (pool.length === 0) {
+    return await fn(extraFallback, 0)
+  }
+
+  let currentIdx =
+    ((store.activeGeminiKeyIndex % pool.length) + pool.length) % pool.length
+
+  // If the current active key is cooling down and another key is ready, start with the ready key
+  if (pool.length > 1 && store.isGeminiKeyCoolingDown(pool[currentIdx])) {
+    for (let offset = 1; offset < pool.length; offset += 1) {
+      const candidateIdx = (currentIdx + offset) % pool.length
+      if (!store.isGeminiKeyCoolingDown(pool[candidateIdx])) {
+        currentIdx = candidateIdx
+        store.setActiveGeminiKeyIndex(currentIdx)
+        break
+      }
+    }
+  }
+
+  let lastError: unknown
+  for (let attempt = 0; attempt < pool.length; attempt += 1) {
+    const currentKey = pool[currentIdx]
+    try {
+      const result = await fn(currentKey, currentIdx)
+      if (useContentStore.getState().activeGeminiKeyIndex !== currentIdx) {
+        useContentStore.getState().setActiveGeminiKeyIndex(currentIdx)
+      }
+      return result
+    } catch (err) {
+      lastError = err
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw err
+      }
+
+      if (isGeminiQuotaOrRateLimitError(err)) {
+        if (attempt < pool.length - 1) {
+          const rotatedIdx = useContentStore
+            .getState()
+            .rotateGeminiKey(currentKey)
+          const nextIdx =
+            rotatedIdx !== currentIdx
+              ? rotatedIdx
+              : (currentIdx + 1) % pool.length
+          if (nextIdx !== rotatedIdx) {
+            useContentStore.getState().setActiveGeminiKeyIndex(nextIdx)
+          }
+          currentIdx = nextIdx
+          toast.info(
+            `🔄 API Key #${currentIdx + 1} သို့ အလိုအလျောက် ပြောင်းလဲထုတ်ပေးနေပါသည်...`
+          )
+          continue
+        }
+        // Final key in the pool also hit 429 — record its cooldown before rethrowing
+        useContentStore.getState().rotateGeminiKey(currentKey)
+      }
+      throw err
+    }
+  }
+
+  throw lastError
+}
+
 function getAiConfig() {
   const { aiProvider, apiKeys, models } = useUIStore.getState()
   const envGeminiKey =
@@ -556,8 +660,18 @@ function getAiConfig() {
   const envOpenRouterKey =
     (import.meta.env.VITE_OPENROUTER_API_KEY as string | undefined)?.trim() ?? ""
 
+  const geminiPool = useContentStore.getState().getGeminiKeyPool()
+  const activePoolIdx =
+    geminiPool.length > 0
+      ? ((useContentStore.getState().activeGeminiKeyIndex % geminiPool.length) +
+          geminiPool.length) %
+        geminiPool.length
+      : 0
+  const activeGeminiKey =
+    geminiPool[activePoolIdx] || apiKeys.gemini.trim() || envGeminiKey
+
   const resolvedApiKeys = {
-    gemini: apiKeys.gemini.trim() || envGeminiKey,
+    gemini: activeGeminiKey,
     openrouter: apiKeys.openrouter.trim() || envOpenRouterKey,
     groq: apiKeys.groq.trim(),
   }
@@ -638,14 +752,15 @@ async function generateWithGemini(
     generationConfig: { temperature: 0.7, topP: 0.95, maxOutputTokens: 4096 },
   }
 
-  const res = await fetchGeminiGenerateContent(model, apiKey, body)
+  const data = await executeWithGeminiKeyRotation(async (activeKey) => {
+    const res = await fetchGeminiGenerateContent(model, activeKey, body)
+    if (!res.ok) {
+      const text = await res.text().catch(() => "")
+      throw parseApiError("Gemini", res.status, text)
+    }
+    return await res.json()
+  }, apiKey)
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    throw parseApiError("Gemini", res.status, text)
-  }
-
-  const data = await res.json()
   const parts: Array<{ text?: string; thought?: boolean }> =
     data.candidates?.[0]?.content?.parts ?? []
   const content = sanitizePlainText(
@@ -961,14 +1076,15 @@ async function suggestPhotoWithGemini(
     },
   }
 
-  const res = await fetchGeminiGenerateContent(model, apiKey, body)
+  const data = await executeWithGeminiKeyRotation(async (activeKey) => {
+    const res = await fetchGeminiGenerateContent(model, activeKey, body)
+    if (!res.ok) {
+      const text = await res.text().catch(() => "")
+      throw parseApiError("Gemini", res.status, text)
+    }
+    return await res.json()
+  }, apiKey)
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    throw parseApiError("Gemini", res.status, text)
-  }
-
-  const data = await res.json()
   const parts: Array<{ text?: string; thought?: boolean }> =
     data.candidates?.[0]?.content?.parts ?? []
   const content = sanitizePlainText(
@@ -1613,14 +1729,15 @@ async function generateVideoWithGemini(
     },
   }
 
-  const res = await fetchGeminiGenerateContent(model, apiKey, body)
+  const data = await executeWithGeminiKeyRotation(async (activeKey) => {
+    const res = await fetchGeminiGenerateContent(model, activeKey, body)
+    if (!res.ok) {
+      const text = await res.text().catch(() => "")
+      throw parseApiError("Gemini", res.status, text)
+    }
+    return await res.json()
+  }, apiKey)
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    throw parseApiError("Gemini", res.status, text)
-  }
-
-  const data = await res.json()
   const parts: Array<{ text?: string; thought?: boolean }> =
     data.candidates?.[0]?.content?.parts ?? []
   const content = parts
@@ -2012,14 +2129,15 @@ async function callGeminiMultimodalText(params: {
     },
   }
 
-  const res = await fetchGeminiGenerateContent(GEMINI_VISION_MODEL, geminiKey, body)
+  const data = await executeWithGeminiKeyRotation(async (activeKey) => {
+    const res = await fetchGeminiGenerateContent(GEMINI_VISION_MODEL, activeKey, body)
+    if (!res.ok) {
+      const text = await res.text().catch(() => "")
+      throw parseApiError("Gemini", res.status, text)
+    }
+    return await res.json()
+  }, geminiKey)
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    throw parseApiError("Gemini", res.status, text)
-  }
-
-  const data = await res.json()
   const parts: Array<{ text?: string; thought?: boolean }> =
     data.candidates?.[0]?.content?.parts ?? []
   const content = parts
@@ -2140,13 +2258,15 @@ export async function extractCleanUnicodeFromPdfImages(
       },
     }
 
-    const res = await fetchGeminiGenerateContent(GEMINI_VISION_MODEL, geminiKey, body)
-    if (!res.ok) {
-      const text = await res.text().catch(() => "")
-      throw parseApiError("Gemini", res.status, text)
-    }
+    const data = await executeWithGeminiKeyRotation(async (activeKey) => {
+      const res = await fetchGeminiGenerateContent(GEMINI_VISION_MODEL, activeKey, body)
+      if (!res.ok) {
+        const text = await res.text().catch(() => "")
+        throw parseApiError("Gemini", res.status, text)
+      }
+      return await res.json()
+    }, geminiKey)
 
-    const data = await res.json()
     const parts: Array<{ text?: string; thought?: boolean }> =
       data.candidates?.[0]?.content?.parts ?? []
     const content = parts
@@ -2293,21 +2413,24 @@ Rules:
 Source text:
 ${trimmed.slice(0, 12000)}`
 
-  const res = await fetchGeminiGenerateContent(GEMINI_MODEL, geminiKey, {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: 0.55,
-      topP: 0.95,
-      maxOutputTokens: 4096,
-    },
-  })
+  const data = await executeWithGeminiKeyRotation(async (activeKey) => {
+    const res = await fetchGeminiGenerateContent(GEMINI_MODEL, activeKey, {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.55,
+        topP: 0.95,
+        maxOutputTokens: 4096,
+      },
+    })
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "")
-    throw parseApiError("Gemini", res.status, errText)
-  }
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "")
+      throw parseApiError("Gemini", res.status, errText)
+    }
 
-  const data = await res.json()
+    return await res.json()
+  }, geminiKey)
+
   const parts: Array<{ text?: string; thought?: boolean }> =
     data.candidates?.[0]?.content?.parts ?? []
   const output = parts
@@ -2388,26 +2511,29 @@ export async function analyzeVideoClipsAndCaptions(
 2. "captions": Generate timestamped subtitles/captions covering the spoken or visual narrative ("Auto-Captions"). Each item: { "startTime": "MM:SS", "endTime": "MM:SS", "text": string }.
 ${langPrompt}`
 
-  const res = await fetchGeminiGenerateContent(GEMINI_VISION_MODEL, geminiKey, {
-    contents: [
-      {
-        parts: [...mediaParts, { text: prompt }],
+  const data = await executeWithGeminiKeyRotation(async (activeKey) => {
+    const res = await fetchGeminiGenerateContent(GEMINI_VISION_MODEL, activeKey, {
+      contents: [
+        {
+          parts: [...mediaParts, { text: prompt }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.3,
+        topP: 0.95,
+        maxOutputTokens: 4096,
+        responseMimeType: "application/json",
       },
-    ],
-    generationConfig: {
-      temperature: 0.3,
-      topP: 0.95,
-      maxOutputTokens: 4096,
-      responseMimeType: "application/json",
-    },
-  })
+    })
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "")
-    throw parseApiError("Gemini", res.status, errText)
-  }
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "")
+      throw parseApiError("Gemini", res.status, errText)
+    }
 
-  const data = await res.json()
+    return await res.json()
+  }, geminiKey)
+
   const parts: Array<{ text?: string; thought?: boolean }> =
     data.candidates?.[0]?.content?.parts ?? []
   const rawJson = parts
@@ -2571,12 +2697,14 @@ async function runEditorialModelCall(
         ...(expectJson ? { responseMimeType: "application/json" } : {}),
       },
     }
-    const res = await fetchGeminiGenerateContent(targetModel, key, body)
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "")
-      throw parseApiError("Gemini", res.status, errText)
-    }
-    const data = await res.json()
+    const data = await executeWithGeminiKeyRotation(async (activeKey) => {
+      const res = await fetchGeminiGenerateContent(targetModel, activeKey, body)
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "")
+        throw parseApiError("Gemini", res.status, errText)
+      }
+      return await res.json()
+    }, key)
     const parts: Array<{ text?: string; thought?: boolean }> =
       data.candidates?.[0]?.content?.parts ?? []
     const text = parts
@@ -2897,7 +3025,6 @@ async function callGeminiImageEdit(
   model: string
 ): Promise<GenerateProductSceneResult> {
   const base64Data = request.imageBase64.replace(/^data:[^;]+;base64,/, "")
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
 
   const prompt = `Edit this product photo by replacing the background and environment with the following scene: ${request.scenePrompt}.
 CRITICAL INSTRUCTIONS:
@@ -2924,18 +3051,21 @@ CRITICAL INSTRUCTIONS:
     },
   }
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  })
+  const data = await executeWithGeminiKeyRotation(async (activeKey) => {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(activeKey)}`
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    throw parseApiError("Gemini", res.status, text)
-  }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "")
+      throw parseApiError("Gemini", res.status, text)
+    }
 
-  const data = await res.json()
+    return await res.json()
+  }, apiKey)
   const parts: Array<{
     inlineData?: { mimeType?: string; data?: string }
     inline_data?: { mime_type?: string; data?: string }
