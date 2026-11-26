@@ -100,6 +100,16 @@ export const BURMESE_VOICE_PRESETS: Record<BurmeseVoiceType, BurmeseVoicePreset>
 
 export const VOICEOVER_SPEEDS: VoiceoverSpeed[] = [0.9, 1.0, 1.1, 1.2]
 
+export interface VoiceoverSegmentItem {
+  id: string
+  text: string
+  blob: Blob
+  audioUrl: string
+  durationSeconds: number
+  provider: "gemini" | "neural-tts" | "speech-synthesis"
+  pcmBytes?: Uint8Array
+}
+
 export interface VoiceoverResult {
   audioUrl: string
   blob: Blob
@@ -110,6 +120,7 @@ export interface VoiceoverResult {
   voiceName: string
   provider: "gemini" | "neural-tts" | "speech-synthesis"
   cleanedText: string
+  segments?: VoiceoverSegmentItem[]
 }
 
 export class TtsError extends Error {
@@ -740,10 +751,34 @@ function concatenatePcmBuffersToWav(pcmChunks: Uint8Array[], gapMs = 120): Blob 
   view.setUint32(40, totalDataLength, true)
 
   const out = new Uint8Array(buffer, 44)
+  const boundaryFadeSamples = Math.floor((TTS_SAMPLE_RATE * 15) / 1000)
   let offset = 0
   for (let i = 0; i < nonEmpty.length; i += 1) {
     const chunk = nonEmpty[i]
     out.set(chunk, offset)
+
+    // Apply a gentle 15ms fade-in/fade-out at chunk boundaries to eliminate clicks or pitch jumps
+    const chunkSamples = Math.floor(chunk.byteLength / 2)
+    const maxFadeSamples = Math.min(boundaryFadeSamples, Math.floor(chunkSamples / 2))
+    if (maxFadeSamples > 0) {
+      const chunkView = new DataView(buffer, 44 + offset, chunkSamples * 2)
+      if (i > 0) {
+        for (let s = 0; s < maxFadeSamples; s += 1) {
+          const gain = s / maxFadeSamples
+          const scaled = Math.round(chunkView.getInt16(s * 2, true) * gain)
+          chunkView.setInt16(s * 2, scaled, true)
+        }
+      }
+      if (i < nonEmpty.length - 1) {
+        for (let s = 0; s < maxFadeSamples; s += 1) {
+          const sampleIdx = chunkSamples - maxFadeSamples + s
+          const gain = 1 - (s + 1) / maxFadeSamples
+          const scaled = Math.round(chunkView.getInt16(sampleIdx * 2, true) * gain)
+          chunkView.setInt16(sampleIdx * 2, scaled, true)
+        }
+      }
+    }
+
     offset += chunk.byteLength
     if (i < nonEmpty.length - 1) {
       // ArrayBuffer is zero-initialized, so advancing offset leaves clean 16-bit PCM silence
@@ -963,6 +998,15 @@ export function splitScriptIntoChunks(text: string, maxChunkChars = 240): string
   if (current.trim()) {
     chunks.push(current.trim())
   }
+  // Prevent isolated short trailing chunks (< 110 chars) from shifting pitch or persona
+  if (chunks.length >= 2) {
+    const lastChunk = chunks[chunks.length - 1]
+    const prevChunk = chunks[chunks.length - 2]
+    const merged = `${prevChunk} ${lastChunk}`
+    if (lastChunk.length < 110 && merged.length <= 330) {
+      chunks.splice(chunks.length - 2, 2, merged)
+    }
+  }
   return chunks
 }
 
@@ -1083,7 +1127,8 @@ async function synthesizeGeminiChunk(
   preset: BurmeseVoicePreset,
   speed: VoiceoverSpeed,
   deliveryTone: VoiceDeliveryTone,
-  apiKey: string
+  apiKey: string,
+  previousChunkText?: string
 ): Promise<
   | { kind: "pcm"; pcmBytes: Uint8Array; sampleRate: number }
   | { kind: "blob"; blob: Blob; mimeType: string; fileExtension: "wav" | "mp3" }
@@ -1098,12 +1143,17 @@ async function synthesizeGeminiChunk(
         ? "သီဟ (Thiha)"
         : "နီလာ (Nilar)"
 
+  const previousContextLine = previousChunkText?.trim()
+    ? `Reference context from previous sentence (DO NOT speak this aloud — match its exact vocal pitch, warmth, and steady cadence seamlessly): "${previousChunkText.trim()}"`
+    : null
+
   const prompt = [
     `You are ${narratorName}, a native Yangon Myanmar (Burmese) professional voiceover narrator.`,
     tonePreset.styleInstruction,
     "Voice Stability & Consistency Anchor (CRITICAL): Maintain the exact same vocal pitch, calm steady speaking rate, volume, and natural Burmese vocal timbre from the first syllable to the last. Do NOT shift pitch, whisper, dramatize, rush, or change persona mid-sentence or across chunks.",
     "Pronunciation & Prosody Direction: Speak in clear, articulate, warm native Yangon Myanmar pronunciation with crisp consonant endings (အသတ်သံများ ပီသကြည်လင်စွာ) and accurate Burmese tonal contours. Use natural Yangon spoken intonation—never stiff, robotic, or English-accented cadence.",
     `Pacing & Breath Pauses: Pause briefly and naturally after every \`၊\` and take a full, calm breath pause after every \`။\` so sentences are never rushed or slurred. ${getSpeedPromptInstruction(speed)}`,
+    ...(previousContextLine ? [previousContextLine] : []),
     "Read ONLY the following Burmese script aloud. Do not add any intro, commentary, or extra words.",
     "",
     chunkText,
@@ -1224,24 +1274,59 @@ async function synthesizeWithGemini(
   deliveryTone: VoiceDeliveryTone,
   apiKey: string,
   onChunkProgress?: (currentChunk: number, totalChunks: number) => void
-): Promise<{ blob: Blob; mimeType: string; fileExtension: "wav" | "mp3" }> {
+): Promise<{
+  blob: Blob
+  mimeType: string
+  fileExtension: "wav" | "mp3"
+  segments: VoiceoverSegmentItem[]
+}> {
   const chunks = splitScriptIntoChunks(cleanedText, 240)
   const chunkResults = []
   for (let i = 0; i < chunks.length; i += 1) {
     onChunkProgress?.(i + 1, chunks.length)
-    chunkResults.push(await synthesizeGeminiChunk(chunks[i], preset, speed, deliveryTone, apiKey))
+    const previousContext = i > 0 ? chunks[i - 1] : undefined
+    chunkResults.push(
+      await synthesizeGeminiChunk(chunks[i], preset, speed, deliveryTone, apiKey, previousContext)
+    )
   }
+
+  const timestamp = Date.now()
+  const segments: VoiceoverSegmentItem[] = chunkResults.map((res, idx) => {
+    const segBlob =
+      res.kind === "pcm"
+        ? pcmToWavBlob(res.pcmBytes, TTS_SAMPLE_RATE, TTS_NUM_CHANNELS, TTS_BITS_PER_SAMPLE)
+        : res.blob
+    const durationSeconds =
+      res.kind === "pcm"
+        ? res.pcmBytes.byteLength / TTS_BYTE_RATE
+        : Math.max(0.5, estimateSpokenDurationSeconds(chunks[idx], speed))
+    return {
+      id: `seg-${timestamp}-${idx}`,
+      text: chunks[idx],
+      blob: segBlob,
+      audioUrl: URL.createObjectURL(segBlob),
+      durationSeconds,
+      provider: "gemini",
+      pcmBytes: res.kind === "pcm" ? res.pcmBytes : undefined,
+    }
+  })
 
   if (chunkResults.length === 1) {
     const single = chunkResults[0]
     if (single.kind === "pcm") {
       return {
-        blob: pcmToWavBlob(single.pcmBytes, TTS_SAMPLE_RATE, TTS_NUM_CHANNELS, TTS_BITS_PER_SAMPLE),
+        blob: segments[0].blob,
         mimeType: "audio/wav",
         fileExtension: "wav",
+        segments,
       }
     }
-    return { blob: single.blob, mimeType: single.mimeType, fileExtension: single.fileExtension }
+    return {
+      blob: single.blob,
+      mimeType: single.mimeType,
+      fileExtension: single.fileExtension,
+      segments,
+    }
   }
 
   if (chunkResults.every((r) => r.kind === "pcm")) {
@@ -1250,16 +1335,13 @@ async function synthesizeWithGemini(
       blob: concatenatePcmBuffersToWav(pcmChunks, 120),
       mimeType: "audio/wav",
       fileExtension: "wav",
+      segments,
     }
   }
 
-  const blobs = chunkResults.map((r) =>
-    r.kind === "pcm"
-      ? pcmToWavBlob(r.pcmBytes, TTS_SAMPLE_RATE, TTS_NUM_CHANNELS, TTS_BITS_PER_SAMPLE)
-      : r.blob
-  )
+  const blobs = segments.map((s) => s.blob)
   const mergedWav = await concatenateAudioBlobsToWav(blobs)
-  return { blob: mergedWav, mimeType: "audio/wav", fileExtension: "wav" }
+  return { blob: mergedWav, mimeType: "audio/wav", fileExtension: "wav", segments }
 }
 
 function escapeXml(text: string): string {
@@ -1646,6 +1728,7 @@ async function synthesizeSpeechSegmentBlob(
   fileExtension: "wav" | "mp3"
   voiceName: string
   provider: "gemini" | "neural-tts" | "speech-synthesis"
+  segments: VoiceoverSegmentItem[]
 }> {
   const geminiKey = getSavedGeminiApiKey()
 
@@ -1674,6 +1757,8 @@ async function synthesizeSpeechSegmentBlob(
     let neuralBlob: Blob
     let neuralMime = "audio/mpeg"
     let neuralExt: "mp3" | "wav" = "mp3"
+    const timestamp = Date.now()
+    const segments: VoiceoverSegmentItem[] = []
 
     if (neuralChunks.length <= 1) {
       onChunkProgress?.(1, 1)
@@ -1681,12 +1766,28 @@ async function synthesizeSpeechSegmentBlob(
       neuralBlob = single.blob
       neuralMime = single.mimeType
       neuralExt = single.fileExtension
+      segments.push({
+        id: `seg-${timestamp}-0`,
+        text: neuralChunks[0] ?? cleanedText,
+        blob: single.blob,
+        audioUrl: URL.createObjectURL(single.blob),
+        durationSeconds: Math.max(0.5, estimateSpokenDurationSeconds(cleanedText, speed)),
+        provider: "neural-tts",
+      })
     } else {
       const chunkBlobs: Blob[] = []
       for (let i = 0; i < neuralChunks.length; i += 1) {
         onChunkProgress?.(i + 1, neuralChunks.length)
         const res = await synthesizeWithNeuralTts(neuralChunks[i], preset, speed)
         chunkBlobs.push(res.blob)
+        segments.push({
+          id: `seg-${timestamp}-${i}`,
+          text: neuralChunks[i],
+          blob: res.blob,
+          audioUrl: URL.createObjectURL(res.blob),
+          durationSeconds: Math.max(0.5, estimateSpokenDurationSeconds(neuralChunks[i], speed)),
+          provider: "neural-tts",
+        })
       }
       neuralBlob = await concatenateAudioBlobsToWav(chunkBlobs)
       neuralMime = "audio/wav"
@@ -1699,6 +1800,7 @@ async function synthesizeSpeechSegmentBlob(
       fileExtension: neuralExt,
       voiceName: `${preset.label} · ${preset.neuralVoice}`,
       provider: "neural-tts",
+      segments,
     }
   } catch {
     onChunkProgress?.(1, 1)
@@ -1707,6 +1809,16 @@ async function synthesizeSpeechSegmentBlob(
       ...speechResult,
       voiceName: `${preset.label} · Browser Speech`,
       provider: "speech-synthesis",
+      segments: [
+        {
+          id: `seg-${Date.now()}-0`,
+          text: cleanedText,
+          blob: speechResult.blob,
+          audioUrl: URL.createObjectURL(speechResult.blob),
+          durationSeconds: Math.max(0.5, estimateSpokenDurationSeconds(cleanedText, speed)),
+          provider: "speech-synthesis",
+        },
+      ],
     }
   }
 }
@@ -1876,6 +1988,7 @@ export async function generateBurmeseVoiceover(
       voiceName: single.voiceName,
       provider: single.provider,
       cleanedText: combinedCleanedText,
+      segments: single.segments,
     }
   }
 
@@ -1895,6 +2008,7 @@ export async function generateBurmeseVoiceover(
   let lastVoiceName = `${preset.label} · ${preset.neuralVoice}`
   let lastProvider: VoiceoverResult["provider"] = "neural-tts"
   let speechIdx = 0
+  const allSegments: VoiceoverSegmentItem[] = []
 
   for (const item of normalizedTimeline) {
     if (item.kind === "pause") {
@@ -1924,6 +2038,7 @@ export async function generateBurmeseVoiceover(
       speechIdx += 1
       lastVoiceName = res.voiceName
       lastProvider = res.provider
+      allSegments.push(...res.segments)
       audioTimeline.push({ kind: "speech", blob: res.blob })
     }
   }
@@ -1940,6 +2055,7 @@ export async function generateBurmeseVoiceover(
     voiceName: lastVoiceName,
     provider: lastProvider,
     cleanedText: combinedCleanedText,
+    segments: allSegments,
   }
 }
 
@@ -2195,6 +2311,144 @@ export async function mixVoiceoverWithAutoDuckingMusic(params: {
     blob: wavBlob,
     audioBuffer: rendered,
     durationSeconds: rendered.duration,
+  }
+}
+
+/**
+ * Regenerate a single voiceover segment (passing the previous segment's text as
+ * non-spoken context when available so pitch, warmth, and cadence match seamlessly).
+ */
+export async function regenerateSingleVoiceoverSegment(params: {
+  text: string
+  voiceType: BurmeseVoiceType
+  speed: VoiceoverSpeed
+  deliveryTone?: VoiceDeliveryTone
+  customPronunciations?: ReadonlyArray<PronunciationRule>
+  previousChunkText?: string
+}): Promise<VoiceoverSegmentItem> {
+  const trimmed = params.text.trim()
+  if (!trimmed) {
+    throw new TtsError("Segment text cannot be empty.")
+  }
+
+  const normalized = normalizeBurmeseForTTS(trimmed, params.customPronunciations) || trimmed
+  const preset = BURMESE_VOICE_PRESETS[params.voiceType]
+  const deliveryTone = params.deliveryTone ?? "normal"
+  const geminiKey = getSavedGeminiApiKey()
+  const id = `seg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+
+  if (geminiKey) {
+    try {
+      const res = await synthesizeGeminiChunk(
+        normalized,
+        preset,
+        params.speed,
+        deliveryTone,
+        geminiKey,
+        params.previousChunkText
+      )
+      const blob =
+        res.kind === "pcm"
+          ? pcmToWavBlob(res.pcmBytes, TTS_SAMPLE_RATE, TTS_NUM_CHANNELS, TTS_BITS_PER_SAMPLE)
+          : res.blob
+      const durationSeconds =
+        res.kind === "pcm"
+          ? res.pcmBytes.byteLength / TTS_BYTE_RATE
+          : Math.max(0.5, estimateSpokenDurationSeconds(normalized, params.speed))
+      return {
+        id,
+        text: trimmed,
+        blob,
+        audioUrl: URL.createObjectURL(blob),
+        durationSeconds,
+        provider: "gemini",
+        pcmBytes: res.kind === "pcm" ? res.pcmBytes : undefined,
+      }
+    } catch {
+      // Fall back to Neural TTS
+    }
+  }
+
+  try {
+    const res = await synthesizeWithNeuralTts(normalized, preset, params.speed)
+    return {
+      id,
+      text: trimmed,
+      blob: res.blob,
+      audioUrl: URL.createObjectURL(res.blob),
+      durationSeconds: Math.max(0.5, estimateSpokenDurationSeconds(normalized, params.speed)),
+      provider: "neural-tts",
+    }
+  } catch {
+    const speechResult = synthesizeWithSpeechSynthesis(normalized, preset, params.speed)
+    return {
+      id,
+      text: trimmed,
+      blob: speechResult.blob,
+      audioUrl: URL.createObjectURL(speechResult.blob),
+      durationSeconds: Math.max(0.5, estimateSpokenDurationSeconds(normalized, params.speed)),
+      provider: "speech-synthesis",
+    }
+  }
+}
+
+/**
+ * Re-merge edited/regenerated segments into a single cohesive WAV audio file
+ * (using lossless 15ms-faded PCM stitching when all segments have PCM bytes),
+ * optionally applying background music auto-ducking.
+ */
+export async function mergeVoiceoverSegments(params: {
+  segments: ReadonlyArray<VoiceoverSegmentItem>
+  musicPreset?: StandaloneBgMusicPreset | "custom"
+  customMusicFile?: File | null
+}): Promise<{
+  blob: Blob
+  audioUrl: string
+  audioBuffer: AudioBuffer
+  durationSeconds: number
+  mimeType: "audio/wav"
+  fileExtension: "wav"
+}> {
+  if (params.segments.length === 0) {
+    throw new TtsError("No segments to merge.")
+  }
+
+  let mergedBlob: Blob
+  if (params.segments.every((seg) => seg.pcmBytes && seg.pcmBytes.byteLength > 0)) {
+    mergedBlob = concatenatePcmBuffersToWav(
+      params.segments.map((seg) => seg.pcmBytes as Uint8Array),
+      120
+    )
+  } else {
+    mergedBlob = await concatenateAudioBlobsToWav(params.segments.map((seg) => seg.blob))
+  }
+
+  if (params.musicPreset && params.musicPreset !== "none") {
+    const mixed = await mixVoiceoverWithAutoDuckingMusic({
+      voiceoverBlob: mergedBlob,
+      musicPreset: params.musicPreset,
+      customMusicFile: params.customMusicFile,
+      musicVolume: 0.34,
+    })
+    return {
+      blob: mixed.blob,
+      audioUrl: mixed.audioUrl,
+      audioBuffer: mixed.audioBuffer,
+      durationSeconds: mixed.durationSeconds,
+      mimeType: "audio/wav",
+      fileExtension: "wav",
+    }
+  }
+
+  const audioBuffer = await decodeBlobToAudioBuffer(mergedBlob)
+  const audioUrl = URL.createObjectURL(mergedBlob)
+  return {
+    blob: mergedBlob,
+    audioUrl,
+    audioBuffer,
+    durationSeconds: audioBuffer.duration,
+    mimeType: "audio/wav",
+    fileExtension: "wav",
   }
 }
 

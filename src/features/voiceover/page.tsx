@@ -1,7 +1,21 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Loader2, Mic, Pause, Play, Radio, Settings2, Square, Upload } from "lucide-react"
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Link2,
+  Loader2,
+  Mic,
+  Pause,
+  Play,
+  Radio,
+  RefreshCw,
+  Settings2,
+  Square,
+  Upload,
+} from "lucide-react"
 import { useShallow } from "zustand/react/shallow"
 import { transcribeAudioWithGemini } from "@/api/aiService"
 import {
@@ -9,8 +23,12 @@ import {
   cleanVoiceoverText,
   estimateSpokenDurationSeconds,
   formatAudioClockDuration,
+  mergeVoiceoverSegments,
   mixVoiceoverWithAutoDuckingMusic,
+  regenerateSingleVoiceoverSegment,
   toBurmeseDigits,
+  type BurmeseVoiceType,
+  type VoiceoverSegmentItem,
 } from "@/api/ttsService"
 import { IosAudioPlayer } from "@/components/shared/IosAudioPlayer"
 import { Button } from "@/components/ui/button"
@@ -36,6 +54,7 @@ import { StudioSettingsSheet } from "./StudioSettingsSheet"
 
 const WAVEFORM_BAR_COUNT = 28
 const LIVE_WAVEFORM_BAR_COUNT = 20
+const SAFE_SCRIPT_CHAR_LIMIT = 1500
 
 function formatRecordTimer(seconds: number): string {
   const mins = Math.floor(seconds / 60)
@@ -92,12 +111,15 @@ export function VoiceoverPage() {
     generatedAudioDuration,
     generatedAudioTitle,
     generatedAudioSource,
+    generatedAudioSegments,
     selfRecordedBlob,
     selfRecordedMimeType,
     selfRecordedNeedsTranscribe,
     setSelfRecordedNeedsTranscribe,
     setStudioSelfAudio,
     generateStudioVoiceover,
+    setMergedStudioAudio,
+    customPronunciations,
     micFilterMode,
     setMicFilterMode,
     liveModeEnabled,
@@ -126,12 +148,15 @@ export function VoiceoverPage() {
       generatedAudioDuration: state.generatedAudioDuration,
       generatedAudioTitle: state.generatedAudioTitle,
       generatedAudioSource: state.generatedAudioSource,
+      generatedAudioSegments: state.generatedAudioSegments,
       selfRecordedBlob: state.selfRecordedBlob,
       selfRecordedMimeType: state.selfRecordedMimeType,
       selfRecordedNeedsTranscribe: state.selfRecordedNeedsTranscribe,
       setSelfRecordedNeedsTranscribe: state.setSelfRecordedNeedsTranscribe,
       setStudioSelfAudio: state.setStudioSelfAudio,
       generateStudioVoiceover: state.generateStudioVoiceover,
+      setMergedStudioAudio: state.setMergedStudioAudio,
+      customPronunciations: state.customPronunciations,
       micFilterMode: state.micFilterMode,
       setMicFilterMode: state.setMicFilterMode,
       liveModeEnabled: state.liveModeEnabled,
@@ -338,6 +363,32 @@ export function VoiceoverPage() {
 
   // Transcription state
   const [isTranscribing, setIsTranscribing] = useState(false)
+
+  // Segment-by-Segment Studio state
+  const [segmentsExpanded, setSegmentsExpanded] = useState(false)
+  const [editableSegments, setEditableSegments] = useState<VoiceoverSegmentItem[]>([])
+  const [regeneratingSegmentId, setRegeneratingSegmentId] = useState<string | null>(null)
+  const [isMergingSegments, setIsMergingSegments] = useState(false)
+  const [playingSegmentId, setPlayingSegmentId] = useState<string | null>(null)
+  const segmentAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  useEffect(() => {
+    setEditableSegments(generatedAudioSegments)
+    setPlayingSegmentId(null)
+    if (segmentAudioRef.current) {
+      segmentAudioRef.current.pause()
+      segmentAudioRef.current = null
+    }
+  }, [generatedAudioSegments])
+
+  useEffect(() => {
+    return () => {
+      if (segmentAudioRef.current) {
+        segmentAudioRef.current.pause()
+        segmentAudioRef.current = null
+      }
+    }
+  }, [])
 
   const isExtractingPdf =
     pdfExtractionStatus === "extracting" || pdfExtractionStatus === "rewriting"
@@ -682,6 +733,147 @@ export function VoiceoverPage() {
     })
   }
 
+  const handleTogglePlaySegment = (seg: VoiceoverSegmentItem) => {
+    setIosAudioSessionPlayback()
+    unlockIosAudio()
+
+    if (playingSegmentId === seg.id && segmentAudioRef.current) {
+      segmentAudioRef.current.pause()
+      segmentAudioRef.current = null
+      setPlayingSegmentId(null)
+      return
+    }
+
+    if (segmentAudioRef.current) {
+      segmentAudioRef.current.pause()
+      segmentAudioRef.current = null
+    }
+
+    const audio = new Audio(seg.audioUrl)
+    audio.onended = () => {
+      setPlayingSegmentId(null)
+      segmentAudioRef.current = null
+    }
+    audio.onerror = () => {
+      setPlayingSegmentId(null)
+      segmentAudioRef.current = null
+    }
+    segmentAudioRef.current = audio
+    setPlayingSegmentId(seg.id)
+    void audio.play().catch(() => {
+      setPlayingSegmentId(null)
+      segmentAudioRef.current = null
+    })
+  }
+
+  const handleSegmentTextChange = (id: string, nextText: string) => {
+    setEditableSegments((prev) =>
+      prev.map((seg) => (seg.id === id ? { ...seg, text: nextText } : seg))
+    )
+  }
+
+  const handleRegenerateSegment = async (index: number) => {
+    const targetSeg = editableSegments[index]
+    if (!targetSeg || regeneratingSegmentId || isMergingSegments) return
+
+    if (!targetSeg.text.trim()) {
+      toast.error(
+        language === "my"
+          ? "အသံပြန်ထုတ်ရန် စာသားထည့်ပါ"
+          : "Segment text cannot be empty."
+      )
+      return
+    }
+
+    setIosAudioSessionPlayback()
+    unlockIosAudio()
+    triggerHaptic(8)
+    setRegeneratingSegmentId(targetSeg.id)
+
+    const voiceType: BurmeseVoiceType =
+      selectedVoice === "ko_khant"
+        ? "deep_male"
+        : selectedVoice === "thiha"
+          ? "male"
+          : "female"
+
+    try {
+      const updated = await regenerateSingleVoiceoverSegment({
+        text: targetSeg.text,
+        voiceType,
+        speed: voiceSpeed,
+        deliveryTone: voiceDeliveryTone,
+        customPronunciations,
+        previousChunkText: index > 0 ? editableSegments[index - 1]?.text : undefined,
+      })
+
+      if (playingSegmentId === targetSeg.id && segmentAudioRef.current) {
+        segmentAudioRef.current.pause()
+        segmentAudioRef.current = null
+        setPlayingSegmentId(null)
+      }
+
+      setEditableSegments((prev) =>
+        prev.map((seg, idx) => (idx === index ? updated : seg))
+      )
+      toast.success(
+        language === "my"
+          ? `အပိုင်း ${toBurmeseDigits(index + 1)} အသံပြန်ထုတ်ပြီးပါပြီ`
+          : `Segment #${index + 1} regenerated`
+      )
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : language === "my"
+            ? "အပိုင်းအသံပြန်ထုတ်ရာတွင် အဆင်မပြေပါ"
+            : "Failed to regenerate segment"
+      toast.error(msg)
+    } finally {
+      setRegeneratingSegmentId(null)
+    }
+  }
+
+  const handleMergeAllSegments = async () => {
+    if (editableSegments.length === 0 || isMergingSegments || regeneratingSegmentId) return
+
+    setIosAudioSessionPlayback()
+    unlockIosAudio()
+    triggerHaptic(10)
+    setIsMergingSegments(true)
+
+    try {
+      const merged = await mergeVoiceoverSegments({
+        segments: editableSegments,
+        musicPreset: voiceMusicPreset,
+        customMusicFile: voiceCustomMusicFile,
+      })
+      setMergedStudioAudio({
+        audioUrl: merged.audioUrl,
+        blob: merged.blob,
+        mimeType: merged.mimeType,
+        fileExtension: merged.fileExtension,
+        durationSeconds: merged.durationSeconds,
+        segments: editableSegments,
+      })
+      toast.success(
+        language === "my"
+          ? "အပိုင်းအားလုံးကို အသံပြန်ပေါင်းပြီးပါပြီ"
+          : "All segments merged successfully"
+      )
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : language === "my"
+            ? "အသံပြန်ပေါင်းရာတွင် အဆင်မပြေပါ"
+            : "Failed to merge segments"
+      toast.error(msg)
+    } finally {
+      setIsMergingSegments(false)
+    }
+  }
+
   const narratorButtonLabel = voiceDialogueMode
     ? t(language, "booth.generateDialogueBtn")
     : t(language, "booth.generateBtn")
@@ -926,20 +1118,54 @@ export function VoiceoverPage() {
               placeholder={t(language, "booth.scriptPlaceholder")}
               className="min-h-[210px] sm:min-h-[240px] w-full resize-none border-0 bg-transparent px-4 py-4 sm:px-5 sm:py-5 text-sm sm:text-base leading-[1.8] text-[#1C1917] dark:text-[#F5F5F4] placeholder:text-[#A8A29E] dark:placeholder:text-[#71717A] focus-visible:ring-0 focus-visible:ring-offset-0 font-myanmar"
             />
-            {voiceScriptText.trim() && (
-              <div className="flex items-center justify-between border-t border-[#E7E5E4]/70 dark:border-[#3F3F46]/70 px-4 py-2 text-[11px] text-[#57534E] dark:text-[#A1A1AA]">
-                <span className="tabular-nums font-myanmar">
-                  {t(language, "booth.estimatedDuration", { seconds: language === "my" ? toBurmeseDigits(estimateSpokenDurationSeconds(voiceScriptText, voiceSpeed)) : String(estimateSpokenDurationSeconds(voiceScriptText, voiceSpeed)) })}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setVoiceScriptText("")}
-                  className="hover:text-[#1C1917] dark:hover:text-[#F5F5F4] transition-colors cursor-pointer font-myanmar"
-                >
-                  {t(language, "booth.clearScript")}
-                </button>
-              </div>
-            )}
+            {(() => {
+              const charCount = voiceScriptText.length
+              const estSec = estimateSpokenDurationSeconds(voiceScriptText, voiceSpeed)
+              const isOverLimit = charCount > SAFE_SCRIPT_CHAR_LIMIT
+              const displayCount =
+                language === "my"
+                  ? toBurmeseDigits(charCount.toLocaleString("en-US"))
+                  : charCount.toLocaleString("en-US")
+              const displaySec =
+                language === "my" ? toBurmeseDigits(estSec) : String(estSec)
+              return (
+                <div className="border-t border-[#E7E5E4]/70 dark:border-[#3F3F46]/70 px-4 py-2 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                    <span
+                      className={cn(
+                        "tabular-nums font-myanmar",
+                        isOverLimit
+                          ? "text-amber-600 dark:text-amber-400 font-semibold"
+                          : "text-[#57534E] dark:text-[#A1A1AA]"
+                      )}
+                    >
+                      {language === "my"
+                        ? `စာလုံးရေ ${displayCount} / ၁,၅၀၀ (~${displaySec} စက္ကန့်)`
+                        : `စာလုံးရေ ${displayCount} / ၁,၅၀၀ (~${displaySec} စက္ကန့်)`}
+                    </span>
+                    {voiceScriptText.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => setVoiceScriptText("")}
+                        className="text-[#57534E] dark:text-[#A1A1AA] hover:text-[#1C1917] dark:hover:text-[#F5F5F4] transition-colors cursor-pointer font-myanmar"
+                      >
+                        {t(language, "booth.clearScript")}
+                      </button>
+                    )}
+                  </div>
+                  {isOverLimit && (
+                    <div className="flex items-start gap-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 px-2.5 py-1.5 text-[11px] leading-snug text-amber-800 dark:text-amber-200 font-myanmar">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                      <span>
+                        {language === "my"
+                          ? "စာလုံး ၁,၅၀၀ ကျော်နေပါသဖြင့် ဖုန်း Safari RAM မလေးစေရန် အပိုင်းခွဲထုတ်ခြင်း (သို့) Audiobook tab ကို သုံးရန် အကြံပြုပါသည်"
+                          : "Over 1,500 chars — split into shorter parts or use the Audiobook tab so mobile Safari RAM stays fast."}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         )}
       </div>
@@ -1242,6 +1468,138 @@ export function VoiceoverPage() {
               )}
             </Button>
           )}
+
+          {generatedAudioSource === "narrator" &&
+            !voiceDialogueMode &&
+            editableSegments.length > 0 && (
+              <div className="rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(6)
+                    setSegmentsExpanded((prev) => !prev)
+                  }}
+                  className="w-full flex items-center justify-between gap-2 px-4 py-3 text-xs sm:text-sm font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#FAF8F5] dark:hover:bg-[#18181B]/60 transition-colors cursor-pointer font-myanmar"
+                >
+                  <span className="flex items-center gap-2">
+                    <span>အပိုင်းလိုက် စစ်ဆေး/ပြင်ဆင်မည်</span>
+                    <span className="rounded-full bg-[#F0EDE8] dark:bg-[#3F3F46] px-2 py-0.5 text-[11px] tabular-nums text-[#57534E] dark:text-[#A1A1AA]">
+                      {language === "my"
+                        ? `${toBurmeseDigits(editableSegments.length)} ပိုင်း`
+                        : `${editableSegments.length} segments`}
+                    </span>
+                  </span>
+                  {segmentsExpanded ? (
+                    <ChevronUp className="h-4 w-4 text-[#57534E] dark:text-[#A1A1AA]" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-[#57534E] dark:text-[#A1A1AA]" />
+                  )}
+                </button>
+
+                {segmentsExpanded && (
+                  <div className="border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 p-3 space-y-2.5 bg-[#FAF8F5]/60 dark:bg-[#18181B]/40">
+                    {editableSegments.map((seg, idx) => {
+                      const isPlaying = playingSegmentId === seg.id
+                      const isRegen = regeneratingSegmentId === seg.id
+                      return (
+                        <div
+                          key={seg.id}
+                          className="rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-2.5 space-y-2"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex items-center rounded-md bg-[#F0EDE8] dark:bg-[#3F3F46] px-2 py-0.5 text-[11px] font-semibold tabular-nums text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                                {language === "my"
+                                  ? `အပိုင်း ${toBurmeseDigits(idx + 1)}`
+                                  : `#${idx + 1}`}
+                              </span>
+                              <span className="text-[11px] tabular-nums text-[#57534E] dark:text-[#A1A1AA]">
+                                {seg.durationSeconds.toFixed(1)}s
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleTogglePlaySegment(seg)}
+                                disabled={isRegen || isMergingSegments}
+                                aria-label={isPlaying ? "Stop segment" : "Play segment"}
+                                className={cn(
+                                  "inline-flex h-7 items-center gap-1 rounded-lg border px-2 text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50",
+                                  isPlaying
+                                    ? "border-[#E11D48]/40 bg-[#E11D48]/10 text-[#E11D48]"
+                                    : "border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46]"
+                                )}
+                              >
+                                {isPlaying ? (
+                                  <Square className="h-3 w-3 fill-current" />
+                                ) : (
+                                  <Play className="h-3 w-3 fill-current" />
+                                )}
+                                <span>{isPlaying ? "Stop" : "Play"}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => void handleRegenerateSegment(idx)}
+                                disabled={Boolean(regeneratingSegmentId) || isMergingSegments}
+                                className="inline-flex h-7 items-center gap-1 rounded-lg border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] px-2 text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#F0EDE8] dark:hover:bg-[#3F3F46] transition-colors cursor-pointer disabled:opacity-50 font-myanmar"
+                              >
+                                {isRegen ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="h-3 w-3" />
+                                )}
+                                <span>
+                                  {language === "my"
+                                    ? "🔄 ဒီတစ်ပိုင်းပဲ အသံပြန်ထုတ်မည်"
+                                    : "🔄 Regenerate Segment"}
+                                </span>
+                              </button>
+                            </div>
+                          </div>
+
+                          <Textarea
+                            value={seg.text}
+                            onChange={(e) => handleSegmentTextChange(seg.id, e.target.value)}
+                            rows={2}
+                            disabled={isRegen || isMergingSegments}
+                            className="min-h-[54px] w-full resize-none rounded-lg border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5]/60 dark:bg-[#18181B]/60 px-2.5 py-1.5 text-xs leading-relaxed text-[#1C1917] dark:text-[#F5F5F4] font-myanmar"
+                          />
+                        </div>
+                      )
+                    })}
+
+                    <Button
+                      type="button"
+                      onClick={() => void handleMergeAllSegments()}
+                      disabled={isMergingSegments || Boolean(regeneratingSegmentId)}
+                      className="w-full h-10 rounded-xl bg-[#1C1917] hover:bg-[#292524] dark:bg-[#F5F5F4] dark:hover:bg-[#E7E5E4] text-[#FAF8F5] dark:text-[#18181B] text-xs sm:text-sm font-semibold font-myanmar"
+                    >
+                      {isMergingSegments ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                          <span>
+                            {language === "my"
+                              ? "ပြန်ပေါင်းနေပါသည်..."
+                              : "Re-merging..."}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Link2 className="h-3.5 w-3.5 mr-1.5" />
+                          <span>
+                            {language === "my"
+                              ? "🔗 အားလုံးပြန်ပေါင်းမည် (Re-Merge)"
+                              : "🔗 Re-Merge All Segments"}
+                          </span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
         </div>
       )}
 

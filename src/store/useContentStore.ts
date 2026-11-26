@@ -28,6 +28,7 @@ import {
   mixVoiceoverWithAutoDuckingMusic,
   type BurmeseVoiceType,
   type VoiceDeliveryTone,
+  type VoiceoverSegmentItem,
   type VoiceoverSpeed,
 } from "@/api/ttsService"
 import { playBlobUrlWithPrimedAudio } from "@/lib/iosAudio"
@@ -183,6 +184,7 @@ interface ContentState {
   generatedAudioDuration: number
   generatedAudioTitle: string
   generatedAudioSource: "my_voice" | "narrator" | null
+  generatedAudioSegments: VoiceoverSegmentItem[]
   selfRecordedBlob: Blob | null
   selfRecordedMimeType: string
   selfRecordedNeedsTranscribe: boolean
@@ -238,6 +240,14 @@ interface ContentState {
     scriptOverride?: string,
     options?: { useAiSpeechPrep?: boolean; customTitle?: string }
   ) => Promise<void>
+  setMergedStudioAudio: (params: {
+    audioUrl: string
+    blob: Blob
+    mimeType: string
+    fileExtension: string
+    durationSeconds: number
+    segments: VoiceoverSegmentItem[]
+  }) => void
   setPdfReadingMode: (mode: PdfReadingMode) => void
   extractAndReadPdfStory: (params: {
     file: File
@@ -323,6 +333,7 @@ export const useContentStore = create<ContentState>()(
       generatedAudioDuration: 0,
       generatedAudioTitle: "",
       generatedAudioSource: null,
+      generatedAudioSegments: [],
       selfRecordedBlob: null,
       selfRecordedMimeType: "audio/wav",
       selfRecordedNeedsTranscribe: false,
@@ -451,6 +462,20 @@ export const useContentStore = create<ContentState>()(
             ttsStatus: "done",
             ttsProgress: null,
             ttsError: null,
+          }
+        }),
+      setMergedStudioAudio: (params) =>
+        set((state) => {
+          if (state.generatedAudioUrl && state.generatedAudioUrl !== params.audioUrl) {
+            URL.revokeObjectURL(state.generatedAudioUrl)
+          }
+          return {
+            generatedAudioUrl: params.audioUrl,
+            generatedAudioBlob: params.blob,
+            generatedAudioMimeType: params.mimeType,
+            generatedAudioExtension: params.fileExtension,
+            generatedAudioDuration: params.durationSeconds,
+            generatedAudioSegments: params.segments,
           }
         }),
       setPdfReadingMode: (pdfReadingMode) => set({ pdfReadingMode }),
@@ -611,6 +636,10 @@ export const useContentStore = create<ContentState>()(
           if (prevUrl && prevUrl !== result.audioUrl) {
             URL.revokeObjectURL(prevUrl)
           }
+          const prevSegments = get().generatedAudioSegments
+          for (const seg of prevSegments) {
+            URL.revokeObjectURL(seg.audioUrl)
+          }
 
           const title =
             options?.customTitle ||
@@ -633,6 +662,7 @@ export const useContentStore = create<ContentState>()(
             generatedAudioDuration: result.durationSeconds,
             generatedAudioTitle: title,
             generatedAudioSource: "narrator",
+            generatedAudioSegments: result.segments ?? [],
           })
 
           get().addAudioSession({
