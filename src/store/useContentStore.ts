@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import { persist } from "zustand/middleware"
+import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
 import type { GeneratorFormValues } from "@/features/generator/schema"
 import {
   extractCleanUnicodeFromPdfImages,
@@ -352,6 +352,39 @@ const defaultDraft: GeneratorFormValues = {
   language: "english",
   includeHashtags: true,
   targetDurationSeconds: 15,
+}
+
+const safeLocalStorage: StateStorage = {
+  getItem: (name) => {
+    try {
+      return localStorage.getItem(name)
+    } catch {
+      return null
+    }
+  },
+  setItem: (name, value) => {
+    try {
+      localStorage.setItem(name, value)
+    } catch {
+      // Gracefully strip regenerable 3D-Pop cutout cache if localStorage quota is exceeded
+      try {
+        const parsed = JSON.parse(value) as { state?: Record<string, unknown> }
+        if (parsed?.state) {
+          parsed.state.presenter3dPopCutoutUrl = null
+          localStorage.setItem(name, JSON.stringify(parsed))
+        }
+      } catch {
+        // Ignore unrecoverable storage quota errors rather than crashing UI
+      }
+    }
+  },
+  removeItem: (name) => {
+    try {
+      localStorage.removeItem(name)
+    } catch {
+      // Ignore storage removal errors
+    }
+  },
 }
 
 export const useContentStore = create<ContentState>()(
@@ -1220,6 +1253,7 @@ export const useContentStore = create<ContentState>()(
     }),
     {
       name: "content-creator-content",
+      storage: createJSONStorage(() => safeLocalStorage),
       partialize: (state) => ({
         draftInput: state.draftInput ?? defaultDraft,
         textPostResult: state.textPostResult ?? null,

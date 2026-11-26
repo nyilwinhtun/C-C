@@ -67,9 +67,19 @@ type CharacterKind = "photo" | "model"
 type AspectPreset = "9:16" | "1:1"
 type FramingPreset = "upper_body" | "close_up"
 
+const NORMALIZED_BASE_URL = import.meta.env.BASE_URL.endsWith("/")
+  ? import.meta.env.BASE_URL
+  : `${import.meta.env.BASE_URL}/`
+
 const PRESET_VRM_PATHS: Record<BuiltinPresenterId, string> = {
-  female_nilar: "/models/nilar.vrm",
-  male_kokhant: "/models/kokhant.vrm",
+  female_nilar: `${NORMALIZED_BASE_URL}models/nilar.vrm`,
+  male_kokhant: `${NORMALIZED_BASE_URL}models/kokhant.vrm`,
+}
+
+function encodeCanvasForStorage(canvas: HTMLCanvasElement): string {
+  const webp = canvas.toDataURL("image/webp", 0.88)
+  if (webp.startsWith("data:image/webp")) return webp
+  return canvas.toDataURL("image/png")
 }
 
 interface ExportedVideoState {
@@ -790,11 +800,28 @@ export function Presenter3DPage() {
         const blob = await res.blob()
         const cutoutBlob = await removeBackground(blob)
         const cutoutUrl = await new Promise<string>((resolve, reject) => {
-          const r = new FileReader()
-          r.onload = () =>
-            typeof r.result === "string" ? resolve(r.result) : reject(new Error("Read failed"))
-          r.onerror = () => reject(new Error("Read failed"))
-          r.readAsDataURL(cutoutBlob)
+          const objUrl = URL.createObjectURL(cutoutBlob)
+          const img = new Image()
+          img.onload = () => {
+            try {
+              const max = 640
+              const k = Math.min(1, max / Math.max(img.width, img.height, 1))
+              const c = document.createElement("canvas")
+              c.width = Math.max(1, Math.round(img.width * k))
+              c.height = Math.max(1, Math.round(img.height * k))
+              c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height)
+              resolve(encodeCanvasForStorage(c))
+            } catch (e) {
+              reject(e)
+            } finally {
+              URL.revokeObjectURL(objUrl)
+            }
+          }
+          img.onerror = () => {
+            URL.revokeObjectURL(objUrl)
+            reject(new Error("Cutout image decode failed"))
+          }
+          img.src = objUrl
         })
         setPresenter3dPopCutoutUrl(cutoutUrl)
         if (enableAfter) {
@@ -1156,13 +1183,13 @@ export function Presenter3DPage() {
       return
     }
     try {
-      const max = 800
-      const k = Math.min(1, max / Math.max(img.width, img.height))
+      const max = 640
+      const k = Math.min(1, max / Math.max(img.width, img.height, 1))
       const c = document.createElement("canvas")
       c.width = Math.max(1, Math.round(img.width * k))
       c.height = Math.max(1, Math.round(img.height * k))
       c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height)
-      const dataUrl = c.toDataURL("image/png")
+      const dataUrl = encodeCanvasForStorage(c)
       setPhotoDataUrl(dataUrl)
       setPresenterMascotDataUrl(dataUrl)
     } catch {

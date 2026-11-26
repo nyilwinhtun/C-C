@@ -489,7 +489,8 @@ export async function createLocalReliefGlb(
       const wx = (x / (grid - 1) - 0.5) * widthWorld
       const wy = (0.5 - y / (grid - 1)) * heightWorld
       const u = x / (grid - 1)
-      const v = 1 - y / (grid - 1)
+      // glTF textures use flipY = false where v = 0 is the top row of the canvas
+      const v = y / (grid - 1)
       const z = mask[idx] ? depthMap[idx] : 0
 
       frontIndex[idx] = positions.length / 3
