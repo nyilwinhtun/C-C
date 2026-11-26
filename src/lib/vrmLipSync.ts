@@ -166,6 +166,11 @@ export function createLipSyncAnalyzer({
 
 export type PresenterOutfitColor = "navy" | "charcoal" | "emerald" | "cream"
 export type PresenterGestureStyle = "natural" | "energetic" | "calm"
+export type PresenterStudioSet =
+  | "mobile_showroom"
+  | "tech_podcast"
+  | "soft_bokeh"
+  | "custom_photo"
 
 export interface AvatarController {
   object: THREE.Object3D
@@ -1716,5 +1721,689 @@ export function drawCaptionBar(
   shown.forEach((l, i) => {
     ctx.fillText(l, canvasW / 2, boxY + fontSize * 0.3 + lh * (i + 0.5), maxW)
   })
+  ctx.restore()
+}
+
+export interface StudioBackdropOptions {
+  studioSet?: PresenterStudioSet
+  logoDataUrl?: string | null
+  shopName?: string
+}
+
+export interface StudioBackdropController {
+  object: THREE.Group
+  setStudioSet: (studioSet: PresenterStudioSet) => void
+  setLogoDataUrl: (dataUrl: string | null) => void
+  setShopName: (name: string) => void
+  update: (delta: number, elapsed: number, lip?: LipSyncWeights) => void
+  dispose: () => void
+}
+
+function createSoftGlowTexture(innerHex: string, outerHex = "rgba(0,0,0,0)"): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas")
+  canvas.width = 128
+  canvas.height = 128
+  const ctx = canvas.getContext("2d")
+  if (ctx) {
+    const grad = ctx.createRadialGradient(64, 64, 4, 64, 64, 62)
+    grad.addColorStop(0, innerHex)
+    grad.addColorStop(0.45, innerHex)
+    grad.addColorStop(1, outerHex)
+    ctx.fillStyle = grad
+    ctx.fillRect(0, 0, 128, 128)
+  }
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.needsUpdate = true
+  return tex
+}
+
+function createGradientBackdropTexture(topHex: string, bottomHex: string): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas")
+  canvas.width = 256
+  canvas.height = 512
+  const ctx = canvas.getContext("2d")
+  if (ctx) {
+    const grad = ctx.createLinearGradient(0, 0, 0, 512)
+    grad.addColorStop(0, topHex)
+    grad.addColorStop(1, bottomHex)
+    ctx.fillStyle = grad
+    ctx.fillRect(0, 0, 256, 512)
+  }
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.needsUpdate = true
+  return tex
+}
+
+function drawBackWallShopSignTexture(
+  logoImg: HTMLImageElement | null,
+  shopName: string
+): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas")
+  canvas.width = 640
+  canvas.height = 176
+  const ctx = canvas.getContext("2d")
+  if (ctx) {
+    // Sleek dark-bronze illuminated sign plate
+    const bg = ctx.createLinearGradient(0, 0, 640, 176)
+    bg.addColorStop(0, "#1c1917")
+    bg.addColorStop(0.5, "#292524")
+    bg.addColorStop(1, "#18181b")
+    ctx.fillStyle = bg
+    ctx.beginPath()
+    ctx.roundRect(4, 4, 632, 168, 22)
+    ctx.fill()
+
+    // Warm gold inner border
+    ctx.strokeStyle = "rgba(251, 191, 36, 0.72)"
+    ctx.lineWidth = 3
+    ctx.beginPath()
+    ctx.roundRect(10, 10, 620, 156, 18)
+    ctx.stroke()
+
+    const cleanName = shopName.trim()
+    const displayLabel = cleanName || "CREATOR STUDIO"
+
+    if (logoImg) {
+      const logoSize = 96
+      const logoX = cleanName ? 36 : (640 - logoSize) / 2
+      const logoY = (176 - logoSize) / 2
+      ctx.save()
+      ctx.fillStyle = "#faf8f5"
+      ctx.beginPath()
+      ctx.arc(logoX + logoSize / 2, logoY + logoSize / 2, logoSize / 2 + 4, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.beginPath()
+      ctx.arc(logoX + logoSize / 2, logoY + logoSize / 2, logoSize / 2, 0, Math.PI * 2)
+      ctx.clip()
+      ctx.drawImage(logoImg, logoX, logoY, logoSize, logoSize)
+      ctx.restore()
+
+      if (cleanName) {
+        ctx.fillStyle = "#faf8f5"
+        ctx.font = '700 40px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif'
+        ctx.textAlign = "left"
+        ctx.textBaseline = "middle"
+        ctx.fillText(displayLabel, logoX + logoSize + 24, 88, 640 - (logoX + logoSize + 52))
+      }
+    } else {
+      // Default sleek emblem + shop name
+      const cx = 84
+      const cy = 88
+      ctx.fillStyle = "#18181b"
+      ctx.beginPath()
+      ctx.arc(cx, cy, 42, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = "#d4af37"
+      ctx.lineWidth = 4
+      ctx.beginPath()
+      ctx.arc(cx, cy, 38, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.fillStyle = "#fde68a"
+      ctx.font = "700 38px Georgia, serif"
+      ctx.textAlign = "center"
+      ctx.textBaseline = "middle"
+      ctx.fillText("S", cx, cy + 2)
+
+      ctx.fillStyle = "#faf8f5"
+      ctx.font = '700 38px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif'
+      ctx.textAlign = "left"
+      ctx.textBaseline = "middle"
+      ctx.fillText(displayLabel, 148, 88, 460)
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.needsUpdate = true
+  return tex
+}
+
+/**
+ * Builds a modular 3D studio backdrop positioned behind the presenter (z = -1.8 to -3.5)
+ * supporting Mobile Showroom, Tech Podcast Studio, Soft Bokeh, and Custom Photo (hidden).
+ */
+export function createStudioBackdropGroup(
+  options: StudioBackdropOptions = {}
+): StudioBackdropController {
+  const root = new THREE.Group()
+  root.name = "studio_backdrop_root"
+
+  const disposables: { dispose: () => void }[] = []
+  const track = <T extends { dispose: () => void }>(item: T): T => {
+    disposables.push(item)
+    return item
+  }
+
+  let currentSet: PresenterStudioSet = options.studioSet ?? "mobile_showroom"
+  let currentShopName = options.shopName ?? ""
+  let loadedLogoImg: HTMLImageElement | null = null
+  let signTexture: THREE.CanvasTexture | null = null
+
+  // --- 1. Mobile Showroom Set ---
+  const showroomGroup = new THREE.Group()
+  showroomGroup.name = "studio_mobile_showroom"
+  root.add(showroomGroup)
+
+  const showroomWallMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0xd8d1c6,
+      roughness: 0.94,
+      metalness: 0.02,
+    })
+  )
+  const showroomWall = new THREE.Mesh(track(new THREE.PlaneGeometry(7.2, 5.2)), showroomWallMat)
+  showroomWall.position.set(0, 1.35, -2.85)
+  showroomGroup.add(showroomWall)
+
+  const nicheBackMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0x262320,
+      roughness: 0.85,
+      metalness: 0.06,
+    })
+  )
+  const shelfWoodMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0x44403c,
+      roughness: 0.72,
+      metalness: 0.08,
+    })
+  )
+  const shelfLedMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0xfde68a,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 1.45,
+      roughness: 0.3,
+    })
+  )
+  const phoneBodyMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0x18181b,
+      roughness: 0.35,
+      metalness: 0.7,
+    })
+  )
+  const phoneScreenMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0x38bdf8,
+      emissive: 0x0284c7,
+      emissiveIntensity: 0.85,
+      roughness: 0.2,
+    })
+  )
+
+  const nicheBackingGeo = track(new THREE.BoxGeometry(0.92, 1.42, 0.08))
+  const shelfPlankGeo = track(new THREE.BoxGeometry(0.84, 0.032, 0.14))
+  const ledStripGeo = track(new THREE.BoxGeometry(0.8, 0.012, 0.018))
+  const phoneBodyGeo = track(new THREE.BoxGeometry(0.082, 0.165, 0.014))
+  const phoneScreenGeo = track(new THREE.PlaneGeometry(0.072, 0.148))
+
+  for (const side of [-1, 1]) {
+    const nicheX = side * 1.15
+    const nicheBack = new THREE.Mesh(nicheBackingGeo, nicheBackMat)
+    nicheBack.position.set(nicheX, 1.32, -2.76)
+    showroomGroup.add(nicheBack)
+
+    for (const shelfY of [1.02, 1.48]) {
+      const plank = new THREE.Mesh(shelfPlankGeo, shelfWoodMat)
+      plank.position.set(nicheX, shelfY, -2.68)
+      showroomGroup.add(plank)
+
+      const led = new THREE.Mesh(ledStripGeo, shelfLedMat)
+      led.position.set(nicheX, shelfY + 0.32, -2.71)
+      showroomGroup.add(led)
+
+      // 3 stylized smartphone display silhouettes per shelf
+      for (let p = -1; p <= 1; p++) {
+        const phoneX = nicheX + p * 0.24
+        const phoneY = shelfY + 0.105
+        const phone = new THREE.Mesh(phoneBodyGeo, phoneBodyMat)
+        phone.position.set(phoneX, phoneY, -2.65)
+        phone.rotation.y = -side * 0.18
+        phone.rotation.x = -0.1
+        showroomGroup.add(phone)
+
+        const screen = new THREE.Mesh(phoneScreenGeo, phoneScreenMat)
+        screen.position.set(phoneX, phoneY, -2.641)
+        screen.rotation.y = -side * 0.18
+        screen.rotation.x = -0.1
+        showroomGroup.add(screen)
+      }
+    }
+  }
+
+  // Framed illuminated back-wall shop sign
+  const signFrameMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0xb48a3a,
+      roughness: 0.35,
+      metalness: 0.72,
+    })
+  )
+  const signFrame = new THREE.Mesh(track(new THREE.BoxGeometry(1.18, 0.35, 0.045)), signFrameMat)
+  signFrame.position.set(0, 1.78, -2.68)
+  showroomGroup.add(signFrame)
+
+  signTexture = drawBackWallShopSignTexture(null, currentShopName)
+  const signFaceMat = track(
+    new THREE.MeshBasicMaterial({
+      map: signTexture,
+    })
+  )
+  const signFace = new THREE.Mesh(track(new THREE.PlaneGeometry(1.12, 0.31)), signFaceMat)
+  signFace.position.set(0, 1.78, -2.654)
+  showroomGroup.add(signFace)
+
+  // --- 2. Tech Podcast Studio Set ---
+  const podcastGroup = new THREE.Group()
+  podcastGroup.name = "studio_tech_podcast"
+  root.add(podcastGroup)
+
+  const podcastWallMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0x141418,
+      roughness: 0.95,
+      metalness: 0.04,
+    })
+  )
+  const podcastWall = new THREE.Mesh(track(new THREE.PlaneGeometry(7.2, 5.2)), podcastWallMat)
+  podcastWall.position.set(0, 1.35, -2.85)
+  podcastGroup.add(podcastWall)
+
+  // Acoustic slats
+  const slatMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0x202026,
+      roughness: 0.88,
+      metalness: 0.05,
+    })
+  )
+  const slatGeo = track(new THREE.BoxGeometry(0.11, 3.8, 0.05))
+  for (let i = -9; i <= 9; i++) {
+    const slat = new THREE.Mesh(slatGeo, slatMat)
+    slat.position.set(i * 0.22, 1.4, -2.74)
+    podcastGroup.add(slat)
+  }
+
+  // Warm amber & cool cyan vertical LED bars
+  const amberLedMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0xfbbf24,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 1.75,
+      roughness: 0.25,
+    })
+  )
+  const cyanLedMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0x67e8f9,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 1.75,
+      roughness: 0.25,
+    })
+  )
+  const ledBarGeo = track(new THREE.BoxGeometry(0.036, 2.5, 0.03))
+
+  const leftAmberBar = new THREE.Mesh(ledBarGeo, amberLedMat)
+  leftAmberBar.position.set(-0.82, 1.35, -2.62)
+  podcastGroup.add(leftAmberBar)
+
+  const rightCyanBar = new THREE.Mesh(ledBarGeo, cyanLedMat)
+  rightCyanBar.position.set(0.82, 1.35, -2.62)
+  podcastGroup.add(rightCyanBar)
+
+  const outerLeftCyan = new THREE.Mesh(ledBarGeo, cyanLedMat)
+  outerLeftCyan.position.set(-1.55, 1.35, -2.66)
+  podcastGroup.add(outerLeftCyan)
+
+  const outerRightAmber = new THREE.Mesh(ledBarGeo, amberLedMat)
+  outerRightAmber.position.set(1.55, 1.35, -2.66)
+  podcastGroup.add(outerRightAmber)
+
+  // Soft ambient studio glow halo
+  const haloTex = track(createSoftGlowTexture("rgba(245, 158, 11, 0.28)"))
+  const haloMat = track(
+    new THREE.MeshBasicMaterial({
+      map: haloTex,
+      transparent: true,
+      depthWrite: false,
+    })
+  )
+  const haloPlane = new THREE.Mesh(track(new THREE.PlaneGeometry(2.8, 2.8)), haloMat)
+  haloPlane.position.set(0, 1.35, -2.76)
+  podcastGroup.add(haloPlane)
+
+  // Subtle desk edge & studio mic silhouette in lower corner
+  const deskMat = track(
+    new THREE.MeshStandardMaterial({
+      color: 0x1c1917,
+      roughness: 0.65,
+      metalness: 0.25,
+    })
+  )
+  const deskEdge = new THREE.Mesh(track(new THREE.BoxGeometry(3.2, 0.08, 0.55)), deskMat)
+  deskEdge.position.set(0, 0.68, -1.85)
+  podcastGroup.add(deskEdge)
+
+  const micGroup = new THREE.Group()
+  micGroup.position.set(0.56, 0.72, -1.78)
+  const micStand = new THREE.Mesh(track(new THREE.CylinderGeometry(0.012, 0.016, 0.28, 12)), deskMat)
+  micStand.position.set(0, 0.14, 0)
+  micGroup.add(micStand)
+  const micArm = new THREE.Mesh(track(new THREE.CylinderGeometry(0.01, 0.01, 0.22, 10)), deskMat)
+  micArm.position.set(-0.07, 0.31, 0.03)
+  micArm.rotation.z = 0.75
+  micGroup.add(micArm)
+  const micCapsule = new THREE.Mesh(track(new THREE.CapsuleGeometry(0.032, 0.065, 8, 14)), deskMat)
+  micCapsule.position.set(-0.14, 0.36, 0.06)
+  micCapsule.rotation.z = 0.55
+  micGroup.add(micCapsule)
+  podcastGroup.add(micGroup)
+
+  // --- 3. Soft Studio Bokeh Set ---
+  const bokehGroup = new THREE.Group()
+  bokehGroup.name = "studio_soft_bokeh"
+  root.add(bokehGroup)
+
+  const bokehBgTex = track(createGradientBackdropTexture("#27272a", "#18181b"))
+  const bokehBgMat = track(
+    new THREE.MeshBasicMaterial({
+      map: bokehBgTex,
+    })
+  )
+  const bokehBg = new THREE.Mesh(track(new THREE.PlaneGeometry(7.6, 5.6)), bokehBgMat)
+  bokehBg.position.set(0, 1.35, -3.35)
+  bokehGroup.add(bokehBg)
+
+  const bokehCount = 44
+  const bokehPositions = new Float32Array(bokehCount * 3)
+  const bokehColors = new Float32Array(bokehCount * 3)
+  const bokehSpeeds = new Float32Array(bokehCount)
+  const bokehPhases = new Float32Array(bokehCount)
+  const palette = [
+    new THREE.Color(0xfde68a),
+    new THREE.Color(0xf59e0b),
+    new THREE.Color(0xfaf8f5),
+    new THREE.Color(0x93c5fd),
+  ]
+
+  for (let i = 0; i < bokehCount; i++) {
+    bokehPositions[i * 3] = (Math.random() - 0.5) * 3.8
+    bokehPositions[i * 3 + 1] = 0.3 + Math.random() * 2.4
+    bokehPositions[i * 3 + 2] = -2.1 - Math.random() * 1.1
+    bokehSpeeds[i] = 0.04 + Math.random() * 0.07
+    bokehPhases[i] = Math.random() * Math.PI * 2
+    const c = palette[i % palette.length]
+    bokehColors[i * 3] = c.r
+    bokehColors[i * 3 + 1] = c.g
+    bokehColors[i * 3 + 2] = c.b
+  }
+
+  const bokehGeo = track(new THREE.BufferGeometry())
+  bokehGeo.setAttribute("position", new THREE.BufferAttribute(bokehPositions, 3))
+  bokehGeo.setAttribute("color", new THREE.BufferAttribute(bokehColors, 3))
+
+  const bokehOrbTex = track(createSoftGlowTexture("rgba(255, 255, 255, 0.88)"))
+  const bokehMat = track(
+    new THREE.PointsMaterial({
+      size: 0.44,
+      map: bokehOrbTex,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.52,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  )
+  const bokehPoints = new THREE.Points(bokehGeo, bokehMat)
+  bokehGroup.add(bokehPoints)
+
+  const refreshSignTexture = () => {
+    const nextTex = drawBackWallShopSignTexture(loadedLogoImg, currentShopName)
+    if (signTexture) signTexture.dispose()
+    signTexture = nextTex
+    signFaceMat.map = nextTex
+    signFaceMat.needsUpdate = true
+  }
+
+  const applyStudioVisibility = (set: PresenterStudioSet) => {
+    currentSet = set
+    root.visible = set !== "custom_photo"
+    showroomGroup.visible = set === "mobile_showroom"
+    podcastGroup.visible = set === "tech_podcast"
+    bokehGroup.visible = set === "soft_bokeh"
+  }
+
+  const setLogoDataUrl = (dataUrl: string | null) => {
+    if (!dataUrl) {
+      loadedLogoImg = null
+      refreshSignTexture()
+      return
+    }
+    const img = new Image()
+    img.onload = () => {
+      loadedLogoImg = img
+      refreshSignTexture()
+    }
+    img.onerror = () => {
+      loadedLogoImg = null
+      refreshSignTexture()
+    }
+    img.src = dataUrl
+  }
+
+  const setShopName = (name: string) => {
+    if (name === currentShopName) return
+    currentShopName = name
+    refreshSignTexture()
+  }
+
+  applyStudioVisibility(currentSet)
+  if (options.logoDataUrl) {
+    setLogoDataUrl(options.logoDataUrl)
+  }
+
+  const update = (delta: number, elapsed: number, lip?: LipSyncWeights) => {
+    const energy = lip ? clamp01(lip.energy) : 0
+    if (currentSet === "tech_podcast") {
+      const pulse = 1.55 + Math.sin(elapsed * 2.1) * 0.2 + energy * 0.65
+      amberLedMat.emissiveIntensity = pulse
+      cyanLedMat.emissiveIntensity = 1.6 + Math.cos(elapsed * 1.7) * 0.2 + energy * 0.55
+    } else if (currentSet === "soft_bokeh") {
+      const posAttr = bokehGeo.getAttribute("position") as THREE.BufferAttribute
+      for (let i = 0; i < bokehCount; i++) {
+        let x = posAttr.getX(i) + Math.sin(elapsed * 0.55 + bokehPhases[i]) * delta * 0.06
+        let y = posAttr.getY(i) + bokehSpeeds[i] * delta
+        if (y > 2.8) y = 0.25
+        if (x > 2.0) x = -2.0
+        if (x < -2.0) x = 2.0
+        posAttr.setXY(i, x, y)
+      }
+      posAttr.needsUpdate = true
+    }
+  }
+
+  const dispose = () => {
+    if (signTexture) {
+      signTexture.dispose()
+      signTexture = null
+    }
+    for (const item of disposables) {
+      item.dispose()
+    }
+  }
+
+  return {
+    object: root,
+    setStudioSet: applyStudioVisibility,
+    setLogoDataUrl,
+    setShopName,
+    update,
+    dispose,
+  }
+}
+
+/**
+ * Draws the top-right corner shop logo watermark at subtle 80% opacity.
+ */
+export function drawCornerLogoWatermark(
+  ctx: CanvasRenderingContext2D,
+  logoImg: HTMLImageElement | null,
+  canvasW: number
+): void {
+  if (!logoImg) return
+  const size = Math.round(canvasW * 0.095)
+  const margin = Math.round(canvasW * 0.036)
+  const x = canvasW - margin - size
+  const y = margin
+  const cx = x + size / 2
+  const cy = y + size / 2
+  const r = size / 2
+
+  ctx.save()
+  ctx.globalAlpha = 0.8
+  ctx.shadowColor = "rgba(0, 0, 0, 0.28)"
+  ctx.shadowBlur = 12
+  ctx.fillStyle = "rgba(250, 248, 245, 0.92)"
+  ctx.beginPath()
+  ctx.arc(cx, cy, r + 3, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.shadowBlur = 0
+  ctx.beginPath()
+  ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  ctx.clip()
+  ctx.drawImage(logoImg, x, y, size, size)
+  ctx.restore()
+}
+
+export interface BroadcastLowerThirdOptions {
+  presenterName: string
+  shopName: string
+  logoImg: HTMLImageElement | null
+  lip: LipSyncWeights
+  elapsed: number
+  captionsOn: boolean
+}
+
+/**
+ * Draws a sleek TV-style glassmorphic/warm-charcoal lower-third nameplate above captions
+ * with mini shop logo, presenter & shop name, and a compact 5-bar reactive audio equalizer.
+ */
+export function drawBroadcastLowerThird(
+  ctx: CanvasRenderingContext2D,
+  options: BroadcastLowerThirdOptions,
+  canvasW: number,
+  canvasH: number
+): void {
+  const cleanPresenter = options.presenterName.trim()
+  const cleanShop = options.shopName.trim()
+  if (!cleanPresenter && !cleanShop) return
+
+  const marginX = Math.round(canvasW * 0.045)
+  const cardW = canvasW - marginX * 2
+  const cardH = Math.round(canvasW * 0.105)
+  const bottomOffset = options.captionsOn ? canvasH * 0.18 : canvasH * 0.045
+  const cardX = marginX
+  const cardY = Math.round(canvasH - cardH - bottomOffset)
+  const radius = Math.round(cardH * 0.24)
+
+  ctx.save()
+  // Glassmorphic warm-charcoal card
+  ctx.shadowColor = "rgba(0, 0, 0, 0.32)"
+  ctx.shadowBlur = 18
+  ctx.fillStyle = "rgba(24, 24, 27, 0.84)"
+  ctx.beginPath()
+  ctx.roundRect(cardX, cardY, cardW, cardH, radius)
+  ctx.fill()
+
+  ctx.shadowBlur = 0
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.14)"
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.roundRect(cardX, cardY, cardW, cardH, radius)
+  ctx.stroke()
+
+  // Warm amber left accent strip
+  const accentW = Math.max(4, Math.round(cardH * 0.07))
+  ctx.fillStyle = "#f59e0b"
+  ctx.beginPath()
+  ctx.roundRect(cardX + 10, cardY + 12, accentW, cardH - 24, accentW / 2)
+  ctx.fill()
+
+  let textStartX = cardX + 24
+
+  // Mini shop logo thumbnail
+  if (options.logoImg) {
+    const thumbSize = Math.round(cardH * 0.66)
+    const thumbX = textStartX
+    const thumbY = cardY + Math.round((cardH - thumbSize) / 2)
+    ctx.save()
+    ctx.fillStyle = "#faf8f5"
+    ctx.beginPath()
+    ctx.arc(thumbX + thumbSize / 2, thumbY + thumbSize / 2, thumbSize / 2 + 1.5, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.beginPath()
+    ctx.arc(thumbX + thumbSize / 2, thumbY + thumbSize / 2, thumbSize / 2, 0, Math.PI * 2)
+    ctx.clip()
+    ctx.drawImage(options.logoImg, thumbX, thumbY, thumbSize, thumbSize)
+    ctx.restore()
+    textStartX = thumbX + thumbSize + 14
+  }
+
+  // Compact 5-bar reactive audio equalizer on the right
+  const eqBarCount = 5
+  const eqBarW = Math.max(4, Math.round(cardH * 0.065))
+  const eqGap = Math.max(3, Math.round(eqBarW * 0.7))
+  const eqTotalW = eqBarCount * eqBarW + (eqBarCount - 1) * eqGap
+  const eqX = cardX + cardW - 18 - eqTotalW
+  const eqMaxH = cardH * 0.52
+  const eqBaseY = cardY + cardH * 0.76
+  const bands = [
+    options.lip.aa,
+    options.lip.oh,
+    options.lip.energy,
+    options.lip.ee,
+    options.lip.ih,
+  ]
+
+  for (let i = 0; i < eqBarCount; i++) {
+    const wave = 0.45 + 0.55 * Math.abs(Math.sin(options.elapsed * 8.5 + i * 1.15))
+    const val = clamp01(0.18 + (bands[i] * 0.72 + options.lip.energy * 0.28) * wave)
+    const barH = Math.max(eqBarW, eqMaxH * val)
+    const bx = eqX + i * (eqBarW + eqGap)
+    const by = eqBaseY - barH
+    ctx.fillStyle = i === 2 ? "#fbbf24" : "#fde68a"
+    ctx.beginPath()
+    ctx.roundRect(bx, by, eqBarW, barH, eqBarW / 2)
+    ctx.fill()
+  }
+
+  // Presenter Name + Shop Name badge
+  const maxTextW = Math.max(60, eqX - textStartX - 14)
+  const titleFontSize = Math.round(cardH * 0.31)
+  const subFontSize = Math.round(cardH * 0.24)
+
+  if (cleanPresenter && cleanShop) {
+    ctx.fillStyle = "#faf8f5"
+    ctx.font = `700 ${titleFontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
+    ctx.textAlign = "left"
+    ctx.textBaseline = "middle"
+    ctx.fillText(cleanPresenter, textStartX, cardY + cardH * 0.36, maxTextW)
+
+    ctx.fillStyle = "#fde68a"
+    ctx.font = `600 ${subFontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
+    ctx.fillText(cleanShop, textStartX, cardY + cardH * 0.69, maxTextW)
+  } else {
+    const single = cleanPresenter || cleanShop
+    ctx.fillStyle = "#faf8f5"
+    ctx.font = `700 ${titleFontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
+    ctx.textAlign = "left"
+    ctx.textBaseline = "middle"
+    ctx.fillText(single, textStartX, cardY + cardH * 0.5, maxTextW)
+  }
+
   ctx.restore()
 }

@@ -39,7 +39,10 @@ import {
 import {
   createBuiltinPresenterController,
   createLipSyncAnalyzer,
+  createStudioBackdropGroup,
+  drawBroadcastLowerThird,
   drawCaptionBar,
+  drawCornerLogoWatermark,
   drawTalkingPhotoFrame,
   drawPresenterCardFrame,
   getTalkingPhotoRect,
@@ -49,12 +52,13 @@ import {
   type LipSyncAnalyzer,
   type PresenterGestureStyle,
   type PresenterOutfitColor,
+  type PresenterStudioSet,
+  type StudioBackdropController,
 } from "@/lib/vrmLipSync"
 
 type CharacterKind = "model" | "photo"
 type AspectPreset = "9:16" | "1:1"
 type FramingPreset = "upper_body" | "close_up"
-type BackdropPreset = "warm_paper" | "soft_charcoal" | "solid_color" | "photo"
 
 interface ExportedVideoState {
   url: string
@@ -137,9 +141,15 @@ export function Presenter3DPage() {
     presenterLogoDataUrl,
     presenterOutfitColor,
     presenterGestureStyle,
+    presenterStudioSet,
+    presenterShowLowerThird,
+    presenterShowCornerLogo,
     setPresenterLogoDataUrl,
     setPresenterOutfitColor,
     setPresenterGestureStyle,
+    setPresenterStudioSet,
+    setPresenterShowLowerThird,
+    setPresenterShowCornerLogo,
   } = useContentStore(
     useShallow((state) => ({
       generatedAudioUrl: state.generatedAudioUrl,
@@ -154,9 +164,15 @@ export function Presenter3DPage() {
       presenterLogoDataUrl: state.presenterLogoDataUrl,
       presenterOutfitColor: state.presenterOutfitColor,
       presenterGestureStyle: state.presenterGestureStyle,
+      presenterStudioSet: state.presenterStudioSet,
+      presenterShowLowerThird: state.presenterShowLowerThird,
+      presenterShowCornerLogo: state.presenterShowCornerLogo,
       setPresenterLogoDataUrl: state.setPresenterLogoDataUrl,
       setPresenterOutfitColor: state.setPresenterOutfitColor,
       setPresenterGestureStyle: state.setPresenterGestureStyle,
+      setPresenterStudioSet: state.setPresenterStudioSet,
+      setPresenterShowLowerThird: state.setPresenterShowLowerThird,
+      setPresenterShowCornerLogo: state.setPresenterShowCornerLogo,
     }))
   )
 
@@ -196,10 +212,8 @@ export function Presenter3DPage() {
 
   const [aspectRatio, setAspectRatio] = useState<AspectPreset>("9:16")
   const [framing, setFraming] = useState<FramingPreset>("upper_body")
-  const [backdrop, setBackdrop] = useState<BackdropPreset>("warm_paper")
   const [solidColor, setSolidColor] = useState("#F5EFE6")
-  const [blurPhotoBackdrop, setBlurPhotoBackdrop] = useState(true)
-  const [showShopBadge, setShowShopBadge] = useState(Boolean(shopProfile.name.trim()))
+  const [photoBlurRadius, setPhotoBlurRadius] = useState(14)
   const [badgeText, setBadgeText] = useState(shopProfile.name.trim() || "")
 
   // Audio state (linked from Recording Booth or local upload)
@@ -223,6 +237,8 @@ export function Presenter3DPage() {
   const sceneRef = useRef<THREE.Scene | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
   const avatarRef = useRef<AvatarController | null>(null)
+  const studioBackdropRef = useRef<StudioBackdropController | null>(null)
+  const cornerLogoImgRef = useRef<HTMLImageElement | null>(null)
   const backdropImageRef = useRef<HTMLImageElement | null>(null)
   const backdropImageUrlRef = useRef<string | null>(null)
 
@@ -240,12 +256,17 @@ export function Presenter3DPage() {
   const sceneSettingsRef = useRef({
     aspectRatio,
     framing,
-    backdrop,
+    presenterStudioSet,
     solidColor,
-    blurPhotoBackdrop,
-    showShopBadge,
+    photoBlurRadius,
+    presenterShowLowerThird,
+    presenterShowCornerLogo,
     badgeText,
     characterKind,
+    avatarMode,
+    presetId,
+    customAvatarName,
+    photoName,
     mouthX,
     mouthY,
     mouthWidth,
@@ -259,12 +280,17 @@ export function Presenter3DPage() {
   sceneSettingsRef.current = {
     aspectRatio,
     framing,
-    backdrop,
+    presenterStudioSet,
     solidColor,
-    blurPhotoBackdrop,
-    showShopBadge,
+    photoBlurRadius,
+    presenterShowLowerThird,
+    presenterShowCornerLogo,
     badgeText,
     characterKind,
+    avatarMode,
+    presetId,
+    customAvatarName,
+    photoName,
     mouthX,
     mouthY,
     mouthWidth,
@@ -436,6 +462,14 @@ export function Presenter3DPage() {
 
     // Load initial preset avatar with persisted uniform, logo & gesture style
     const storeSnapshot = useContentStore.getState()
+    const studioBackdrop = createStudioBackdropGroup({
+      studioSet: storeSnapshot.presenterStudioSet,
+      logoDataUrl: storeSnapshot.presenterLogoDataUrl,
+      shopName: badgeText.trim() || shopProfile.name.trim(),
+    })
+    scene.add(studioBackdrop.object)
+    studioBackdropRef.current = studioBackdrop
+
     const initialAvatar = createBuiltinPresenterController(defaultPreset, {
       outfitColor: storeSnapshot.presenterOutfitColor,
       logoDataUrl: storeSnapshot.presenterLogoDataUrl,
@@ -482,48 +516,68 @@ export function Presenter3DPage() {
       if (avatarRef.current) {
         avatarRef.current.update(delta, elapsed, lip)
       }
+      if (studioBackdropRef.current) {
+        studioBackdropRef.current.update(delta, elapsed, lip)
+      }
 
       renderer.render(scene, camera)
 
-      // Composite Backdrop + WebGL 3D Character + Shop Badge onto displayCanvas
+      // Composite Backdrop + WebGL 3D Character + Broadcast Overlays onto displayCanvas
       const ctx = displayCanvas.getContext("2d")
       if (!ctx) return
 
       ctx.clearRect(0, 0, dims.width, dims.height)
 
-      // 1. Draw Backdrop
-      if (settings.backdrop === "photo" && backdropImageRef.current) {
-        const img = backdropImageRef.current
-        const scale = Math.max(dims.width / img.width, dims.height / img.height)
-        const drawW = img.width * scale
-        const drawH = img.height * scale
-        const drawX = (dims.width - drawW) / 2
-        const drawY = (dims.height - drawH) / 2
+      // 1. Draw Base Backdrop (2D fallback / custom photo)
+      if (settings.presenterStudioSet === "custom_photo") {
+        if (backdropImageRef.current) {
+          const img = backdropImageRef.current
+          const scale = Math.max(dims.width / img.width, dims.height / img.height)
+          const drawW = img.width * scale
+          const drawH = img.height * scale
+          const drawX = (dims.width - drawW) / 2
+          const drawY = (dims.height - drawH) / 2
+          const blurPx = Math.max(0, settings.photoBlurRadius)
+          const pad = blurPx > 0 ? blurPx * 1.4 : 0
 
-        ctx.save()
-        if (settings.blurPhotoBackdrop) {
-          ctx.filter = "blur(14px) brightness(0.92)"
+          ctx.save()
+          if (blurPx > 0) {
+            ctx.filter = `blur(${blurPx}px) brightness(0.92)`
+          }
+          ctx.drawImage(img, drawX - pad, drawY - pad, drawW + pad * 2, drawH + pad * 2)
+          ctx.restore()
+        } else {
+          ctx.fillStyle = settings.solidColor || "#F5EFE6"
+          ctx.fillRect(0, 0, dims.width, dims.height)
         }
-        ctx.drawImage(img, drawX - 16, drawY - 16, drawW + 32, drawH + 32)
-        ctx.restore()
-      } else if (settings.backdrop === "soft_charcoal") {
+      } else if (settings.presenterStudioSet === "tech_podcast") {
         const grad = ctx.createRadialGradient(
           dims.width * 0.5,
           dims.height * 0.35,
           dims.width * 0.1,
           dims.width * 0.5,
           dims.height * 0.5,
-          dims.height * 0.75
+          dims.height * 0.78
+        )
+        grad.addColorStop(0, "#232329")
+        grad.addColorStop(1, "#141418")
+        ctx.fillStyle = grad
+        ctx.fillRect(0, 0, dims.width, dims.height)
+      } else if (settings.presenterStudioSet === "soft_bokeh") {
+        const grad = ctx.createRadialGradient(
+          dims.width * 0.5,
+          dims.height * 0.35,
+          dims.width * 0.1,
+          dims.width * 0.5,
+          dims.height * 0.5,
+          dims.height * 0.78
         )
         grad.addColorStop(0, "#27272A")
         grad.addColorStop(1, "#18181B")
         ctx.fillStyle = grad
         ctx.fillRect(0, 0, dims.width, dims.height)
-      } else if (settings.backdrop === "solid_color") {
-        ctx.fillStyle = settings.solidColor || "#F5EFE6"
-        ctx.fillRect(0, 0, dims.width, dims.height)
       } else {
-        // Warm Studio Paper
+        // Mobile Showroom warm architectural studio gradient
         const grad = ctx.createRadialGradient(
           dims.width * 0.5,
           dims.height * 0.35,
@@ -532,13 +586,13 @@ export function Presenter3DPage() {
           dims.height * 0.5,
           dims.height * 0.8
         )
-        grad.addColorStop(0, "#FFFDF9")
-        grad.addColorStop(1, "#EFEAE1")
+        grad.addColorStop(0, "#FAF6EE")
+        grad.addColorStop(1, "#DDD5C8")
         ctx.fillStyle = grad
         ctx.fillRect(0, 0, dims.width, dims.height)
       }
 
-      // 2. Draw character layer: 2.5D Talking Photo or 3D WebGL
+      // 2. Draw character layer: 2.5D Talking Photo or 3D WebGL (with 3D Studio Set)
       if (settings.characterKind === "photo") {
         const photo = characterPhotoRef.current
         if (photo && settings.photoStyle === "card") {
@@ -565,33 +619,37 @@ export function Presenter3DPage() {
         ctx.drawImage(glCanvas, 0, 0, dims.width, dims.height)
       }
 
-      // 3. Draw optional Shop Name Badge Overlay
-      const cleanBadge = settings.badgeText.trim()
-      if (settings.showShopBadge && cleanBadge) {
-        const paddingX = 24
-        const badgeHeight = 46
-        ctx.save()
-        ctx.font = "600 22px system-ui, -apple-system, sans-serif"
-        const textWidth = ctx.measureText(cleanBadge).width
-        const pillWidth = Math.min(dims.width - 48, textWidth + paddingX * 2)
-        const pillX = 28
-        const pillY = 28
-
-        ctx.fillStyle =
-          settings.backdrop === "soft_charcoal"
-            ? "rgba(250, 248, 245, 0.92)"
-            : "rgba(24, 24, 27, 0.86)"
-        ctx.beginPath()
-        ctx.roundRect(pillX, pillY, pillWidth, badgeHeight, 23)
-        ctx.fill()
-
-        ctx.fillStyle = settings.backdrop === "soft_charcoal" ? "#18181B" : "#FAF8F5"
-        ctx.textBaseline = "middle"
-        ctx.fillText(cleanBadge, pillX + paddingX, pillY + badgeHeight / 2 + 1, pillWidth - paddingX * 2)
-        ctx.restore()
+      // 3. Top-Right Corner Brand Bug (Watermark)
+      if (settings.presenterShowCornerLogo && cornerLogoImgRef.current) {
+        drawCornerLogoWatermark(ctx, cornerLogoImgRef.current, dims.width)
       }
 
-      // 4. Optional live captions (Talking Photo mode)
+      // 4. TV-Style Lower-Third Nameplate
+      if (settings.presenterShowLowerThird) {
+        const presenterName =
+          settings.characterKind === "model"
+            ? settings.avatarMode === "preset"
+              ? settings.presetId === "male_kokhant"
+                ? "ကိုခန့်"
+                : "နီလာ"
+              : settings.customAvatarName.replace(/\.(vrm|glb)$/i, "") || "3D Presenter"
+            : settings.photoName.replace(/\.[^.]+$/, "")
+        drawBroadcastLowerThird(
+          ctx,
+          {
+            presenterName,
+            shopName: settings.badgeText.trim(),
+            logoImg: cornerLogoImgRef.current,
+            lip,
+            elapsed,
+            captionsOn: settings.characterKind === "photo" && settings.captionsOn,
+          },
+          dims.width,
+          dims.height
+        )
+      }
+
+      // 5. Optional live captions (Talking Photo mode)
       if (settings.characterKind === "photo" && settings.captionsOn) {
         drawCaptionBar(ctx, settings.captionText, dims.width, dims.height)
       }
@@ -606,6 +664,11 @@ export function Presenter3DPage() {
         scene.remove(avatarRef.current.object)
         avatarRef.current.dispose()
         avatarRef.current = null
+      }
+      if (studioBackdropRef.current) {
+        scene.remove(studioBackdropRef.current.object)
+        studioBackdropRef.current.dispose()
+        studioBackdropRef.current = null
       }
       renderer.dispose()
       rendererRef.current = null
@@ -654,7 +717,37 @@ export function Presenter3DPage() {
 
   useEffect(() => {
     avatarRef.current?.setLogoDataUrl?.(presenterLogoDataUrl)
+    studioBackdropRef.current?.setLogoDataUrl(presenterLogoDataUrl)
+
+    if (!presenterLogoDataUrl) {
+      cornerLogoImgRef.current = null
+      return
+    }
+    let cancelled = false
+    const img = new Image()
+    img.onload = () => {
+      if (!cancelled) {
+        cornerLogoImgRef.current = img
+      }
+    }
+    img.onerror = () => {
+      if (!cancelled) {
+        cornerLogoImgRef.current = null
+      }
+    }
+    img.src = presenterLogoDataUrl
+    return () => {
+      cancelled = true
+    }
   }, [presenterLogoDataUrl])
+
+  useEffect(() => {
+    studioBackdropRef.current?.setStudioSet(presenterStudioSet)
+  }, [presenterStudioSet])
+
+  useEffect(() => {
+    studioBackdropRef.current?.setShopName(badgeText)
+  }, [badgeText])
 
   useEffect(() => {
     avatarRef.current?.setGestureStyle?.(presenterGestureStyle)
@@ -865,7 +958,7 @@ export function Presenter3DPage() {
       }
       backdropImageUrlRef.current = url
       backdropImageRef.current = img
-      setBackdrop("photo")
+      setPresenterStudioSet("custom_photo")
     }
     img.onerror = () => {
       URL.revokeObjectURL(url)
@@ -1425,7 +1518,7 @@ export function Presenter3DPage() {
                             setPhotoStyle(id)
                             if (id === "card") {
                               setShowAdvanced(false)
-                              if (shopProfile.name.trim()) setShowShopBadge(true)
+                              if (shopProfile.name.trim()) setPresenterShowLowerThird(true)
                             }
                           }}
                           className={cn(
@@ -1832,102 +1925,131 @@ export function Presenter3DPage() {
               {t(language, "presenter3d.backdropTitle")}
             </Label>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => setBackdrop("warm_paper")}
-                className={cn(
-                  "rounded-xl border px-3 py-2 text-xs font-medium cursor-pointer font-myanmar",
-                  backdrop === "warm_paper"
-                    ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
-                    : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A]"
-                )}
-              >
-                {t(language, "presenter3d.backdropWarmPaper")}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setBackdrop("soft_charcoal")}
-                className={cn(
-                  "rounded-xl border px-3 py-2 text-xs font-medium cursor-pointer font-myanmar",
-                  backdrop === "soft_charcoal"
-                    ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
-                    : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A]"
-                )}
-              >
-                {t(language, "presenter3d.backdropCharcoal")}
-              </button>
-
-              <label
-                className={cn(
-                  "flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium cursor-pointer font-myanmar",
-                  backdrop === "solid_color"
-                    ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
-                    : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A]"
-                )}
-              >
-                <input
-                  type="color"
-                  value={solidColor}
-                  onChange={(e) => {
-                    setSolidColor(e.target.value)
-                    setBackdrop("solid_color")
-                  }}
-                  className="h-4 w-4 rounded border-0 bg-transparent cursor-pointer"
-                />
-                <span>{t(language, "presenter3d.backdropSolid")}</span>
-              </label>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <FileDropzone accept={["image/*"]} onFiles={(f) => handleUploadBackdropPhoto(f[0])}>
-                <label className="inline-flex items-center gap-1.5 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-3 py-2 text-xs font-medium cursor-pointer font-myanmar">
-                  <ImagePlus className="h-3.5 w-3.5" />
-                  <span>{t(language, "presenter3d.uploadBackdropPhoto")}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleUploadBackdropPhoto}
-                    className="hidden"
-                  />
-                </label>
-              </FileDropzone>
-
-              {backdrop === "photo" && (
+            {/* 4 Studio Set Pills */}
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  { id: "mobile_showroom", labelKey: "presenter3d.studioShowroom" },
+                  { id: "tech_podcast", labelKey: "presenter3d.studioPodcast" },
+                  { id: "soft_bokeh", labelKey: "presenter3d.studioBokeh" },
+                  { id: "custom_photo", labelKey: "presenter3d.studioCustomPhoto" },
+                ] as const satisfies readonly { id: PresenterStudioSet; labelKey: string }[]
+              ).map((studioOpt) => (
                 <button
+                  key={studioOpt.id}
                   type="button"
-                  onClick={() => setBlurPhotoBackdrop((v) => !v)}
-                  className="rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-3 py-2 text-xs font-medium cursor-pointer font-myanmar"
+                  onClick={() => {
+                    triggerHaptic(6)
+                    setPresenterStudioSet(studioOpt.id)
+                  }}
+                  className={cn(
+                    "rounded-xl border px-3 py-2 text-xs font-medium cursor-pointer font-myanmar transition-all",
+                    presenterStudioSet === studioOpt.id
+                      ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B] shadow-xs"
+                      : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
+                  )}
                 >
-                  {blurPhotoBackdrop
-                    ? t(language, "presenter3d.photoBlurOn")
-                    : t(language, "presenter3d.photoBlurOff")}
+                  {t(language, studioOpt.labelKey)}
                 </button>
-              )}
+              ))}
             </div>
 
-            {/* Optional Shop Name Badge */}
-            <div className="pt-2 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2">
+            {/* Custom Photo + Blur Slider + Solid Color Fallback */}
+            {presenterStudioSet === "custom_photo" && (
+              <div className="rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white/80 dark:bg-[#27272A]/80 p-3 space-y-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <FileDropzone accept={["image/*"]} onFiles={(f) => handleUploadBackdropPhoto(f[0])}>
+                    <label className="inline-flex items-center gap-1.5 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-3 py-2 text-xs font-medium cursor-pointer font-myanmar">
+                      <ImagePlus className="h-3.5 w-3.5" />
+                      <span>{t(language, "presenter3d.uploadBackdropPhoto")}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleUploadBackdropPhoto}
+                        className="hidden"
+                      />
+                    </label>
+                  </FileDropzone>
+
+                  <label className="flex items-center gap-1.5 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] px-3 py-2 text-xs font-medium cursor-pointer font-myanmar">
+                    <input
+                      type="color"
+                      value={solidColor}
+                      onChange={(e) => {
+                        setSolidColor(e.target.value)
+                        backdropImageRef.current = null
+                      }}
+                      className="h-4 w-4 rounded border-0 bg-transparent cursor-pointer"
+                    />
+                    <span>{t(language, "presenter3d.backdropSolid")}</span>
+                  </label>
+                </div>
+
+                {backdropImageRef.current && (
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px] font-medium font-myanmar text-[#57534E] dark:text-[#A1A1AA]">
+                      <span>{t(language, "presenter3d.photoBlurLabel")}</span>
+                      <span className="tabular-nums">{photoBlurRadius}px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={24}
+                      step={1}
+                      value={photoBlurRadius}
+                      onChange={(e) => setPhotoBlurRadius(Number(e.target.value))}
+                      className="w-full accent-amber-600"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Broadcast Overlays: Corner Logo Watermark + Broadcast Nameplate */}
+            <div className="pt-2 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
-                  {t(language, "presenter3d.shopBadgeToggle")}
+                  {t(language, "presenter3d.cornerLogoToggle")}
                 </span>
                 <button
                   type="button"
-                  onClick={() => setShowShopBadge((v) => !v)}
+                  onClick={() => {
+                    triggerHaptic(6)
+                    setPresenterShowCornerLogo(!presenterShowCornerLogo)
+                  }}
                   className={cn(
                     "rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer transition-colors",
-                    showShopBadge
+                    presenterShowCornerLogo
                       ? "bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
                       : "bg-[#EFEAE1] text-[#57534E] dark:bg-[#27272A] dark:text-[#A1A1AA]"
                   )}
                 >
-                  {showShopBadge ? "ON" : "OFF"}
+                  {presenterShowCornerLogo ? "ON" : "OFF"}
                 </button>
               </div>
 
-              {showShopBadge && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                  {t(language, "presenter3d.lowerThirdToggle")}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(6)
+                    setPresenterShowLowerThird(!presenterShowLowerThird)
+                  }}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer transition-colors",
+                    presenterShowLowerThird
+                      ? "bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                      : "bg-[#EFEAE1] text-[#57534E] dark:bg-[#27272A] dark:text-[#A1A1AA]"
+                  )}
+                >
+                  {presenterShowLowerThird ? "ON" : "OFF"}
+                </button>
+              </div>
+
+              {(presenterShowLowerThird || presenterStudioSet === "mobile_showroom") && (
                 <Input
                   value={badgeText}
                   onChange={(e) => setBadgeText(e.target.value)}

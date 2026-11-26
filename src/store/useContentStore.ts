@@ -125,6 +125,11 @@ export type EditorialLength = "short" | "medium" | "detailed"
 export type MicFilterMode = "raw" | "light"
 export type PresenterOutfitColor = "navy" | "charcoal" | "emerald" | "cream"
 export type PresenterGestureStyle = "natural" | "energetic" | "calm"
+export type PresenterStudioSet =
+  | "mobile_showroom"
+  | "tech_podcast"
+  | "soft_bokeh"
+  | "custom_photo"
 
 export interface ShopProfile {
   name: string
@@ -181,6 +186,9 @@ interface ContentState {
   presenterLogoDataUrl: string | null
   presenterOutfitColor: PresenterOutfitColor
   presenterGestureStyle: PresenterGestureStyle
+  presenterStudioSet: PresenterStudioSet
+  presenterShowLowerThird: boolean
+  presenterShowCornerLogo: boolean
   posterDraft: PosterDraft | null
   uploadedVideoFile: File | null
   videoPreviewUrl: string | null
@@ -247,6 +255,9 @@ interface ContentState {
   setPresenterLogoDataUrl: (dataUrl: string | null) => void
   setPresenterOutfitColor: (color: PresenterOutfitColor) => void
   setPresenterGestureStyle: (style: PresenterGestureStyle) => void
+  setPresenterStudioSet: (studioSet: PresenterStudioSet) => void
+  setPresenterShowLowerThird: (show: boolean) => void
+  setPresenterShowCornerLogo: (show: boolean) => void
   setPosterDraft: (draft: PosterDraft | null) => void
   setUploadedVideo: (file: File | null, previewUrl: string | null) => void
   setUploadedPhotos: (photos: UploadedPhotoItem[]) => void
@@ -346,6 +357,9 @@ export const useContentStore = create<ContentState>()(
       presenterLogoDataUrl: null,
       presenterOutfitColor: "navy",
       presenterGestureStyle: "natural",
+      presenterStudioSet: "mobile_showroom",
+      presenterShowLowerThird: true,
+      presenterShowCornerLogo: true,
       posterDraft: null,
       uploadedVideoFile: null,
       videoPreviewUrl: null,
@@ -590,6 +604,9 @@ export const useContentStore = create<ContentState>()(
       setPresenterLogoDataUrl: (presenterLogoDataUrl) => set({ presenterLogoDataUrl }),
       setPresenterOutfitColor: (presenterOutfitColor) => set({ presenterOutfitColor }),
       setPresenterGestureStyle: (presenterGestureStyle) => set({ presenterGestureStyle }),
+      setPresenterStudioSet: (presenterStudioSet) => set({ presenterStudioSet }),
+      setPresenterShowLowerThird: (presenterShowLowerThird) => set({ presenterShowLowerThird }),
+      setPresenterShowCornerLogo: (presenterShowCornerLogo) => set({ presenterShowCornerLogo }),
       setPosterDraft: (posterDraft) => set({ posterDraft }),
       setUploadedVideo: (file, previewUrl) =>
         set((state) => {
@@ -1184,6 +1201,9 @@ export const useContentStore = create<ContentState>()(
         presenterLogoDataUrl: state.presenterLogoDataUrl ?? null,
         presenterOutfitColor: state.presenterOutfitColor ?? "navy",
         presenterGestureStyle: state.presenterGestureStyle ?? "natural",
+        presenterStudioSet: state.presenterStudioSet ?? "mobile_showroom",
+        presenterShowLowerThird: state.presenterShowLowerThird ?? true,
+        presenterShowCornerLogo: state.presenterShowCornerLogo ?? true,
         videoProductNote: state.videoProductNote ?? "",
         videoPlatform: state.videoPlatform ?? "TikTok / Reels",
         videoOutputLanguage: state.videoOutputLanguage ?? "my",
@@ -1245,6 +1265,21 @@ export const useContentStore = create<ContentState>()(
             persisted.presenterGestureStyle === "calm"
               ? persisted.presenterGestureStyle
               : "natural",
+          presenterStudioSet:
+            persisted.presenterStudioSet === "mobile_showroom" ||
+            persisted.presenterStudioSet === "tech_podcast" ||
+            persisted.presenterStudioSet === "soft_bokeh" ||
+            persisted.presenterStudioSet === "custom_photo"
+              ? persisted.presenterStudioSet
+              : "mobile_showroom",
+          presenterShowLowerThird:
+            typeof persisted.presenterShowLowerThird === "boolean"
+              ? persisted.presenterShowLowerThird
+              : true,
+          presenterShowCornerLogo:
+            typeof persisted.presenterShowCornerLogo === "boolean"
+              ? persisted.presenterShowCornerLogo
+              : true,
         }
       },
     }
