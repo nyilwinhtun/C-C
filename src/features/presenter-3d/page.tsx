@@ -27,6 +27,7 @@ import { Label } from "@/components/ui/label"
 import { cn, triggerHaptic } from "@/lib/utils"
 import { t } from "@/locales/translations"
 import { useContentStore } from "@/store/useContentStore"
+import { detectMouthFromImage } from "@/lib/mouthDetector"
 import { useUIStore } from "@/store/useUIStore"
 import { formatAudioClockDuration } from "@/api/ttsService"
 import {
@@ -38,6 +39,7 @@ import {
   createLipSyncAnalyzer,
   drawCaptionBar,
   drawTalkingPhotoFrame,
+  drawPresenterCardFrame,
   getTalkingPhotoRect,
   loadCustomAvatarFromFile,
   type AvatarController,
@@ -125,6 +127,9 @@ export function Presenter3DPage() {
     generatedAudioDuration,
     selectedVoice,
     shopProfile,
+    mascotPresets,
+    saveMascotPreset,
+    deleteMascotPreset,
   } = useContentStore(
     useShallow((state) => ({
       generatedAudioUrl: state.generatedAudioUrl,
@@ -133,6 +138,9 @@ export function Presenter3DPage() {
       generatedAudioDuration: state.generatedAudioDuration,
       selectedVoice: state.selectedVoice,
       shopProfile: state.shopProfile,
+      mascotPresets: state.mascotPresets,
+      saveMascotPreset: state.saveMascotPreset,
+      deleteMascotPreset: state.deleteMascotPreset,
     }))
   )
 
@@ -152,6 +160,13 @@ export function Presenter3DPage() {
   const [mouthY, setMouthY] = useState(0.42)
   const [mouthWidth, setMouthWidth] = useState(0.12)
   const [jawOpenness, setJawOpenness] = useState(1)
+  const [jawBottom, setJawBottom] = useState(0.56)
+  const [jawHalfWidth, setJawHalfWidth] = useState(0.14)
+  const [photoStyle, setPhotoStyle] = useState<"lipsync" | "card">("lipsync")
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [isDetecting, setIsDetecting] = useState(false)
+  const [photoDataUrl, setPhotoDataUrl] = useState("")
+  const [mascotName, setMascotName] = useState("")
   const [captionsOn, setCaptionsOn] = useState(false)
   const [captionText, setCaptionText] = useState("")
   const characterPhotoRef = useRef<HTMLImageElement | null>(null)
@@ -219,6 +234,9 @@ export function Presenter3DPage() {
     mouthY,
     mouthWidth,
     jawOpenness,
+    jawBottom,
+    jawHalfWidth,
+    photoStyle,
     captionsOn,
     captionText,
   })
@@ -235,6 +253,9 @@ export function Presenter3DPage() {
     mouthY,
     mouthWidth,
     jawOpenness,
+    jawBottom,
+    jawHalfWidth,
+    photoStyle,
     captionsOn,
     captionText,
   }
@@ -492,7 +513,9 @@ export function Presenter3DPage() {
       // 2. Draw character layer: 2.5D Talking Photo or 3D WebGL
       if (settings.characterKind === "photo") {
         const photo = characterPhotoRef.current
-        if (photo) {
+        if (photo && settings.photoStyle === "card") {
+          drawPresenterCardFrame(ctx, photo, dims.width, dims.height, lip, elapsed)
+        } else if (photo) {
           drawTalkingPhotoFrame(
             ctx,
             photo,
@@ -503,6 +526,8 @@ export function Presenter3DPage() {
               mouthY: settings.mouthY,
               mouthWidth: settings.mouthWidth,
               jawOpenness: settings.jawOpenness,
+              jawBottom: settings.jawBottom,
+              jawHalfWidth: settings.jawHalfWidth,
             },
             lip,
             elapsed
@@ -641,11 +666,7 @@ export function Presenter3DPage() {
     img.onload = () => {
       if (characterPhotoUrlRef.current) URL.revokeObjectURL(characterPhotoUrlRef.current)
       characterPhotoUrlRef.current = url
-      characterPhotoRef.current = img
-      setPhotoDims({ w: img.width, h: img.height })
-      setPhotoName(file.name)
-      setMouthX(0.5)
-      setMouthY(0.42)
+      applyCharacterImage(img, file.name, null)
       toast.success(t(language, "presenter3d.photoLoaded"))
     }
     img.onerror = () => {
@@ -653,6 +674,86 @@ export function Presenter3DPage() {
       toast.error(t(language, "presenter3d.photoCharLoadError"))
     }
     img.src = url
+  }
+
+  /** Installs a photo as the character and (unless coordinates are given) auto-detects the mouth. */
+  const applyCharacterImage = (
+    img: HTMLImageElement,
+    name: string,
+    known: {
+      mouthX: number
+      mouthY: number
+      mouthWidth: number
+      jawBottom: number
+      jawHalfWidth: number
+      jawOpenness: number
+    } | null
+  ) => {
+    characterPhotoRef.current = img
+    setPhotoDims({ w: img.width, h: img.height })
+    setPhotoName(name)
+    setPhotoDataUrl("")
+    // Downscaled copy for saving as a mascot (keeps localStorage small)
+    try {
+      const max = 640
+      const k = Math.min(1, max / Math.max(img.width, img.height))
+      const c = document.createElement("canvas")
+      c.width = Math.round(img.width * k)
+      c.height = Math.round(img.height * k)
+      c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height)
+      setPhotoDataUrl(c.toDataURL("image/jpeg", 0.85))
+    } catch {
+      /* ignore */
+    }
+    if (known) {
+      setMouthX(known.mouthX)
+      setMouthY(known.mouthY)
+      setMouthWidth(known.mouthWidth)
+      setJawBottom(known.jawBottom)
+      setJawHalfWidth(known.jawHalfWidth)
+      setJawOpenness(known.jawOpenness)
+      return
+    }
+    setIsDetecting(true)
+    void detectMouthFromImage(img).then((m) => {
+      if (characterPhotoRef.current !== img) return
+      setMouthX(m.x)
+      setMouthY(m.y)
+      setMouthWidth(m.width)
+      setJawBottom(m.jawBottom)
+      setJawHalfWidth(m.jawHalfWidth)
+      setIsDetecting(false)
+      if (m.detected) toast.success("✅ နှုတ်ခမ်းနေရာကို အလိုအလျောက် တွေ့ရှိပြီး")
+      else toast.info("မျက်နှာမတွေ့ပါ – အလယ်တည့်တည့်ကို သုံးထားပါသည် (အသေးစိတ်ညှိနိုင်သည်)")
+    })
+  }
+
+  const handleSaveMascot = () => {
+    if (!photoDataUrl) return
+    const name = mascotName.trim() || shopProfile.name.trim() || photoName || "Mascot"
+    saveMascotPreset({
+      name,
+      photoDataUrl,
+      mouthX,
+      mouthY,
+      mouthWidth,
+      jawBottom,
+      jawHalfWidth,
+      jawOpenness,
+    })
+    setMascotName("")
+    toast.success(`💾 "${name}" Mascot သိမ်းပြီးပါပြီ`)
+  }
+
+  const handleLoadMascot = (m: (typeof mascotPresets)[number]) => {
+    const img = new Image()
+    img.onload = () => {
+      setCharacterKind("photo")
+      applyCharacterImage(img, m.name, m)
+      toast.success(`"${m.name}" ကို ခေါ်ပြီးပါပြီ`)
+    }
+    img.onerror = () => toast.error(t(language, "presenter3d.photoCharLoadError"))
+    img.src = m.photoDataUrl
   }
 
   const placeMouthFromPointer = (clientX: number, clientY: number) => {
@@ -966,7 +1067,7 @@ export function Presenter3DPage() {
             <div
               ref={stageRef}
               onPointerDown={(e) => {
-                if (characterKind !== "photo" || !photoDims || isRenderingVideo) return
+                if (characterKind !== "photo" || !photoDims || isRenderingVideo || !showAdvanced || photoStyle !== "lipsync") return
                 draggingMouthRef.current = true
                 e.currentTarget.setPointerCapture(e.pointerId)
                 placeMouthFromPointer(e.clientX, e.clientY)
@@ -981,7 +1082,7 @@ export function Presenter3DPage() {
                 draggingMouthRef.current = false
               }}
               className={cn(
-                characterKind === "photo" && photoDims && "touch-none cursor-crosshair",
+                characterKind === "photo" && photoDims && showAdvanced && photoStyle === "lipsync" && "touch-none cursor-crosshair",
                 "relative overflow-hidden rounded-2xl shadow-md border border-black/10 dark:border-white/10 w-full",
                 aspectRatio === "9:16" ? "max-w-[300px] aspect-[9/16]" : "max-w-[380px] aspect-square"
               )}
@@ -990,7 +1091,7 @@ export function Presenter3DPage() {
                 ref={displayCanvasRef}
                 className="w-full h-full block object-contain"
               />
-              {characterKind === "photo" && photoDims && !isRenderingVideo && (() => {
+              {characterKind === "photo" && photoDims && !isRenderingVideo && showAdvanced && photoStyle === "lipsync" && (() => {
                 const dims = CANVAS_DIMENSIONS[aspectRatio]
                 const rect = getTalkingPhotoRect(dims.width, dims.height, photoDims.w, photoDims.h)
                 const diameter = Math.max(18, mouthWidth * rect.w * 100)
@@ -1228,6 +1329,95 @@ export function Presenter3DPage() {
 
                 {photoDims && (
                   <div className="space-y-2.5 rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        ["lipsync", "🎤 Lip-Sync Animation"],
+                        ["card", "✨ Presenter Card (ပုံအသန့် + အသံလှိုင်း)"],
+                      ] as const).map(([id, label]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => {
+                            setPhotoStyle(id)
+                            if (id === "card") {
+                              setShowAdvanced(false)
+                              if (shopProfile.name.trim()) setShowShopBadge(true)
+                            }
+                          }}
+                          className={cn(
+                            "rounded-xl border px-2 py-2 text-[11px] font-semibold font-myanmar cursor-pointer transition-colors",
+                            photoStyle === id
+                              ? "border-[#1C1917] bg-[#1C1917] text-[#FAF8F5] dark:border-[#F5F5F4] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                              : "border-[#E7E5E4] dark:border-[#3F3F46] text-[#57534E] dark:text-[#A1A1AA]"
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {isDetecting && (
+                      <p className="flex items-center gap-1.5 text-[11px] text-amber-700 font-myanmar">
+                        <Loader2 className="h-3 w-3 animate-spin" /> နှုတ်ခမ်းနေရာ ရှာနေသည်...
+                      </p>
+                    )}
+
+                    <div className="space-y-1.5 rounded-xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] p-2">
+                      <div className="flex gap-1.5">
+                        <Input
+                          value={mascotName}
+                          onChange={(e) => setMascotName(e.target.value)}
+                          placeholder={shopProfile.name.trim() || "Mascot အမည် (ဥပမာ The Boys Mobile)"}
+                          className="h-8 rounded-lg text-[11px] font-myanmar"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleSaveMascot}
+                          disabled={!photoDataUrl}
+                          className="shrink-0 rounded-lg bg-amber-500 px-2.5 text-[11px] font-semibold text-white disabled:opacity-50 cursor-pointer font-myanmar"
+                        >
+                          💾 Mascot သိမ်းထားမည်
+                        </button>
+                      </div>
+                      {mascotPresets.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {mascotPresets.map((m) => (
+                            <span
+                              key={m.id}
+                              className="inline-flex items-center gap-1 rounded-full border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#EFEAE1]/60 dark:bg-[#18181B] pl-1 pr-1.5 py-0.5"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => handleLoadMascot(m)}
+                                className="inline-flex items-center gap-1 text-[11px] font-medium cursor-pointer"
+                              >
+                                <img src={m.photoDataUrl} alt="" className="h-5 w-5 rounded-full object-cover" />
+                                {m.name}
+                              </button>
+                              <button
+                                type="button"
+                                aria-label="delete mascot"
+                                onClick={() => deleteMascotPreset(m.id)}
+                                className="text-[11px] text-[#A8A29E] hover:text-red-500 cursor-pointer"
+                              >
+                                ✕
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {photoStyle === "lipsync" && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAdvanced((v) => !v)}
+                        className="text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] underline-offset-2 hover:underline cursor-pointer font-myanmar"
+                      >
+                        ⚙️ အသေးစိတ်ညှိရန် {showAdvanced ? "▲" : "▼"}
+                      </button>
+                    )}
+                    {showAdvanced && photoStyle === "lipsync" && (
+                    <div className="space-y-2.5">
                     <p className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
                       {t(language, "presenter3d.photoHint")}
                     </p>
@@ -1261,6 +1451,8 @@ export function Presenter3DPage() {
                         className="w-full accent-amber-600"
                       />
                     </div>
+                    </div>
+                    )}
 
                     <div className="pt-2 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2">
                       <div className="flex items-center justify-between">

@@ -797,13 +797,17 @@ export function disposeObject3D(root: THREE.Object3D): void {
 /* ------------------------------------------------------------------ */
 
 export interface TalkingPhotoParams {
-  /** Mouth centre, 0–1 in image space */
+  /** Mouth (lip-line) centre, 0–1 in image space */
   mouthX: number
   mouthY: number
   /** Mouth width as a fraction of the image width */
   mouthWidth: number
   /** Jaw openness multiplier (0.2–2) */
   jawOpenness: number
+  /** Chin bottom, 0–1 of image height (optional, from landmark detection) */
+  jawBottom?: number
+  /** Jaw half-width as fraction of image width (optional) */
+  jawHalfWidth?: number
 }
 
 /** Contain-fit rect of the photo inside the canvas, in 0–1 canvas fractions. */
@@ -818,6 +822,8 @@ export function getTalkingPhotoRect(
   const h = (imgH * scale) / canvasH
   return { x: (1 - w) / 2, y: (1 - h) / 2, w, h }
 }
+
+let warpCanvas: HTMLCanvasElement | null = null
 
 export function drawTalkingPhotoFrame(
   ctx: CanvasRenderingContext2D,
@@ -840,8 +846,7 @@ export function drawTalkingPhotoFrame(
   // Head motion: breathing + vocal nod, pivoting around bottom-centre of the photo
   const breathe = Math.sin(elapsed * 1.6) * 0.5 + 0.5
   const bobY = (breathe * 0.004 + energy * 0.006) * dh
-  const rot =
-    (Math.sin(elapsed * 0.9) * 0.006 + Math.sin(elapsed * 2.3) * energy * 0.012) // radians
+  const rot = Math.sin(elapsed * 0.9) * 0.006 + Math.sin(elapsed * 2.3) * energy * 0.012
   const sc = 1 + breathe * 0.004 + energy * 0.006
 
   ctx.save()
@@ -856,58 +861,182 @@ export function drawTalkingPhotoFrame(
   const my = dy + params.mouthY * dh
   const mw = Math.max(8, params.mouthWidth * dw)
   const jaw = Math.min(2, Math.max(0.1, params.jawOpenness))
-  const drop = mw * 0.55 * jaw * open
+  const drop = mw * 0.5 * jaw * open
 
-  if (drop > 0.8) {
-    // 1. Lower-jaw warp: re-draw the lower-face patch shifted down
-    ctx.save()
-    ctx.beginPath()
-    ctx.rect(0, my, canvasW, canvasH) // only below the mouth line
-    ctx.clip()
-    ctx.beginPath()
-    ctx.ellipse(mx, my + mw * 0.55, mw * 1.05, mw * 0.95, 0, 0, Math.PI * 2)
-    ctx.clip()
-    ctx.drawImage(img, dx, dy + drop * 0.85, dw, dh)
-    ctx.restore()
+  if (drop > 0.8 && typeof document !== "undefined") {
+    const jawY = Math.max(
+      my + mw * 0.8,
+      dy + (params.jawBottom ?? params.mouthY + params.mouthWidth * 1.2) * dh
+    )
+    const halfW = Math.max(mw * 0.8, (params.jawHalfWidth ?? params.mouthWidth * 1.15) * dw)
+    const fade = Math.max(8, (jawY - my) * 0.45)
 
-    // 2. Shaded organic mouth cavity covering the gap
-    const wScale = 1 + lip.ee * 0.18 - lip.oh * 0.22
-    const rx = (mw / 2) * Math.max(0.6, wScale)
-    const ry = drop * 0.62 + 1
-    const cy = my + drop * 0.45
-    const grad = ctx.createRadialGradient(mx, cy, 1, mx, cy, Math.max(rx, ry))
-    grad.addColorStop(0, "#2a0c10")
-    grad.addColorStop(0.7, "#4a1519")
-    grad.addColorStop(1, "#6b2a2a")
-    ctx.fillStyle = grad
-    ctx.beginPath()
-    ctx.ellipse(mx, cy, rx, ry, 0, 0, Math.PI * 2)
-    ctx.fill()
+    const x0 = Math.floor(Math.max(0, mx - halfW * 1.1))
+    const x1 = Math.ceil(Math.min(canvasW, mx + halfW * 1.1))
+    const y0 = Math.floor(Math.max(0, my))
+    const y1 = Math.ceil(Math.min(canvasH, jawY + fade + drop + 4))
+    const bw = x1 - x0
+    const bh = y1 - y0
 
-    // Upper teeth hint
-    if (open > 0.25) {
-      ctx.save()
-      ctx.beginPath()
-      ctx.ellipse(mx, cy, rx, ry, 0, 0, Math.PI * 2)
-      ctx.clip()
-      ctx.fillStyle = "rgba(250,246,240,0.9)"
-      ctx.fillRect(mx - rx * 0.7, cy - ry, rx * 1.4, ry * 0.32)
-      // Tongue
-      ctx.fillStyle = "rgba(196,92,96,0.9)"
-      ctx.beginPath()
-      ctx.ellipse(mx, cy + ry * 0.7, rx * 0.55, ry * 0.45, 0, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.restore()
+    if (bw > 4 && bh > 4) {
+      if (!warpCanvas) warpCanvas = document.createElement("canvas")
+      if (warpCanvas.width !== bw || warpCanvas.height !== bh) {
+        warpCanvas.width = bw
+        warpCanvas.height = bh
+      }
+      const wctx = warpCanvas.getContext("2d")
+      if (wctx) {
+        wctx.globalCompositeOperation = "source-over"
+        wctx.clearRect(0, 0, bw, bh)
+        const kx = img.width / dw
+        const ky = img.height / dh
+        const band = 2
+        // 1. Slice-warp the real lower-face pixels: chin drops, neck stays put
+        for (let sy = my; sy < jawY + fade; sy += band) {
+          const off = sy <= jawY ? drop : drop * (1 - (sy - jawY) / fade)
+          if (off <= 0) break
+          const srcY = (sy - dy) * ky
+          wctx.drawImage(
+            img,
+            (x0 - dx) * kx,
+            srcY,
+            bw * kx,
+            band * ky,
+            0,
+            sy + off - y0,
+            bw,
+            band + 1
+          )
+        }
+        // 2. Feather the warped patch into the surrounding skin (jaw-shaped mask)
+        const cy = (my + jawY) / 2 - y0
+        const ry = (jawY - my) / 2 + fade
+        wctx.globalCompositeOperation = "destination-in"
+        wctx.save()
+        wctx.translate(mx - x0, cy)
+        wctx.scale(1, ry / halfW)
+        const g = wctx.createRadialGradient(0, 0, 0, 0, 0, halfW)
+        g.addColorStop(0, "rgba(0,0,0,1)")
+        g.addColorStop(0.72, "rgba(0,0,0,1)")
+        g.addColorStop(1, "rgba(0,0,0,0)")
+        wctx.fillStyle = g
+        wctx.fillRect(-halfW, -halfW, halfW * 2, halfW * 2)
+        wctx.restore()
+        wctx.globalCompositeOperation = "source-over"
+        ctx.drawImage(warpCanvas, x0, y0)
+      }
     }
 
-    // Soft lip outline
-    ctx.strokeStyle = "rgba(90,30,36,0.55)"
-    ctx.lineWidth = Math.max(1.5, mw * 0.03)
-    ctx.beginPath()
-    ctx.ellipse(mx, cy, rx, ry, 0, 0, Math.PI * 2)
+    // 3. Inner-mouth cavity along the lip contour (lens between upper & lower lip)
+    const wScale = 1 + lip.ee * 0.14 - lip.oh * 0.2
+    const rx = (mw / 2) * Math.max(0.6, wScale)
+    const lensPath = () => {
+      ctx.beginPath()
+      ctx.moveTo(mx - rx, my)
+      ctx.quadraticCurveTo(mx, my - drop * 0.25, mx + rx, my)
+      ctx.quadraticCurveTo(mx, my + drop * 2.05, mx - rx, my)
+      ctx.closePath()
+    }
+    ctx.save()
+    lensPath()
+    ctx.clip()
+    const grad = ctx.createLinearGradient(0, my - drop * 0.2, 0, my + drop)
+    grad.addColorStop(0, "#1a0709")
+    grad.addColorStop(0.55, "#3b1216")
+    grad.addColorStop(1, "#5a2326")
+    ctx.fillStyle = grad
+    ctx.fillRect(mx - rx, my - drop, rx * 2, drop * 3)
+    if (open > 0.25) {
+      ctx.fillStyle = "rgba(246,242,235,0.88)"
+      ctx.fillRect(mx - rx * 0.78, my - drop * 0.1, rx * 1.56, drop * 0.3)
+      ctx.fillStyle = "rgba(190,86,92,0.85)"
+      ctx.beginPath()
+      ctx.ellipse(mx, my + drop * 0.92, rx * 0.5, drop * 0.34, 0, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    // soft upper-lip shadow for depth
+    const shade = ctx.createLinearGradient(0, my, 0, my + drop * 0.45)
+    shade.addColorStop(0, "rgba(0,0,0,0.45)")
+    shade.addColorStop(1, "rgba(0,0,0,0)")
+    ctx.fillStyle = shade
+    ctx.fillRect(mx - rx, my, rx * 2, drop * 0.5)
+    ctx.restore()
+
+    ctx.strokeStyle = "rgba(95,35,40,0.5)"
+    ctx.lineWidth = Math.max(1.2, mw * 0.025)
+    ctx.lineJoin = "round"
+    lensPath()
     ctx.stroke()
   }
 
+  ctx.restore()
+}
+
+/**
+ * "Presenter Card" style: the photo stays 100% crisp (no warping). Only a subtle
+ * vocal scale bounce and a glowing audio-spectrum bar are animated.
+ */
+export function drawPresenterCardFrame(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  canvasW: number,
+  canvasH: number,
+  lip: LipSyncWeights,
+  elapsed: number
+): void {
+  const energy = Math.min(1, Math.max(0, lip.energy))
+  const areaX = canvasW * 0.07
+  const areaY = canvasH * 0.09
+  const areaW = canvasW * 0.86
+  const areaH = canvasH * 0.62
+  const fit = Math.min(areaW / img.width, areaH / img.height)
+  const pw = img.width * fit
+  const ph = img.height * fit
+  const px = areaX + (areaW - pw) / 2
+  const py = areaY + (areaH - ph) / 2
+  const bounce = 1 + energy * 0.018 + (Math.sin(elapsed * 1.6) * 0.5 + 0.5) * 0.003
+  const radius = Math.min(pw, ph) * 0.06
+
+  ctx.save()
+  ctx.translate(px + pw / 2, py + ph / 2)
+  ctx.scale(bounce, bounce)
+  ctx.translate(-(px + pw / 2), -(py + ph / 2))
+  ctx.shadowColor = `rgba(245,158,11,${0.18 + energy * 0.5})`
+  ctx.shadowBlur = 18 + energy * 34
+  ctx.fillStyle = "#fff"
+  ctx.beginPath()
+  ctx.roundRect(px, py, pw, ph, radius)
+  ctx.fill()
+  ctx.shadowBlur = 0
+  ctx.clip()
+  ctx.drawImage(img, px, py, pw, ph)
+  ctx.restore()
+
+  // Glowing audio spectrum bar
+  const bars = 28
+  const barAreaX = canvasW * 0.12
+  const barAreaW = canvasW * 0.76
+  const baseY = canvasH * 0.80
+  const maxH = canvasH * 0.07
+  const step = barAreaW / bars
+  ctx.save()
+  ctx.shadowColor = "rgba(251,191,36,0.9)"
+  ctx.shadowBlur = 10 + energy * 14
+  for (let i = 0; i < bars; i++) {
+    const t = i / (bars - 1)
+    const band = t < 0.34 ? lip.aa : t < 0.67 ? lip.oh : lip.ee
+    const wave =
+      0.5 + 0.5 * Math.sin(elapsed * 7 + i * 0.9) * Math.cos(elapsed * 3.1 + i * 0.37)
+    const env = Math.sin(Math.PI * t) * 0.35 + 0.65
+    const h = Math.max(canvasH * 0.004, maxH * (0.06 + (energy * 0.55 + band * 0.45) * wave * env))
+    const grad = ctx.createLinearGradient(0, baseY - h, 0, baseY + h)
+    grad.addColorStop(0, "#fde68a")
+    grad.addColorStop(1, "#f59e0b")
+    ctx.fillStyle = grad
+    ctx.beginPath()
+    ctx.roundRect(barAreaX + i * step + step * 0.18, baseY - h, step * 0.64, h * 2, step * 0.32)
+    ctx.fill()
+  }
   ctx.restore()
 }
 

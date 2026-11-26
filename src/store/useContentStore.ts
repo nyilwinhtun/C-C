@@ -148,7 +148,24 @@ export interface UploadedPhotoItem {
   previewUrl: string
 }
 
+export interface MascotPreset {
+  id: string
+  name: string
+  /** Downscaled JPEG data URL of the character photo */
+  photoDataUrl: string
+  mouthX: number
+  mouthY: number
+  mouthWidth: number
+  jawBottom: number
+  jawHalfWidth: number
+  jawOpenness: number
+  savedAt: number
+}
+
 interface ContentState {
+  mascotPresets: MascotPreset[]
+  saveMascotPreset: (preset: Omit<MascotPreset, "id" | "savedAt">) => void
+  deleteMascotPreset: (id: string) => void
   draftInput: GeneratorFormValues
   textPostResult: GeneratedContent | null
   generatedHistory: GeneratedItem[]
@@ -369,6 +386,22 @@ export const useContentStore = create<ContentState>()(
       geminiKeyPool: [],
       activeGeminiKeyIndex: 0,
       geminiKeyCooldowns: {},
+      mascotPresets: [],
+      saveMascotPreset: (preset) =>
+        set((state) => {
+          const existing = state.mascotPresets.find(
+            (m) => m.name.trim().toLowerCase() === preset.name.trim().toLowerCase()
+          )
+          const entry: MascotPreset = {
+            ...preset,
+            id: existing?.id ?? `mascot-${Date.now()}`,
+            savedAt: Date.now(),
+          }
+          const rest = state.mascotPresets.filter((m) => m.id !== entry.id)
+          return { mascotPresets: [entry, ...rest].slice(0, 8) }
+        }),
+      deleteMascotPreset: (id) =>
+        set((state) => ({ mascotPresets: state.mascotPresets.filter((m) => m.id !== id) })),
 
       getGeminiKeyPool: () => {
         const state = get()
@@ -1156,6 +1189,7 @@ export const useContentStore = create<ContentState>()(
         liveModeEnabled: state.liveModeEnabled ?? false,
         geminiKeyPool: (state.geminiKeyPool ?? []).slice(0, 5),
         activeGeminiKeyIndex: state.activeGeminiKeyIndex ?? 0,
+        mascotPresets: state.mascotPresets ?? [],
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState as Partial<ContentState> | undefined) ?? {}
