@@ -98,9 +98,7 @@ async function verifyOfflineCredential(
     return existing.hash === hash ? { id: existing.userId, email: normalizedEmail } : null
   }
 
-  const userId = `offline-${hash.slice(0, 16)}`
-  await saveOfflineCredential(normalizedEmail, password, userId)
-  return { id: userId, email: normalizedEmail }
+  return null
 }
 
 const COMPACT_WAVE_BARS = [
@@ -114,7 +112,6 @@ const COMPACT_WAVE_BARS = [
 export function LoginPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [isSignUp, setIsSignUp] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [focusedField, setFocusedField] = useState<FocusedAuthField>(null)
@@ -127,44 +124,12 @@ export function LoginPage() {
     }))
   )
 
-  const handleContinueOffline = () => {
-    setAuth({ id: "offline-local-user", email: "local@offline.studio" }, "offline-session")
-    toast.success(
-      language === "my"
-        ? "Offline Mode ဖြင့် ဆက်လက်အသုံးပြုနိုင်ပါပြီ"
-        : "Continuing in Offline Mode"
-    )
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     setLoading(true)
 
     try {
-      if (isSignUp) {
-        const { data, error: signUpError } = await supabase.auth.signUp({
-          email,
-          password,
-        })
-        if (signUpError) throw signUpError
-
-        await saveOfflineCredential(email, password, data.user?.id)
-        if (data?.session) {
-          setAuth(
-            data.session.user
-              ? { id: data.session.user.id, email: data.session.user.email ?? "" }
-              : null,
-            data.session.access_token
-          )
-          toast.success(t(language, "auth.signInSuccess"))
-        } else {
-          toast.success(t(language, "auth.signUpSuccess"))
-          setIsSignUp(false)
-        }
-        return
-      }
-
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -384,11 +349,6 @@ export function LoginPage() {
                 <span className="text-stone-400 dark:text-stone-500" aria-hidden="true">•</span>
                 <span>Voice &amp; Video</span>
               </p>
-              {isSignUp && (
-                <span className="mt-1.5 inline-flex items-center rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-300 font-myanmar">
-                  {t(language, "auth.signUpTitle")}
-                </span>
-              )}
             </div>
 
             {error && (
@@ -425,7 +385,7 @@ export function LoginPage() {
                   onFocus={() => setFocusedField("password")}
                   onBlur={() => setFocusedField((prev) => (prev === "password" ? null : prev))}
                   required
-                  autoComplete={isSignUp ? "new-password" : "current-password"}
+                  autoComplete="current-password"
                   disabled={loading}
                   className="bg-white/70 dark:bg-[#18181B]/65 backdrop-blur-sm border-[#E7E5E4]/90 dark:border-white/12 transition-shadow focus-visible:ring-2 focus-visible:ring-indigo-500/40 dark:focus-visible:ring-indigo-400/40"
                 />
@@ -441,37 +401,11 @@ export function LoginPage() {
                     <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                     <span>{t(language, "auth.signingIn")}</span>
                   </span>
-                ) : isSignUp ? (
-                  t(language, "auth.createAccount")
                 ) : (
                   t(language, "auth.signIn")
                 )}
               </Button>
             </form>
-
-            <div className="mt-3.5 space-y-2.5 pt-3 border-t border-[#E7E5E4]/80 dark:border-white/10">
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  setError(null)
-                  setIsSignUp((prev) => !prev)
-                }}
-                className="w-full text-center text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer font-myanmar"
-              >
-                {isSignUp ? t(language, "auth.signIn") : t(language, "auth.createAccount")}
-              </button>
-
-              <Button
-                type="button"
-                variant="outline"
-                disabled={loading}
-                onClick={handleContinueOffline}
-                className="w-full text-xs font-semibold font-myanmar bg-white/60 dark:bg-white/5 hover:bg-white/90 dark:hover:bg-white/10 border-[#E7E5E4]/90 dark:border-white/12 ios-press"
-              >
-                ဆက်လက်အသုံးပြုမည် (Offline Mode)
-              </Button>
-            </div>
           </div>
         </div>
 

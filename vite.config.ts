@@ -70,8 +70,8 @@ export default defineConfig({
       description: 'Social Link & QR, Photo & Poster, and Voice & Video Creator Studio',
       start_url: './',
       scope: './',
-      theme_color: '#141312',
-      background_color: '#0C0B0A',
+      theme_color: '#141414',
+      background_color: '#141414',
       display: 'standalone',
       orientation: 'portrait',
       icons: [
