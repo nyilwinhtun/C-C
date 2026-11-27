@@ -36,6 +36,7 @@ import { useContentStore } from "@/store/useContentStore"
 import { FileDropzone } from "@/components/shared/file-dropzone"
 import { useImagePaste } from "@/lib/use-image-paste"
 import { canvasToPngBlob, shareMediaFile } from "@/lib/nativeShare"
+import { createSampleProductCutoutDataUrl } from "@/lib/sampleAssets"
 import { useUIStore } from "@/store/useUIStore"
 import { isShoppingCategory } from "@/types"
 import { renderPosterCanvas } from "./posterRenderer"
@@ -507,6 +508,33 @@ export function PhotoStudioPage() {
     replaceCutoutObjectUrl(null)
     setAiCaption("")
   }, [replaceCutoutObjectUrl])
+
+  const handleLoadSamplePoster = useCallback(() => {
+    const sampleUrl = createSampleProductCutoutDataUrl()
+    if (!sampleUrl) return
+    setPrimaryDataUrl(sampleUrl)
+    setOriginalPrimaryDataUrl(sampleUrl)
+    replaceCutoutObjectUrl(sampleUrl)
+    setPoster((prev) => ({
+      ...prev,
+      template: "flash_sale",
+      title: isMy ? "Pro Max Studio Edition" : "Pro Max Studio Edition",
+      subtitle: isMy
+        ? "256GB • 1 Year Official Warranty • အသင့်ရှိ"
+        : "256GB • 1-Year Official Warranty • Ready to Ship",
+      showPriceBadge: true,
+      priceTag: "1,850,000 Ks",
+      originalPrice: "2,100,000 Ks",
+      promoBadgeText: isMy ? "အထူးလျှော့ဈေး" : "FLASH SALE",
+      showCodBadge: true,
+    }))
+    setAiCaption(
+      isMy
+        ? "🔥 Stock အသစ်ဝင်လာတဲ့ Pro Max Studio Edition!\n✨ 256GB • 1 Year Official Warranty • အိမ်အရောက်ငွေချေ (COD) ရပါတယ်\n📩 မှာယူလိုပါက Inbox သို့မဟုတ် ဖုန်းဆက်ပြီး စုံစမ်းနိုင်ပါတယ်ရှင့်။\n#OnlineShopMyanmar #FlashSale #NewArrival"
+        : "🔥 Just arrived — Pro Max Studio Edition!\n✨ 256GB • 1-Year Official Warranty • Cash on Delivery available.\n📩 Message us in Inbox or call to order today!\n#NewArrival #FlashSale #TechDeals"
+    )
+    toast.success(t(language, "sample.loadedToast"))
+  }, [isMy, language, replaceCutoutObjectUrl])
 
   const handleImageFile = useCallback(
     async (file: File | undefined, slot: "primary" | "secondary") => {
@@ -982,23 +1010,37 @@ export function PhotoStudioPage() {
             </div>
           ) : (
             <>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={() => primaryInputRef.current?.click()}
-                className="h-9 flex-1 gap-1.5 text-xs font-medium"
+                className="h-9 min-w-0 flex-1 gap-1.5 text-xs font-medium"
               >
                 <ImagePlus className="h-3.5 w-3.5 shrink-0" />
-                {primaryDataUrl
-                  ? isMy
-                    ? "ပုံပြောင်းမည်"
-                    : "Change Product Photo"
-                  : isMy
-                    ? "ပစ္စည်းပုံ ထည့်မည်"
-                    : "Upload Product Photo"}
+                <span className="truncate">
+                  {primaryDataUrl
+                    ? isMy
+                      ? "ပုံပြောင်းမည်"
+                      : "Change Product Photo"
+                    : isMy
+                      ? "ပစ္စည်းပုံ ထည့်မည်"
+                      : "Upload Product Photo"}
+                </span>
               </Button>
+              {!primaryDataUrl && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleLoadSamplePoster}
+                  className="h-9 shrink-0 gap-1.5 px-3 text-xs font-semibold font-myanmar"
+                >
+                  <Sparkles className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                  <span>{t(language, "sample.trySample")}</span>
+                </Button>
+              )}
               {primaryDataUrl && (
                 <Button
                   type="button"

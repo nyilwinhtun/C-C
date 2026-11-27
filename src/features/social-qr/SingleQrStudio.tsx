@@ -196,6 +196,17 @@ export function SingleQrStudio() {
     effectiveCta,
   ])
 
+  const handleLoadSampleQr = useCallback(() => {
+    triggerHaptic(8)
+    updateSocialQrSettings({
+      url: "https://www.facebook.com/creatorstudiomm",
+      headline: shopProfile?.name?.trim() || "Studio Creator MM",
+      handleText: "@creatorstudiomm",
+      ctaText: isMy ? "မှာယူရန် / စကားပြောရန် Scan ဖတ်ပါ" : "Scan to Order / Chat",
+    })
+    toast.success(t(language, "sample.loadedToast"))
+  }, [isMy, language, shopProfile?.name, updateSocialQrSettings])
+
   const handleCopyCleanLink = useCallback(async () => {
     const linkToCopy = detected.cleanUrl || detected.finalUrl
     if (!linkToCopy) return
@@ -396,21 +407,35 @@ export function SingleQrStudio() {
                 </span>
               </button>
 
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleCopyCleanLink}
-                disabled={!detected.isValid}
-                className="gap-1.5 text-xs"
-              >
-                {copiedClean ? (
-                  <Check className="h-3.5 w-3.5 text-emerald-500" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" />
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {!socialQrSettings.url.trim() && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleLoadSampleQr}
+                    className="gap-1.5 text-xs font-semibold font-myanmar"
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                    <span>{t(language, "sample.trySample")}</span>
+                  </Button>
                 )}
-                {t(language, "socialQr.copyCleanLink")}
-              </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopyCleanLink}
+                  disabled={!detected.isValid}
+                  className="gap-1.5 text-xs"
+                >
+                  {copiedClean ? (
+                    <Check className="h-3.5 w-3.5 text-emerald-500" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                  {t(language, "socialQr.copyCleanLink")}
+                </Button>
+              </div>
             </div>
 
             {detected.isValid && detected.strippedParamsCount > 0 && (

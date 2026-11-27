@@ -295,6 +295,40 @@ export function BioLinkStudio() {
     shareUrl,
   ])
 
+  const handleLoadSampleBio = useCallback(() => {
+    triggerHaptic(8)
+    updateBioLinkSettings({
+      shopTitle: shopProfile?.name?.trim() || "Studio Creator MM",
+      tagline: isMy
+        ? "ရန်ကုန် • နေ့စဉ် မနက် ၉ နာရီ – ည ၉ နာရီ"
+        : "Yangon • Open Daily 9AM – 9PM",
+      links: [
+        {
+          id: makeLinkId(),
+          platform: "facebook",
+          label: isMy ? "Facebook Page" : "Facebook Page",
+          url: "https://www.facebook.com/creatorstudiomm",
+          enabled: true,
+        },
+        {
+          id: makeLinkId(),
+          platform: "youtube",
+          label: isMy ? "YouTube Channel" : "YouTube Channel",
+          url: "https://www.youtube.com/@creatorstudiomm",
+          enabled: true,
+        },
+        {
+          id: makeLinkId(),
+          platform: "telegram",
+          label: isMy ? "Telegram ချန်နယ်" : "Telegram Channel",
+          url: "https://t.me/creatorstudiomm",
+          enabled: true,
+        },
+      ],
+    })
+    toast.success(t(language, "sample.loadedToast"))
+  }, [isMy, language, shopProfile?.name, updateBioLinkSettings])
+
   const handleAddUrlFromInput = useCallback(() => {
     const raw = newUrlInput.trim()
     if (!raw) return
@@ -650,8 +684,20 @@ export function BioLinkStudio() {
             {/* Links List */}
             <div className="space-y-2.5">
               {bioLinkSettings.links.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border bg-muted/20 p-6 text-center text-xs text-muted-foreground">
-                  {t(language, "socialQr.bioEmptyLinks")}
+                <div className="rounded-xl border border-dashed border-border bg-muted/20 p-5 text-center space-y-2.5">
+                  <p className="text-xs text-muted-foreground font-myanmar">
+                    {t(language, "socialQr.bioEmptyLinks")}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleLoadSampleBio}
+                    className="gap-1.5 text-xs font-semibold font-myanmar"
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                    <span>{t(language, "sample.trySample")}</span>
+                  </Button>
                 </div>
               ) : (
                 bioLinkSettings.links.map((item, idx) => {

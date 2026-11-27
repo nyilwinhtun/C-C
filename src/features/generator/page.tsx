@@ -11,6 +11,7 @@ import {
   Plus,
   RotateCcw,
   SlidersHorizontal,
+  Sparkles,
   Square,
   Trash2,
   X,
@@ -380,6 +381,16 @@ export function GeneratorPage() {
     rawNotesRef.current = value
     setRawNotes(value)
     setDraftInput({ topic: value })
+  }
+
+  const handleLoadSamplePrompt = () => {
+    triggerHaptic(6)
+    const sampleTopic =
+      language === "my"
+        ? "Pro Max Studio Edition ဖုန်းအသစ် ရောက်ရှိ — 256GB၊ 1 Year Official Warranty၊ ဒီနေ့ 1,850,000 Ks အထူးလျှော့ဈေး၊ ရန်ကုန်/မန္တလေး အိမ်အရောက်ငွေချေ (COD) ရမယ်။"
+        : "New arrival Pro Max Studio Edition — 256GB, 1-year official warranty, launch promo 1,850,000 Ks today only, Cash on Delivery available nationwide."
+    handleNotesChange(sampleTopic)
+    toast.success(t(language, "sample.loadedToast"))
   }
 
   const handleStartRecording = async () => {
@@ -918,7 +929,17 @@ export function GeneratorPage() {
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+            {rawNotes.trim().length === 0 && (
+              <button
+                type="button"
+                onClick={handleLoadSamplePrompt}
+                className="inline-flex items-center gap-1 rounded-full border border-amber-500/35 bg-amber-500/10 px-2.5 py-1.5 text-xs font-semibold text-amber-800 dark:text-amber-200 transition-all hover:bg-amber-500/20 active:scale-95 cursor-pointer font-myanmar"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                <span>{t(language, "sample.trySample")}</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {

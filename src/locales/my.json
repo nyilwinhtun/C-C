@@ -897,5 +897,7 @@
   "nativeShare.sharedWithCaption": "Caption ကူးယူပြီးပါပြီ — ပို့စ်တွင် Paste ချနိုင်ပါသည်",
   "nativeShare.fallbackSaved": "ဖိုင်သိမ်းပြီးပါပြီ — Facebook / Viber တွင် မျှဝေနိုင်ပါသည်",
   "nativeShare.fallbackSavedWithCaption": "ဖိုင်သိမ်းပြီး Caption ကူးယူပြီးပါပြီ — ပို့စ်တွင် Paste ချနိုင်ပါသည်",
-  "nativeShare.exportError": "မျှဝေရန် ဖိုင်ပြင်ဆင်၍ မရပါ။"
+  "nativeShare.exportError": "မျှဝေရန် ဖိုင်ပြင်ဆင်၍ မရပါ။",
+  "sample.trySample": "နမူနာ စမ်းကြည့်မည်",
+  "sample.loadedToast": "နမူနာ ထည့်သွင်းပြီးပါပြီ — စမ်းသုံးကြည့်နိုင်ပါပြီ!"
 }

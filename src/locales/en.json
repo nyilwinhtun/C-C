@@ -897,5 +897,7 @@
   "nativeShare.sharedWithCaption": "Caption copied — paste in your post",
   "nativeShare.fallbackSaved": "File saved — ready to share to your apps",
   "nativeShare.fallbackSavedWithCaption": "File saved & caption copied — paste in your post",
-  "nativeShare.exportError": "Could not prepare file for sharing."
+  "nativeShare.exportError": "Could not prepare file for sharing.",
+  "sample.trySample": "Try Sample",
+  "sample.loadedToast": "Sample loaded — ready to explore!"
 }
