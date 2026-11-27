@@ -67,11 +67,11 @@ export default defineConfig({
     manifest: {
       name: 'Content Creator',
       short_name: 'Content Creator',
-      description: 'AI Voice, Mascot & Social QR Content Creator Studio',
+      description: 'Social Link & QR, Photo & Poster, and Voice & Video Creator Studio',
       start_url: './',
       scope: './',
-      theme_color: '#12131D',
-      background_color: '#0E1018',
+      theme_color: '#141312',
+      background_color: '#0C0B0A',
       display: 'standalone',
       orientation: 'portrait',
       icons: [

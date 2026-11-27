@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Globe, Mic, QrCode, Sparkles } from "lucide-react"
+import { Clapperboard, Globe, Mic, QrCode } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -287,7 +287,7 @@ export function LoginPage() {
           aria-hidden="true"
           className="mb-2.5 grid grid-cols-2 gap-2 lg:hidden"
         >
-          {/* Floating Micro-Card 1: AI Voice */}
+          {/* Floating Micro-Card 1: Voice & Audio */}
           <div
             className={`studio-float-mobile-1 flex items-center gap-2 rounded-2xl border px-2.5 py-2 backdrop-blur-xl transition-all duration-500 min-w-0 ${
               focusedField === "email"
@@ -322,23 +322,23 @@ export function LoginPage() {
             </div>
           </div>
 
-          {/* Floating Micro-Card 2: Mascot Studio */}
+          {/* Floating Micro-Card 2: Presenter Studio */}
           <div
             className={`studio-float-mobile-2 flex items-center gap-2 rounded-2xl border px-2.5 py-2 backdrop-blur-xl transition-all duration-500 min-w-0 ${
               focusedField === "password"
-                ? "border-indigo-400/55 dark:border-indigo-400/45 bg-white/80 dark:bg-[#27272A]/80 shadow-md shadow-indigo-500/12 scale-[1.02]"
+                ? "border-stone-400/55 dark:border-stone-300/40 bg-white/80 dark:bg-[#27272A]/80 shadow-md shadow-stone-500/12 scale-[1.02]"
                 : "border-white/65 dark:border-white/12 bg-white/62 dark:bg-[#27272A]/55 shadow-xs"
             }`}
           >
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-700 dark:text-violet-300">
-              <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-stone-500/15 text-stone-700 dark:text-stone-200">
+              <Clapperboard className="h-3.5 w-3.5" strokeWidth={2} />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1">
                 <span className="text-[11px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] truncate">
                   {t(language, "auth.studioMascotTitle")}
                 </span>
-                <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500/85" />
+                <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500/85" />
               </div>
               <p className="text-[10px] text-[#57534E] dark:text-[#A1A1AA] truncate font-myanmar leading-tight mt-0.5">
                 {t(language, "auth.studioMascotSub")}
@@ -377,12 +377,12 @@ export function LoginPage() {
               <h1 className="text-[21px] sm:text-2xl font-bold tracking-tight text-foreground leading-tight">
                 Content Creator
               </h1>
-              <p className="mt-1 flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-medium tracking-[0.02em] text-muted-foreground leading-snug">
-                <span>AI Voice</span>
-                <span className="text-cyan-500/85 dark:text-cyan-400/85" aria-hidden="true">•</span>
-                <span>Mascot</span>
-                <span className="text-violet-500/85 dark:text-violet-400/85" aria-hidden="true">•</span>
-                <span>Social QR</span>
+              <p className="mt-1 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 text-[11px] sm:text-xs font-medium tracking-[0.02em] text-muted-foreground leading-snug">
+                <span>Social Link &amp; QR</span>
+                <span className="text-amber-600/80 dark:text-amber-400/80" aria-hidden="true">•</span>
+                <span>Photo &amp; Poster</span>
+                <span className="text-stone-400 dark:text-stone-500" aria-hidden="true">•</span>
+                <span>Voice &amp; Video</span>
               </p>
               {isSignUp && (
                 <span className="mt-1.5 inline-flex items-center rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-300 font-myanmar">

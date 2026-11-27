@@ -1,59 +1,49 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
   <defs>
     <linearGradient id="cc-bg" x1="8" y1="6" x2="92" y2="96" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#1B1E2E" />
-      <stop offset="50%" stop-color="#12131D" />
-      <stop offset="100%" stop-color="#090A10" />
+      <stop offset="0%" stop-color="#232220" />
+      <stop offset="52%" stop-color="#161514" />
+      <stop offset="100%" stop-color="#0C0B0A" />
     </linearGradient>
-    <linearGradient id="cc-sheen" x1="10" y1="4" x2="74" y2="62" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.24" />
-      <stop offset="35%" stop-color="#67E8F9" stop-opacity="0.09" />
+    <linearGradient id="cc-sheen" x1="10" y1="4" x2="72" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.14" />
+      <stop offset="38%" stop-color="#E7E0D3" stop-opacity="0.05" />
       <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
     </linearGradient>
     <linearGradient id="cc-rim" x1="6" y1="6" x2="94" y2="94" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#22D3EE" stop-opacity="0.82" />
-      <stop offset="50%" stop-color="#A855F7" stop-opacity="0.62" />
-      <stop offset="100%" stop-color="#FBBF24" stop-opacity="0.82" />
+      <stop offset="0%" stop-color="#E6C98B" stop-opacity="0.72" />
+      <stop offset="50%" stop-color="#A8A29E" stop-opacity="0.46" />
+      <stop offset="100%" stop-color="#C8A45D" stop-opacity="0.72" />
     </linearGradient>
     <linearGradient id="cc-aperture" x1="16" y1="16" x2="84" y2="84" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#22D3EE" stop-opacity="0.72" />
-      <stop offset="52%" stop-color="#C084FC" stop-opacity="0.45" />
-      <stop offset="100%" stop-color="#FBBF24" stop-opacity="0.72" />
+      <stop offset="0%" stop-color="#E5E5E4" stop-opacity="0.45" />
+      <stop offset="50%" stop-color="#A8A29E" stop-opacity="0.24" />
+      <stop offset="100%" stop-color="#D6B46C" stop-opacity="0.52" />
     </linearGradient>
     <linearGradient id="cc-left" x1="20" y1="30" x2="48" y2="70" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#67E8F9" />
-      <stop offset="52%" stop-color="#F0F9FF" />
-      <stop offset="100%" stop-color="#C4B5FD" />
+      <stop offset="0%" stop-color="#FAFAF9" />
+      <stop offset="55%" stop-color="#E7E5E4" />
+      <stop offset="100%" stop-color="#B8B3AC" />
     </linearGradient>
     <linearGradient id="cc-right" x1="49" y1="30" x2="77" y2="70" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#DDD6FE" />
-      <stop offset="52%" stop-color="#F5F3FF" />
-      <stop offset="100%" stop-color="#FDE68A" />
+      <stop offset="0%" stop-color="#F5E6C4" />
+      <stop offset="52%" stop-color="#DFBE7A" />
+      <stop offset="100%" stop-color="#B5893D" />
     </linearGradient>
     <linearGradient id="cc-accent" x1="61" y1="43" x2="75" y2="57" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#22D3EE" />
-      <stop offset="50%" stop-color="#A855F7" />
-      <stop offset="100%" stop-color="#FBBF24" />
+      <stop offset="0%" stop-color="#F6E8C8" />
+      <stop offset="55%" stop-color="#D8B36A" />
+      <stop offset="100%" stop-color="#A87E34" />
     </linearGradient>
-    <linearGradient id="cc-sparkle" x1="72" y1="16" x2="84" y2="28" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FDE68A" />
-      <stop offset="55%" stop-color="#FBBF24" />
-      <stop offset="100%" stop-color="#67E8F9" />
-    </linearGradient>
-    <radialGradient id="cc-glow-cyan" cx="20" cy="18" r="46" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#22D3EE" stop-opacity="0.32" />
-      <stop offset="55%" stop-color="#06B6D4" stop-opacity="0.1" />
-      <stop offset="100%" stop-color="#06B6D4" stop-opacity="0" />
+    <radialGradient id="cc-glow-silver" cx="20" cy="18" r="46" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F5F5F4" stop-opacity="0.14" />
+      <stop offset="55%" stop-color="#D6D3D1" stop-opacity="0.04" />
+      <stop offset="100%" stop-color="#D6D3D1" stop-opacity="0" />
     </radialGradient>
-    <radialGradient id="cc-glow-violet" cx="82" cy="84" r="48" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#A855F7" stop-opacity="0.34" />
-      <stop offset="55%" stop-color="#8B5CF6" stop-opacity="0.1" />
-      <stop offset="100%" stop-color="#8B5CF6" stop-opacity="0" />
-    </radialGradient>
-    <radialGradient id="cc-glow-gold" cx="80" cy="20" r="32" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FBBF24" stop-opacity="0.24" />
-      <stop offset="60%" stop-color="#F59E0B" stop-opacity="0.06" />
-      <stop offset="100%" stop-color="#F59E0B" stop-opacity="0" />
+    <radialGradient id="cc-glow-gold" cx="82" cy="84" r="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#D4AF37" stop-opacity="0.2" />
+      <stop offset="55%" stop-color="#B88E44" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#B88E44" stop-opacity="0" />
     </radialGradient>
     <clipPath id="cc-clip">
       <rect x="2" y="2" width="96" height="96" rx="24" />
@@ -62,18 +52,16 @@
 
   <g clip-path="url(#cc-clip)">
     <rect x="2" y="2" width="96" height="96" rx="24" fill="url(#cc-bg)" />
-    <rect x="2" y="2" width="96" height="96" fill="url(#cc-glow-cyan)" />
-    <rect x="2" y="2" width="96" height="96" fill="url(#cc-glow-violet)" />
+    <rect x="2" y="2" width="96" height="96" fill="url(#cc-glow-silver)" />
     <rect x="2" y="2" width="96" height="96" fill="url(#cc-glow-gold)" />
     <path d="M2 26C2 12.7452 12.7452 2 26 2H74C87.2548 2 98 12.7452 98 26V35C73 46.5 37 48.5 2 37.5V26Z" fill="url(#cc-sheen)" />
-    <circle cx="50" cy="50" r="36" stroke="url(#cc-aperture)" stroke-width="1.3" stroke-dasharray="17 6.5 7 6.5" stroke-linecap="round" opacity="0.82" />
-    <circle cx="50" cy="50" r="29.5" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="1" />
-    <path d="M16.5 24.5V20C16.5 18.067 18.067 16.5 20 16.5H24.5" stroke="#67E8F9" stroke-opacity="0.4" stroke-width="1.5" stroke-linecap="round" />
-    <path d="M83.5 75.5V80C83.5 81.933 81.933 83.5 80 83.5H75.5" stroke="#FDE68A" stroke-opacity="0.4" stroke-width="1.5" stroke-linecap="round" />
+    <circle cx="50" cy="50" r="36" stroke="url(#cc-aperture)" stroke-width="1.25" stroke-dasharray="17 6.5 7 6.5" stroke-linecap="round" opacity="0.85" />
+    <circle cx="50" cy="50" r="29.5" stroke="#FFFFFF" stroke-opacity="0.07" stroke-width="1" />
+    <path d="M16.5 24.5V20C16.5 18.067 18.067 16.5 20 16.5H24.5" stroke="#E7E5E4" stroke-opacity="0.4" stroke-width="1.5" stroke-linecap="round" />
+    <path d="M83.5 75.5V80C83.5 81.933 81.933 83.5 80 83.5H75.5" stroke="#E6C98B" stroke-opacity="0.45" stroke-width="1.5" stroke-linecap="round" />
     <path d="M46.2 36.2C43.5 33.8 40 32.3 36 32.3C27 32.3 20.5 39.5 20.5 50C20.5 60.5 27 67.7 36 67.7C40.1 67.7 43.6 66.2 46.3 63.7" stroke="url(#cc-left)" stroke-width="6.8" stroke-linecap="round" />
     <path d="M75.8 36.2C73.1 33.8 69.6 32.3 65.6 32.3C56.6 32.3 50.1 39.5 50.1 50C50.1 60.5 56.6 67.7 65.6 67.7C69.7 67.7 73.2 66.2 75.9 63.7" stroke="url(#cc-right)" stroke-width="6.8" stroke-linecap="round" />
     <path d="M64.4 44.1L74.1 49.3C75 49.8 75 51.1 74.1 51.6L64.4 56.8C63.5 57.3 62.4 56.6 62.4 55.6V45.3C62.4 44.3 63.5 43.6 64.4 44.1Z" fill="url(#cc-accent)" />
-    <path d="M78 16.5L79.35 20.65L83.5 22L79.35 23.35L78 27.5L76.65 23.35L72.5 22L76.65 20.65L78 16.5Z" fill="url(#cc-sparkle)" />
   </g>
   <rect x="2.75" y="2.75" width="94.5" height="94.5" rx="23.25" stroke="url(#cc-rim)" stroke-width="1.5" />
 </svg>

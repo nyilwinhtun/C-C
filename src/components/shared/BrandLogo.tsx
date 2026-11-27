@@ -8,9 +8,9 @@ export interface BrandLogoProps extends React.SVGProps<SVGSVGElement> {
 
 /**
  * Reusable Content Creator (CC) vector brand mark.
- * Features a dark-glass rounded-squircle studio badge, subtle camera aperture &
- * play/sparkle accent, and stylized geometric "CC" monogram with luminous
- * cyan-to-violet/gold studio gradients.
+ * Editorial matte charcoal / obsidian rounded-squircle badge with brushed
+ * warm-gold & crisp-silver studio framing, subtle camera aperture hairline,
+ * and stylized geometric "CC" monogram with a precision play accent.
  */
 export function BrandLogo({ className, size = 36, ...props }: BrandLogoProps) {
   const uid = useId().replace(/:/g, "")
@@ -21,9 +21,7 @@ export function BrandLogo({ className, size = 36, ...props }: BrandLogoProps) {
   const leftCGradId = `cc-left-${uid}`
   const rightCGradId = `cc-right-${uid}`
   const accentGradId = `cc-accent-${uid}`
-  const sparkleGradId = `cc-sparkle-${uid}`
-  const glowCyanId = `cc-glow-cyan-${uid}`
-  const glowVioletId = `cc-glow-violet-${uid}`
+  const glowSilverId = `cc-glow-silver-${uid}`
   const glowGoldId = `cc-glow-gold-${uid}`
   const clipId = `cc-clip-${uid}`
 
@@ -40,77 +38,65 @@ export function BrandLogo({ className, size = 36, ...props }: BrandLogoProps) {
       {...props}
     >
       <defs>
-        {/* Deep Dark-Glass Obsidian Studio Squircle Base */}
+        {/* Matte Charcoal / Obsidian Studio Squircle Base */}
         <linearGradient id={bgGradId} x1="8" y1="6" x2="92" y2="96" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#1B1E2E" />
-          <stop offset="50%" stopColor="#12131D" />
-          <stop offset="100%" stopColor="#090A10" />
+          <stop offset="0%" stopColor="#232220" />
+          <stop offset="52%" stopColor="#161514" />
+          <stop offset="100%" stopColor="#0C0B0A" />
         </linearGradient>
 
-        {/* Top-Left Diagonal Frosted Glass Specular Sheen */}
-        <linearGradient id={glassSheenId} x1="10" y1="4" x2="74" y2="62" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.24" />
-          <stop offset="35%" stopColor="#67E8F9" stopOpacity="0.09" />
+        {/* Subtle Top-Left Editorial Satin Sheen */}
+        <linearGradient id={glassSheenId} x1="10" y1="4" x2="72" y2="60" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.14" />
+          <stop offset="38%" stopColor="#E7E0D3" stopOpacity="0.05" />
           <stop offset="100%" stopColor="#FFFFFF" stopOpacity="0" />
         </linearGradient>
 
-        {/* Luminous Cyan -> Violet -> Gold Border Rim */}
+        {/* Brushed Warm Gold -> Neutral Silver -> Warm Gold Border Rim */}
         <linearGradient id={rimGradId} x1="6" y1="6" x2="94" y2="94" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#22D3EE" stopOpacity="0.82" />
-          <stop offset="50%" stopColor="#A855F7" stopOpacity="0.62" />
-          <stop offset="100%" stopColor="#FBBF24" stopOpacity="0.82" />
+          <stop offset="0%" stopColor="#E6C98B" stopOpacity="0.72" />
+          <stop offset="50%" stopColor="#A8A29E" stopOpacity="0.46" />
+          <stop offset="100%" stopColor="#C8A45D" stopOpacity="0.72" />
         </linearGradient>
 
-        {/* Subtle Camera Aperture Ring Gradient */}
+        {/* Subtle Camera Aperture Ring Gradient (Warm Gold & Silver) */}
         <linearGradient id={apertureGradId} x1="16" y1="16" x2="84" y2="84" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#22D3EE" stopOpacity="0.72" />
-          <stop offset="52%" stopColor="#C084FC" stopOpacity="0.45" />
-          <stop offset="100%" stopColor="#FBBF24" stopOpacity="0.72" />
+          <stop offset="0%" stopColor="#E5E5E4" stopOpacity="0.45" />
+          <stop offset="50%" stopColor="#A8A29E" stopOpacity="0.24" />
+          <stop offset="100%" stopColor="#D6B46C" stopOpacity="0.52" />
         </linearGradient>
 
-        {/* Stylized Left "C" — Luminous Cyan to Pearl-Violet */}
+        {/* Stylized Left "C" — Crisp Brushed Silver */}
         <linearGradient id={leftCGradId} x1="20" y1="30" x2="48" y2="70" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#67E8F9" />
-          <stop offset="52%" stopColor="#F0F9FF" />
-          <stop offset="100%" stopColor="#C4B5FD" />
+          <stop offset="0%" stopColor="#FAFAF9" />
+          <stop offset="55%" stopColor="#E7E5E4" />
+          <stop offset="100%" stopColor="#B8B3AC" />
         </linearGradient>
 
-        {/* Stylized Right "C" — Pearl-Violet to Warm Studio Gold */}
+        {/* Stylized Right "C" — Warm Editorial Gold */}
         <linearGradient id={rightCGradId} x1="49" y1="30" x2="77" y2="70" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#DDD6FE" />
-          <stop offset="52%" stopColor="#F5F3FF" />
-          <stop offset="100%" stopColor="#FDE68A" />
+          <stop offset="0%" stopColor="#F5E6C4" />
+          <stop offset="52%" stopColor="#DFBE7A" />
+          <stop offset="100%" stopColor="#B5893D" />
         </linearGradient>
 
-        {/* Play Prism Accent — Cyan -> Violet -> Gold */}
+        {/* Precision Play Prism Accent — Warm Brushed Gold */}
         <linearGradient id={accentGradId} x1="61" y1="43" x2="75" y2="57" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#22D3EE" />
-          <stop offset="50%" stopColor="#A855F7" />
-          <stop offset="100%" stopColor="#FBBF24" />
+          <stop offset="0%" stopColor="#F6E8C8" />
+          <stop offset="55%" stopColor="#D8B36A" />
+          <stop offset="100%" stopColor="#A87E34" />
         </linearGradient>
 
-        {/* Studio Sparkle Accent — Gold to Cyan */}
-        <linearGradient id={sparkleGradId} x1="72" y1="16" x2="84" y2="28" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#FDE68A" />
-          <stop offset="55%" stopColor="#FBBF24" />
-          <stop offset="100%" stopColor="#67E8F9" />
-        </linearGradient>
-
-        {/* Smooth Radial Ambient Studio Glows */}
-        <radialGradient id={glowCyanId} cx="20" cy="18" r="46" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#22D3EE" stopOpacity="0.32" />
-          <stop offset="55%" stopColor="#06B6D4" stopOpacity="0.1" />
-          <stop offset="100%" stopColor="#06B6D4" stopOpacity="0" />
+        {/* Subtle Editorial Studio Ambient Lighting */}
+        <radialGradient id={glowSilverId} cx="20" cy="18" r="46" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#F5F5F4" stopOpacity="0.14" />
+          <stop offset="55%" stopColor="#D6D3D1" stopOpacity="0.04" />
+          <stop offset="100%" stopColor="#D6D3D1" stopOpacity="0" />
         </radialGradient>
-        <radialGradient id={glowVioletId} cx="82" cy="84" r="48" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#A855F7" stopOpacity="0.34" />
-          <stop offset="55%" stopColor="#8B5CF6" stopOpacity="0.1" />
-          <stop offset="100%" stopColor="#8B5CF6" stopOpacity="0" />
-        </radialGradient>
-        <radialGradient id={glowGoldId} cx="80" cy="20" r="32" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#FBBF24" stopOpacity="0.24" />
-          <stop offset="60%" stopColor="#F59E0B" stopOpacity="0.06" />
-          <stop offset="100%" stopColor="#F59E0B" stopOpacity="0" />
+        <radialGradient id={glowGoldId} cx="82" cy="84" r="48" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#D4AF37" stopOpacity="0.2" />
+          <stop offset="55%" stopColor="#B88E44" stopOpacity="0.06" />
+          <stop offset="100%" stopColor="#B88E44" stopOpacity="0" />
         </radialGradient>
 
         <clipPath id={clipId}>
@@ -119,15 +105,14 @@ export function BrandLogo({ className, size = 36, ...props }: BrandLogoProps) {
       </defs>
 
       <g clipPath={`url(#${clipId})`}>
-        {/* Dark-Glass Squircle Studio Fill */}
+        {/* Matte Obsidian Squircle Base */}
         <rect x="2" y="2" width="96" height="96" rx="24" fill={`url(#${bgGradId})`} />
 
-        {/* Soft Ambient Internal Studio Glows */}
-        <rect x="2" y="2" width="96" height="96" fill={`url(#${glowCyanId})`} />
-        <rect x="2" y="2" width="96" height="96" fill={`url(#${glowVioletId})`} />
+        {/* Soft Editorial Studio Highlights */}
+        <rect x="2" y="2" width="96" height="96" fill={`url(#${glowSilverId})`} />
         <rect x="2" y="2" width="96" height="96" fill={`url(#${glowGoldId})`} />
 
-        {/* Frosted Top-Glass Specular Reflection */}
+        {/* Satin Top Specular Reflection */}
         <path
           d="M2 26C2 12.7452 12.7452 2 26 2H74C87.2548 2 98 12.7452 98 26V35C73 46.5 37 48.5 2 37.5V26Z"
           fill={`url(#${glassSheenId})`}
@@ -139,38 +124,38 @@ export function BrandLogo({ className, size = 36, ...props }: BrandLogoProps) {
           cy="50"
           r="36"
           stroke={`url(#${apertureGradId})`}
-          strokeWidth="1.3"
+          strokeWidth="1.25"
           strokeDasharray="17 6.5 7 6.5"
           strokeLinecap="round"
-          opacity="0.82"
+          opacity="0.85"
         />
         <circle
           cx="50"
           cy="50"
           r="29.5"
           stroke="#FFFFFF"
-          strokeOpacity="0.08"
+          strokeOpacity="0.07"
           strokeWidth="1"
         />
 
         {/* Minimalist Viewfinder Corner Ticks */}
         <path
           d="M16.5 24.5V20C16.5 18.067 18.067 16.5 20 16.5H24.5"
-          stroke="#67E8F9"
+          stroke="#E7E5E4"
           strokeOpacity="0.4"
           strokeWidth="1.5"
           strokeLinecap="round"
         />
         <path
           d="M83.5 75.5V80C83.5 81.933 81.933 83.5 80 83.5H75.5"
-          stroke="#FDE68A"
-          strokeOpacity="0.4"
+          stroke="#E6C98B"
+          strokeOpacity="0.45"
           strokeWidth="1.5"
           strokeLinecap="round"
         />
 
         {/* Stylized Geometric "CC" Monogram (Custom Vector Paths) */}
-        {/* Left C */}
+        {/* Left C — Crisp Silver */}
         <path
           d="M46.2 36.2C43.5 33.8 40 32.3 36 32.3C27 32.3 20.5 39.5 20.5 50C20.5 60.5 27 67.7 36 67.7C40.1 67.7 43.6 66.2 46.3 63.7"
           stroke={`url(#${leftCGradId})`}
@@ -178,7 +163,7 @@ export function BrandLogo({ className, size = 36, ...props }: BrandLogoProps) {
           strokeLinecap="round"
         />
 
-        {/* Right C */}
+        {/* Right C — Warm Gold */}
         <path
           d="M75.8 36.2C73.1 33.8 69.6 32.3 65.6 32.3C56.6 32.3 50.1 39.5 50.1 50C50.1 60.5 56.6 67.7 65.6 67.7C69.7 67.7 73.2 66.2 75.9 63.7"
           stroke={`url(#${rightCGradId})`}
@@ -191,15 +176,9 @@ export function BrandLogo({ className, size = 36, ...props }: BrandLogoProps) {
           d="M64.4 44.1L74.1 49.3C75 49.8 75 51.1 74.1 51.6L64.4 56.8C63.5 57.3 62.4 56.6 62.4 55.6V45.3C62.4 44.3 63.5 43.6 64.4 44.1Z"
           fill={`url(#${accentGradId})`}
         />
-
-        {/* 4-Point Studio Sparkle Accent (Top-Right) */}
-        <path
-          d="M78 16.5L79.35 20.65L83.5 22L79.35 23.35L78 27.5L76.65 23.35L72.5 22L76.65 20.65L78 16.5Z"
-          fill={`url(#${sparkleGradId})`}
-        />
       </g>
 
-      {/* Outer Crisp Glass Rim */}
+      {/* Outer Brushed Gold & Silver Studio Rim */}
       <rect
         x="2.75"
         y="2.75"
@@ -221,7 +200,7 @@ export interface AnimatedBrandEmblemProps {
 
 /**
  * Animated Login Emblem wrapping BrandLogo in a GPU-accelerated rotating
- * cyan-violet-gold gradient border shimmer and soft breathing ambient glow
+ * warm-gold & brushed-silver border shimmer and soft breathing ambient glow
  * (respecting prefers-reduced-motion via CSS).
  */
 export function AnimatedBrandEmblem({
@@ -244,10 +223,10 @@ export function AnimatedBrandEmblem({
         className={cn(
           "studio-emblem-breathe pointer-events-none absolute -inset-3 rounded-[28px] blur-xl transition-colors duration-500",
           focusedField === "password"
-            ? "bg-gradient-to-tr from-cyan-400/45 via-violet-500/40 to-indigo-500/45 dark:from-cyan-400/50 dark:via-violet-500/45 dark:to-indigo-400/50"
+            ? "bg-gradient-to-tr from-stone-300/40 via-amber-200/32 to-stone-400/40 dark:from-stone-300/32 dark:via-amber-300/28 dark:to-stone-400/32"
             : focusedField === "email"
-            ? "bg-gradient-to-tr from-cyan-400/45 via-amber-400/40 to-violet-500/45 dark:from-cyan-400/50 dark:via-amber-400/45 dark:to-violet-500/50"
-            : "bg-gradient-to-tr from-cyan-400/35 via-violet-500/30 to-amber-400/35 dark:from-cyan-400/40 dark:via-violet-500/35 dark:to-amber-400/35"
+            ? "bg-gradient-to-tr from-amber-300/42 via-yellow-200/32 to-stone-300/38 dark:from-amber-400/38 dark:via-amber-200/30 dark:to-stone-300/30"
+            : "bg-gradient-to-tr from-amber-300/30 via-stone-300/25 to-amber-400/30 dark:from-amber-400/30 dark:via-stone-400/24 dark:to-amber-300/28"
         )}
       />
 
@@ -256,30 +235,30 @@ export function AnimatedBrandEmblem({
         className={cn(
           "relative rounded-[20px] p-[2px] overflow-hidden shadow-lg transition-transform duration-500",
           isFocused
-            ? "scale-[1.04] shadow-cyan-900/20 dark:shadow-violet-950/60"
+            ? "scale-[1.04] shadow-amber-950/20 dark:shadow-black/65"
             : "shadow-stone-900/15 dark:shadow-black/55"
         )}
       >
         {/* Static Fallback Gradient Rim (always crisp under prefers-reduced-motion) */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 rounded-[20px] bg-gradient-to-br from-cyan-400/75 via-violet-500/55 to-amber-400/75 opacity-75"
+          className="pointer-events-none absolute inset-0 rounded-[20px] bg-gradient-to-br from-[#E6C98B]/75 via-[#A8A29E]/50 to-[#C8A45D]/75 opacity-75"
         />
 
-        {/* Smooth Rotating Gradient Border Shimmer */}
+        {/* Smooth Rotating Warm-Gold & Silver Border Shimmer */}
         <div
           aria-hidden="true"
           className="studio-emblem-halo-spin pointer-events-none absolute -inset-[65%]"
           style={{
             background:
               focusedField === "password"
-                ? "conic-gradient(from 0deg, transparent 0deg, rgba(34,211,238,0.98) 50deg, rgba(168,85,247,0.95) 115deg, rgba(99,102,241,0.92) 175deg, transparent 235deg, rgba(251,191,36,0.75) 305deg, transparent 360deg)"
-                : "conic-gradient(from 0deg, transparent 0deg, rgba(34,211,238,0.98) 55deg, rgba(168,85,247,0.95) 120deg, rgba(251,191,36,0.96) 185deg, transparent 245deg, rgba(103,232,249,0.75) 310deg, transparent 360deg)",
+                ? "conic-gradient(from 0deg, transparent 0deg, rgba(245,245,244,0.95) 50deg, rgba(214,211,209,0.85) 115deg, rgba(216,179,106,0.92) 175deg, transparent 235deg, rgba(231,229,228,0.72) 305deg, transparent 360deg)"
+                : "conic-gradient(from 0deg, transparent 0deg, rgba(230,201,139,0.96) 55deg, rgba(245,245,244,0.92) 120deg, rgba(200,164,93,0.94) 185deg, transparent 245deg, rgba(214,211,209,0.75) 310deg, transparent 360deg)",
           }}
         />
 
-        {/* Inner Dark-Glass Bezel + Crisp BrandLogo */}
-        <div className="relative rounded-[18px] bg-[#0E1018]/92 p-[2px] backdrop-blur-md">
+        {/* Inner Matte Obsidian Bezel + Crisp BrandLogo */}
+        <div className="relative rounded-[18px] bg-[#121110]/94 p-[2px] backdrop-blur-md">
           <BrandLogo
             size={size}
             className="block rounded-[16px]"

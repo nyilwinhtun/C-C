@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Mic, QrCode, Sparkles } from "lucide-react"
+import { Clapperboard, Mic, QrCode } from "lucide-react"
 import { t, type Locale } from "@/locales/translations"
 
 export type FocusedAuthField = "email" | "password" | null
@@ -129,7 +129,7 @@ export function LiveStudioBackdrop({
         />
       </div>
 
-      {/* Floating Glassmorphic Micro-Card 1: AI Voice (Desktop Left) */}
+      {/* Floating Glassmorphic Micro-Card 1: Voice & Audio (Desktop Left) */}
       <div
         className={`hidden lg:flex studio-float-1 absolute top-[20%] left-[6%] xl:left-[10%] items-center gap-3 rounded-2xl border px-3.5 py-2.5 backdrop-blur-xl transition-all duration-500 ${
           focusedField === "email"
@@ -164,23 +164,23 @@ export function LiveStudioBackdrop({
         </div>
       </div>
 
-      {/* Floating Glassmorphic Micro-Card 2: Mascot Studio (Desktop Right Top) */}
+      {/* Floating Glassmorphic Micro-Card 2: Presenter Studio (Desktop Right Top) */}
       <div
         className={`hidden lg:flex studio-float-2 absolute top-[24%] right-[6%] xl:right-[10%] items-center gap-3 rounded-2xl border px-3.5 py-2.5 backdrop-blur-xl transition-all duration-500 ${
           focusedField === "password"
-            ? "border-indigo-400/50 dark:border-indigo-400/40 bg-white/75 dark:bg-[#27272A]/75 shadow-lg shadow-indigo-500/10 scale-[1.04]"
+            ? "border-stone-400/55 dark:border-stone-300/40 bg-white/75 dark:bg-[#27272A]/75 shadow-lg shadow-stone-500/10 scale-[1.04]"
             : "border-white/60 dark:border-white/10 bg-white/55 dark:bg-[#27272A]/50 shadow-sm"
         }`}
       >
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-500/15 text-violet-700 dark:text-violet-300">
-          <Sparkles className="h-4 w-4" strokeWidth={2} />
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-stone-500/15 text-stone-700 dark:text-stone-200">
+          <Clapperboard className="h-4 w-4" strokeWidth={2} />
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-semibold text-[#1C1917] dark:text-[#F5F5F4]">
               {t(language, "auth.studioMascotTitle")}
             </span>
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet-500/80" />
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500/80" />
           </div>
           <p className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
             {t(language, "auth.studioMascotSub")}
