@@ -11,7 +11,7 @@ import { useShallow } from "zustand/react/shallow"
 import { toast } from "@/components/ui/sonner"
 import { t } from "@/locales/translations"
 import { ThemeToggle } from "@/components/shared/theme-toggle"
-import { CCLogo } from "@/components/shared/cc-logo"
+import { StudioEmblem } from "@/components/shared/cc-logo"
 import {
   LiveStudioBackdrop,
   MINI_VOICE_BARS,
@@ -206,12 +206,12 @@ export function LoginPage() {
   const isFocused = focusedField !== null
 
   return (
-    <div className="min-h-screen bg-[#FAF8F5] dark:bg-[#141418] flex flex-col items-center justify-center px-4 pt-16 pb-6 sm:p-6 relative overflow-hidden">
+    <div className="min-h-screen bg-[#FAF8F5] dark:bg-[#141418] flex flex-col items-center justify-center px-4 pt-14 pb-4 sm:p-6 relative overflow-hidden">
       {/* Zero-latency Live Interactive Studio Backdrop (with optional video fallback) */}
       <LiveStudioBackdrop focusedField={focusedField} language={language} />
 
       {/* Top right language & theme controls */}
-      <div className="absolute top-4 right-4 flex items-center gap-2 z-20 pt-safe">
+      <div className="absolute top-3.5 right-4 sm:top-4 flex items-center gap-2 z-20 pt-safe">
         <Button
           variant="outline"
           size="sm"
@@ -236,7 +236,7 @@ export function LoginPage() {
       {/* Central Glassmorphism Sign-In Card */}
       <div className="w-full max-w-md relative z-10 studio-card-enter">
         {/* Live Studio Status Pill */}
-        <div className="flex justify-center mb-2.5 sm:mb-3.5">
+        <div className="flex justify-center mb-2 sm:mb-3.5">
           <div
             className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1 text-[11px] font-medium backdrop-blur-xl transition-all duration-300 ${
               isFocused
@@ -285,7 +285,7 @@ export function LoginPage() {
         {/* Mobile / Tablet Top Floating Studio Deck (above card, never overlaps inputs) */}
         <div
           aria-hidden="true"
-          className="mb-3 grid grid-cols-2 gap-2.5 lg:hidden"
+          className="mb-2.5 grid grid-cols-2 gap-2 lg:hidden"
         >
           {/* Floating Micro-Card 1: AI Voice */}
           <div
@@ -367,36 +367,38 @@ export function LoginPage() {
             className="pointer-events-none absolute inset-y-0 left-0 w-1/3 studio-border-shimmer bg-gradient-to-r from-transparent via-white/90 dark:via-white/30 to-transparent opacity-70"
           />
 
-          <div className="relative rounded-[23px] bg-white/72 dark:bg-[#222227]/70 sm:bg-white/78 sm:dark:bg-[#222227]/76 backdrop-blur-2xl p-5 sm:p-8 border border-white/55 dark:border-white/10">
-            <div className="flex flex-col items-center text-center mb-5 sm:mb-6">
-              <div
-                className={`relative mb-3 rounded-[18px] p-1 transition-all duration-500 ${
-                  isFocused
-                    ? "ring-2 ring-amber-500/35 dark:ring-amber-400/35 scale-[1.03]"
-                    : "ring-1 ring-black/5 dark:ring-white/10"
-                }`}
-              >
-                <CCLogo
-                  size={56}
-                  className="h-14 w-14 rounded-[15px] shadow-md"
-                />
-              </div>
-              <h1 className="text-2xl font-bold tracking-tight text-foreground leading-relaxed">
-                {isSignUp ? t(language, "auth.signUpTitle") : t(language, "auth.title")}
+          <div className="relative rounded-[23px] bg-white/72 dark:bg-[#222227]/70 sm:bg-white/78 sm:dark:bg-[#222227]/76 backdrop-blur-2xl p-4 sm:p-7 border border-white/55 dark:border-white/10">
+            <div className="flex flex-col items-center text-center mb-3.5 sm:mb-5">
+              <StudioEmblem
+                size={52}
+                focusedField={focusedField}
+                className="mb-2.5 sm:mb-3"
+              />
+              <h1 className="text-[21px] sm:text-2xl font-bold tracking-tight text-foreground leading-tight">
+                Content Creator
               </h1>
-              <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-                {isSignUp ? t(language, "auth.signUpDesc") : t(language, "auth.signInDesc")}
+              <p className="mt-1 flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-medium tracking-[0.02em] text-muted-foreground leading-snug">
+                <span>AI Voice</span>
+                <span className="text-amber-500/80 dark:text-amber-400/80" aria-hidden="true">•</span>
+                <span>Mascot</span>
+                <span className="text-rose-500/80 dark:text-rose-400/80" aria-hidden="true">•</span>
+                <span>Social QR</span>
               </p>
+              {isSignUp && (
+                <span className="mt-1.5 inline-flex items-center rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-300 font-myanmar">
+                  {t(language, "auth.signUpTitle")}
+                </span>
+              )}
             </div>
 
             {error && (
-              <div className="mb-5 rounded-[14px] border-[0.5px] border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive leading-relaxed">
+              <div className="mb-3.5 rounded-[14px] border-[0.5px] border-destructive/30 bg-destructive/10 p-2.5 text-sm text-destructive leading-relaxed">
                 {error}
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-1.5">
+            <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
+              <div className="space-y-1">
                 <Label htmlFor="auth-email">{t(language, "auth.email")}</Label>
                 <Input
                   id="auth-email"
@@ -413,7 +415,7 @@ export function LoginPage() {
                 />
               </div>
 
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label htmlFor="auth-password">{t(language, "auth.password")}</Label>
                 <Input
                   id="auth-password"
@@ -432,7 +434,7 @@ export function LoginPage() {
               <Button
                 type="submit"
                 disabled={loading}
-                className="w-full mt-2 font-semibold shadow-sm ios-press"
+                className="w-full mt-1.5 font-semibold shadow-sm ios-press"
               >
                 {loading ? (
                   <span className="flex items-center justify-center gap-2">
@@ -447,7 +449,7 @@ export function LoginPage() {
               </Button>
             </form>
 
-            <div className="mt-4 space-y-3 pt-3.5 border-t border-[#E7E5E4]/80 dark:border-white/10">
+            <div className="mt-3.5 space-y-2.5 pt-3 border-t border-[#E7E5E4]/80 dark:border-white/10">
               <button
                 type="button"
                 disabled={loading}
@@ -476,7 +478,7 @@ export function LoginPage() {
         {/* Mobile / Tablet Bottom Floating Studio Deck: Social QR + Live Audio Equalizer Waveform */}
         <div
           aria-hidden="true"
-          className="mt-3 grid grid-cols-[1fr_auto] items-stretch gap-2.5 lg:hidden"
+          className="mt-2.5 grid grid-cols-[1fr_auto] items-stretch gap-2 lg:hidden"
         >
           {/* Floating Micro-Card 3: Social QR */}
           <div

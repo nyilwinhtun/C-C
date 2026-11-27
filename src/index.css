@@ -346,6 +346,26 @@
   }
 }
 
+@keyframes studio-emblem-halo-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes studio-emblem-breathe {
+  0%, 100% {
+    opacity: 0.46;
+    transform: translate3d(0, 0, 0) scale(0.96);
+  }
+  50% {
+    opacity: 0.85;
+    transform: translate3d(0, 0, 0) scale(1.08);
+  }
+}
+
 .studio-orb-a {
   animation: studio-orb-drift-a 16s ease-in-out infinite;
   will-change: transform, opacity;
@@ -416,6 +436,16 @@
   will-change: transform, opacity;
 }
 
+.studio-emblem-halo-spin {
+  animation: studio-emblem-halo-spin 6.5s linear infinite;
+  will-change: transform;
+}
+
+.studio-emblem-breathe {
+  animation: studio-emblem-breathe 3.8s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
 .studio-grid-pattern {
   background-image: radial-gradient(circle, rgba(28, 25, 23, 0.08) 1px, transparent 1px);
   background-size: 28px 28px;
@@ -439,7 +469,9 @@
   .studio-wave-bar,
   .studio-card-enter,
   .studio-border-shimmer,
-  .studio-glow-pulse {
+  .studio-glow-pulse,
+  .studio-emblem-halo-spin,
+  .studio-emblem-breathe {
     animation: none !important;
     transition: none !important;
   }
