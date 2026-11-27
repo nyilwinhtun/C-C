@@ -458,12 +458,17 @@ export function VoiceoverPage() {
     setWaveformBars(Array(WAVEFORM_BAR_COUNT).fill(14))
   }, [releaseWakeLock])
 
-  // Only stop active mic stream/recorder on unmount; never revoke generatedAudioUrl here
+  // Only stop active mic stream/recorder & preview audio on unmount; never revoke generatedAudioUrl here
   useEffect(() => {
     return () => {
       stopRecorderResources()
       wavRecorderRef.current?.cancel()
       wavRecorderRef.current = null
+      if (segmentAudioRef.current) {
+        segmentAudioRef.current.pause()
+        segmentAudioRef.current.src = ""
+        segmentAudioRef.current = null
+      }
     }
   }, [stopRecorderResources])
 

@@ -502,6 +502,8 @@ export type Presenter3dPopMotionPreset = "orbit_sway" | "slow_push" | "vocal_bou
 export interface Presenter3dPopOptions {
   depth: number
   motionPreset: Presenter3dPopMotionPreset
+  /** Disables heavy canvas shadowBlur and ctx.filter blur for smooth mobile rendering */
+  lowPower?: boolean
 }
 
 /**
@@ -512,7 +514,8 @@ function drawAudioSpectrumBar(
   canvasW: number,
   canvasH: number,
   lip: LipSyncWeights,
-  elapsed: number
+  elapsed: number,
+  lowPower = false
 ): void {
   const energy = Math.min(1, Math.max(0, lip.energy))
   const bars = 28
@@ -522,8 +525,10 @@ function drawAudioSpectrumBar(
   const maxH = canvasH * 0.07
   const step = barAreaW / bars
   ctx.save()
-  ctx.shadowColor = "rgba(251,191,36,0.9)"
-  ctx.shadowBlur = 10 + energy * 14
+  if (!lowPower) {
+    ctx.shadowColor = "rgba(251,191,36,0.9)"
+    ctx.shadowBlur = 10 + energy * 14
+  }
   for (let i = 0; i < bars; i++) {
     const t = i / (bars - 1)
     const band = t < 0.34 ? lip.aa : t < 0.67 ? lip.oh : lip.ee
@@ -553,8 +558,10 @@ export function drawPresenterCardFrame(
   canvasW: number,
   canvasH: number,
   lip: LipSyncWeights,
-  elapsed: number
+  elapsed: number,
+  options?: { lowPower?: boolean }
 ): void {
+  const lowPower = Boolean(options?.lowPower)
   const energy = Math.min(1, Math.max(0, lip.energy))
   const areaX = canvasW * 0.07
   const areaY = canvasH * 0.08
@@ -574,8 +581,10 @@ export function drawPresenterCardFrame(
   ctx.translate(px + pw / 2, py + ph / 2)
   ctx.scale(bounce, bounce)
   ctx.translate(-(px + pw / 2), -(py + ph / 2))
-  ctx.shadowColor = `rgba(245,158,11,${0.18 + energy * 0.5})`
-  ctx.shadowBlur = 18 + energy * 34
+  if (!lowPower) {
+    ctx.shadowColor = `rgba(245,158,11,${0.18 + energy * 0.5})`
+    ctx.shadowBlur = 18 + energy * 34
+  }
   ctx.fillStyle = "#fff"
   ctx.beginPath()
   ctx.roundRect(px, py, pw, ph, radius)
@@ -585,7 +594,7 @@ export function drawPresenterCardFrame(
   ctx.drawImage(img, px, py, pw, ph)
   ctx.restore()
 
-  drawAudioSpectrumBar(ctx, canvasW, canvasH, lip, elapsed)
+  drawAudioSpectrumBar(ctx, canvasW, canvasH, lip, elapsed, lowPower)
 }
 
 /**
@@ -660,10 +669,14 @@ export function drawPresenter3dPopFrame(
   const frontShiftX = camX * canvasW * 0.024 * d
   const frontShiftY = camY * canvasH * 0.016 * d + vocalLiftY
 
+  const lowPower = Boolean(options.lowPower)
+
   // 1. Card Frame + Back Layer (z = back)
   ctx.save()
-  ctx.shadowColor = `rgba(245,158,11,${0.18 + energy * 0.45})`
-  ctx.shadowBlur = 18 + energy * 28
+  if (!lowPower) {
+    ctx.shadowColor = `rgba(245,158,11,${0.18 + energy * 0.45})`
+    ctx.shadowBlur = 18 + energy * 28
+  }
   ctx.fillStyle = "#18181b"
   ctx.beginPath()
   ctx.roundRect(px, py, pw, ph, radius)
@@ -675,8 +688,10 @@ export function drawPresenter3dPopFrame(
   ctx.translate(cx + backShiftX, cy + backShiftY)
   ctx.scale(backZoom, backZoom)
   ctx.translate(-cx, -cy)
-  const bgBlur = 2 + d * 7
-  ctx.filter = `blur(${bgBlur.toFixed(1)}px) brightness(0.9)`
+  if (!lowPower) {
+    const bgBlur = 2 + d * 7
+    ctx.filter = `blur(${bgBlur.toFixed(1)}px) brightness(0.9)`
+  }
   ctx.drawImage(originalImg, px, py, pw, ph)
   ctx.restore()
 
@@ -712,24 +727,26 @@ export function drawPresenter3dPopFrame(
   ctx.scale(frontScale, frontScale)
   ctx.translate(-cx, -cy)
 
-  // Soft warm rim highlight behind subject
-  ctx.save()
-  ctx.shadowColor = `rgba(253, 230, 138, ${(0.35 + energy * 0.4).toFixed(2)})`
-  ctx.shadowBlur = 12 + energy * 16 + d * 8
-  ctx.shadowOffsetX = 0
-  ctx.shadowOffsetY = -2
+  if (!lowPower) {
+    // Soft warm rim highlight behind subject
+    ctx.save()
+    ctx.shadowColor = `rgba(253, 230, 138, ${(0.35 + energy * 0.4).toFixed(2)})`
+    ctx.shadowBlur = 12 + energy * 16 + d * 8
+    ctx.shadowOffsetX = 0
+    ctx.shadowOffsetY = -2
+    ctx.drawImage(cutoutImg, px, py, pw, ph)
+    ctx.restore()
+
+    // Deep 3D drop shadow + crisp foreground subject
+    ctx.shadowColor = `rgba(0, 0, 0, ${(0.32 + 0.22 * d).toFixed(2)})`
+    ctx.shadowBlur = 16 + 24 * d
+    ctx.shadowOffsetX = -camX * 14 * d
+    ctx.shadowOffsetY = 10 + 12 * d
+  }
   ctx.drawImage(cutoutImg, px, py, pw, ph)
   ctx.restore()
 
-  // Deep 3D drop shadow + crisp foreground subject
-  ctx.shadowColor = `rgba(0, 0, 0, ${(0.32 + 0.22 * d).toFixed(2)})`
-  ctx.shadowBlur = 16 + 24 * d
-  ctx.shadowOffsetX = -camX * 14 * d
-  ctx.shadowOffsetY = 10 + 12 * d
-  ctx.drawImage(cutoutImg, px, py, pw, ph)
-  ctx.restore()
-
-  drawAudioSpectrumBar(ctx, canvasW, canvasH, lip, elapsed)
+  drawAudioSpectrumBar(ctx, canvasW, canvasH, lip, elapsed, lowPower)
 }
 
 export type CaptionStyle = "classic" | "dynamic_pop"
@@ -739,6 +756,7 @@ export interface CaptionBarOptions {
   lip?: LipSyncWeights
   elapsed?: number
   hasLowerThird?: boolean
+  lowPower?: boolean
 }
 
 function wrapCaptionLines(
@@ -801,8 +819,10 @@ export function drawCaptionBar(
     ctx.translate(-canvasW / 2, -centerY)
 
     // Sleek dark pill backdrop with subtle gold rim
-    ctx.shadowColor = "rgba(0, 0, 0, 0.42)"
-    ctx.shadowBlur = 18
+    if (!options?.lowPower) {
+      ctx.shadowColor = "rgba(0, 0, 0, 0.42)"
+      ctx.shadowBlur = 18
+    }
     ctx.fillStyle = "rgba(15, 15, 18, 0.78)"
     ctx.beginPath()
     ctx.roundRect(canvasW * 0.06, boxY, canvasW * 0.88, boxH, fontSize * 0.55)
@@ -1383,7 +1403,8 @@ export function createStudioBackdropGroup(
 export function drawCornerLogoWatermark(
   ctx: CanvasRenderingContext2D,
   logoImg: HTMLImageElement | null,
-  canvasW: number
+  canvasW: number,
+  options?: { lowPower?: boolean }
 ): void {
   if (!logoImg) return
   const size = Math.round(canvasW * 0.095)
@@ -1396,8 +1417,10 @@ export function drawCornerLogoWatermark(
 
   ctx.save()
   ctx.globalAlpha = 0.8
-  ctx.shadowColor = "rgba(0, 0, 0, 0.28)"
-  ctx.shadowBlur = 12
+  if (!options?.lowPower) {
+    ctx.shadowColor = "rgba(0, 0, 0, 0.28)"
+    ctx.shadowBlur = 12
+  }
   ctx.fillStyle = "rgba(250, 248, 245, 0.92)"
   ctx.beginPath()
   ctx.arc(cx, cy, r + 3, 0, Math.PI * 2)
@@ -1418,6 +1441,7 @@ export interface BroadcastLowerThirdOptions {
   lip: LipSyncWeights
   elapsed: number
   captionsOn: boolean
+  lowPower?: boolean
 }
 
 /**
@@ -1444,8 +1468,10 @@ export function drawBroadcastLowerThird(
 
   ctx.save()
   // Glassmorphic warm-charcoal card
-  ctx.shadowColor = "rgba(0, 0, 0, 0.32)"
-  ctx.shadowBlur = 18
+  if (!options.lowPower) {
+    ctx.shadowColor = "rgba(0, 0, 0, 0.32)"
+    ctx.shadowBlur = 18
+  }
   ctx.fillStyle = "rgba(24, 24, 27, 0.84)"
   ctx.beginPath()
   ctx.roundRect(cardX, cardY, cardW, cardH, radius)
@@ -1552,6 +1578,7 @@ export interface PipPhoneOverlayOptions {
   hasCornerLogo?: boolean
   hasLowerThird?: boolean
   captionsOn?: boolean
+  lowPower?: boolean
 }
 
 /**
@@ -1610,9 +1637,11 @@ export function drawPipPhoneOverlay(
   ctx.translate(-cx, -cy)
 
   // Dark-glass showcase card container
-  ctx.shadowColor = "rgba(0, 0, 0, 0.36)"
-  ctx.shadowBlur = 20
-  ctx.shadowOffsetY = 8
+  if (!options.lowPower) {
+    ctx.shadowColor = "rgba(0, 0, 0, 0.36)"
+    ctx.shadowBlur = 20
+    ctx.shadowOffsetY = 8
+  }
   ctx.fillStyle = "rgba(20, 20, 24, 0.80)"
   ctx.beginPath()
   ctx.roundRect(x, y, cardW, cardH, radius)
@@ -1640,9 +1669,11 @@ export function drawPipPhoneOverlay(
     const drawY = y + imgTop + (availH - drawH) / 2
 
     ctx.save()
-    ctx.shadowColor = "rgba(0, 0, 0, 0.4)"
-    ctx.shadowBlur = 12
-    ctx.shadowOffsetY = 4
+    if (!options.lowPower) {
+      ctx.shadowColor = "rgba(0, 0, 0, 0.4)"
+      ctx.shadowBlur = 12
+      ctx.shadowOffsetY = 4
+    }
     ctx.drawImage(options.phoneImg, drawX, drawY, drawW, drawH)
     ctx.restore()
   }
@@ -1678,8 +1709,10 @@ export function drawPipPhoneOverlay(
     const pillX = x + (cardW - pillW) / 2
     const pillY = y + cardH - pillH * 0.72
 
-    ctx.shadowColor = "rgba(0, 0, 0, 0.32)"
-    ctx.shadowBlur = 10
+    if (!options.lowPower) {
+      ctx.shadowColor = "rgba(0, 0, 0, 0.32)"
+      ctx.shadowBlur = 10
+    }
     ctx.fillStyle = "#FACC15"
     ctx.beginPath()
     ctx.roundRect(pillX, pillY, pillW, pillH, pillH / 2)

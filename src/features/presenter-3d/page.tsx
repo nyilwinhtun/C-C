@@ -71,6 +71,44 @@ import {
 type CharacterKind = "photo" | "model"
 type AspectPreset = "9:16" | "1:1"
 type FramingPreset = "upper_body" | "close_up"
+type RenderQualityPreset = "mobile_fast" | "studio_hd"
+
+function detectMobileDevice(): boolean {
+  if (typeof window === "undefined") return false
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : ""
+  if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)) {
+    return true
+  }
+  if (window.innerWidth < 768) return true
+  if (window.matchMedia?.("(pointer: coarse)").matches && window.innerWidth <= 1024) {
+    return true
+  }
+  return false
+}
+
+const QUALITY_FPS: Record<RenderQualityPreset, number> = {
+  mobile_fast: 24,
+  studio_hd: 30,
+}
+
+const QUALITY_VIDEO_BITRATE: Record<RenderQualityPreset, number> = {
+  mobile_fast: 2_500_000,
+  studio_hd: 3_500_000,
+}
+
+const CANVAS_DIMENSIONS_BY_QUALITY: Record<
+  RenderQualityPreset,
+  Record<AspectPreset, { width: number; height: number }>
+> = {
+  mobile_fast: {
+    "9:16": { width: 540, height: 960 },
+    "1:1": { width: 540, height: 540 },
+  },
+  studio_hd: {
+    "9:16": { width: 720, height: 1280 },
+    "1:1": { width: 1080, height: 1080 },
+  },
+}
 
 const NORMALIZED_BASE_URL = import.meta.env.BASE_URL.endsWith("/")
   ? import.meta.env.BASE_URL
@@ -93,11 +131,6 @@ interface ExportedVideoState {
   mimeType: string
   extension: "mp4" | "webm"
   fileName: string
-}
-
-const CANVAS_DIMENSIONS: Record<AspectPreset, { width: number; height: number }> = {
-  "9:16": { width: 720, height: 1280 },
-  "1:1": { width: 1080, height: 1080 },
 }
 
 const VIDEO_MIME_CANDIDATES = [
@@ -128,14 +161,20 @@ function pickVideoRecorderMimeType(): { mimeType: string; extension: "mp4" | "we
   return { mimeType: "", extension: "webm" }
 }
 
-function createSafeRecorder(stream: MediaStream, mimeType: string): MediaRecorder {
+function createSafeRecorder(
+  stream: MediaStream,
+  mimeType: string,
+  qualityPreset: RenderQualityPreset
+): MediaRecorder {
+  const videoBitsPerSecond = QUALITY_VIDEO_BITRATE[qualityPreset]
+  const audioBitsPerSecond = qualityPreset === "mobile_fast" ? 96_000 : 128_000
   const attempts: MediaRecorderOptions[] = mimeType
     ? [
-        { mimeType, videoBitsPerSecond: 3_500_000, audioBitsPerSecond: 128_000 },
-        { mimeType, videoBitsPerSecond: 3_500_000 },
+        { mimeType, videoBitsPerSecond, audioBitsPerSecond },
+        { mimeType, videoBitsPerSecond },
         { mimeType },
       ]
-    : [{ videoBitsPerSecond: 3_500_000 }]
+    : [{ videoBitsPerSecond }]
 
   for (const opts of attempts) {
     try {
@@ -291,10 +330,15 @@ export function Presenter3DPage() {
   })
 
   const [aspectRatio, setAspectRatio] = useState<AspectPreset>("9:16")
+  const [qualityPreset, setQualityPreset] = useState<RenderQualityPreset>(() =>
+    detectMobileDevice() ? "mobile_fast" : "studio_hd"
+  )
   const [framing, setFraming] = useState<FramingPreset>("upper_body")
   const [solidColor, setSolidColor] = useState("#F5EFE6")
   const [photoBlurRadius, setPhotoBlurRadius] = useState(14)
   const [badgeText, setBadgeText] = useState(shopProfile.name.trim() || "")
+  const pipCutoutCacheRef = useRef<Map<string, string>>(new Map())
+  const pop3dSourceCacheRef = useRef<Map<string, string>>(new Map())
 
   // Audio state (linked from Recording Booth or local upload)
   const [localAudioFile, setLocalAudioFile] = useState<{
@@ -335,6 +379,7 @@ export function Presenter3DPage() {
   // Scene appearance refs so animation loop reads latest values without re-creating WebGL context
   const sceneSettingsRef = useRef({
     aspectRatio,
+    qualityPreset,
     framing,
     presenterStudioSet,
     solidColor,
@@ -362,6 +407,7 @@ export function Presenter3DPage() {
   })
   sceneSettingsRef.current = {
     aspectRatio,
+    qualityPreset,
     framing,
     presenterStudioSet,
     solidColor,
@@ -477,10 +523,15 @@ export function Presenter3DPage() {
     }
   }, [])
 
-  // Update camera framing when framing or aspect ratio changes
+  // Update camera framing when framing, aspect ratio, or quality preset changes
   const applyCameraFraming = useCallback(
-    (camera: THREE.PerspectiveCamera, currentFraming: FramingPreset, currentAspect: AspectPreset) => {
-      const dims = CANVAS_DIMENSIONS[currentAspect]
+    (
+      camera: THREE.PerspectiveCamera,
+      currentFraming: FramingPreset,
+      currentAspect: AspectPreset,
+      currentQuality: RenderQualityPreset = "studio_hd"
+    ) => {
+      const dims = CANVAS_DIMENSIONS_BY_QUALITY[currentQuality][currentAspect]
       camera.aspect = dims.width / dims.height
       camera.fov = currentAspect === "9:16" ? 32 : 30
 
@@ -557,14 +608,29 @@ export function Presenter3DPage() {
 
     const clock = new THREE.Clock()
     let rafId = 0
+    let lastRenderMs = 0
+    let appliedPixelRatio = -1
 
-    const renderFrame = () => {
+    const renderFrame = (nowMs: number) => {
       rafId = requestAnimationFrame(renderFrame)
 
-      const delta = Math.min(clock.getDelta(), 0.05)
-      const elapsed = clock.elapsedTime
       const settings = sceneSettingsRef.current
-      const dims = CANVAS_DIMENSIONS[settings.aspectRatio]
+      const lowPower = settings.qualityPreset === "mobile_fast"
+      const targetFps = QUALITY_FPS[settings.qualityPreset]
+      if (lowPower && lastRenderMs > 0 && nowMs - lastRenderMs < 1000 / targetFps - 1) {
+        return
+      }
+      lastRenderMs = nowMs
+
+      const desiredPixelRatio = lowPower ? 1 : Math.min(window.devicePixelRatio || 1, 2)
+      if (appliedPixelRatio !== desiredPixelRatio) {
+        renderer.setPixelRatio(desiredPixelRatio)
+        appliedPixelRatio = desiredPixelRatio
+      }
+
+      const delta = Math.min(clock.getDelta(), 0.08)
+      const elapsed = clock.elapsedTime
+      const dims = CANVAS_DIMENSIONS_BY_QUALITY[settings.qualityPreset][settings.aspectRatio]
 
       if (displayCanvas.width !== dims.width || displayCanvas.height !== dims.height) {
         displayCanvas.width = dims.width
@@ -572,7 +638,7 @@ export function Presenter3DPage() {
       }
       if (glCanvas.width !== dims.width || glCanvas.height !== dims.height) {
         renderer.setSize(dims.width, dims.height, false)
-        applyCameraFraming(camera, settings.framing, settings.aspectRatio)
+        applyCameraFraming(camera, settings.framing, settings.aspectRatio, settings.qualityPreset)
       }
 
       // Lip-sync weights from active AnalyserNode
@@ -614,7 +680,7 @@ export function Presenter3DPage() {
           const drawH = img.height * scale
           const drawX = (dims.width - drawW) / 2
           const drawY = (dims.height - drawH) / 2
-          const blurPx = Math.max(0, settings.photoBlurRadius)
+          const blurPx = lowPower ? 0 : Math.max(0, settings.photoBlurRadius)
           const pad = blurPx > 0 ? blurPx * 1.4 : 0
 
           ctx.save()
@@ -622,6 +688,10 @@ export function Presenter3DPage() {
             ctx.filter = `blur(${blurPx}px) brightness(0.92)`
           }
           ctx.drawImage(img, drawX - pad, drawY - pad, drawW + pad * 2, drawH + pad * 2)
+          if (lowPower) {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.08)"
+            ctx.fillRect(0, 0, dims.width, dims.height)
+          }
           ctx.restore()
         } else {
           ctx.fillStyle = settings.solidColor || "#F5EFE6"
@@ -678,9 +748,10 @@ export function Presenter3DPage() {
             drawPresenter3dPopFrame(ctx, photo, cutout, dims.width, dims.height, lip, elapsed, {
               depth: settings.presenter3dPopDepth,
               motionPreset: settings.presenter3dPopMotion,
+              lowPower,
             })
           } else {
-            drawPresenterCardFrame(ctx, photo, dims.width, dims.height, lip, elapsed)
+            drawPresenterCardFrame(ctx, photo, dims.width, dims.height, lip, elapsed, { lowPower })
           }
         }
       } else if (settings.hasLoaded3dAvatar) {
@@ -689,7 +760,7 @@ export function Presenter3DPage() {
 
       // 3. Top-Right Corner Brand Bug (Watermark at 80% opacity)
       if (settings.presenterShowCornerLogo && cornerLogoImgRef.current) {
-        drawCornerLogoWatermark(ctx, cornerLogoImgRef.current, dims.width)
+        drawCornerLogoWatermark(ctx, cornerLogoImgRef.current, dims.width, { lowPower })
       }
 
       // 4. TV-Style Lower-Third Nameplate
@@ -713,6 +784,7 @@ export function Presenter3DPage() {
             lip,
             elapsed,
             captionsOn: settings.captionsOn,
+            lowPower,
           },
           dims.width,
           dims.height
@@ -733,6 +805,7 @@ export function Presenter3DPage() {
             hasCornerLogo: Boolean(settings.presenterShowCornerLogo && cornerLogoImgRef.current),
             hasLowerThird: settings.presenterShowLowerThird,
             captionsOn: settings.captionsOn,
+            lowPower,
           },
           dims.width,
           dims.height
@@ -746,6 +819,7 @@ export function Presenter3DPage() {
           lip,
           elapsed,
           hasLowerThird: settings.presenterShowLowerThird,
+          lowPower,
         })
       }
     }
@@ -754,6 +828,14 @@ export function Presenter3DPage() {
 
     return () => {
       cancelAnimationFrame(rafId)
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        try {
+          mediaRecorderRef.current.stop()
+        } catch {
+          // Ignore recorder stop errors on unmount
+        }
+      }
+      mediaRecorderRef.current = null
       stopAudioPlayback()
       if (avatarRef.current) {
         scene.remove(avatarRef.current.object)
@@ -769,6 +851,16 @@ export function Presenter3DPage() {
       rendererRef.current = null
       sceneRef.current = null
       cameraRef.current = null
+      glCanvas.width = 0
+      glCanvas.height = 0
+      glCanvasRef.current = null
+      displayCanvas.width = 0
+      displayCanvas.height = 0
+      pipImageRef.current = null
+      cornerLogoImgRef.current = null
+      backdropImageRef.current = null
+      characterPhotoRef.current = null
+      cutoutPhotoRef.current = null
       if (backdropImageUrlRef.current) {
         URL.revokeObjectURL(backdropImageUrlRef.current)
         backdropImageUrlRef.current = null
@@ -784,12 +876,12 @@ export function Presenter3DPage() {
     }
   }, [applyCameraFraming, defaultPreset, stopAudioPlayback])
 
-  // Re-apply camera framing whenever user toggles Upper-Body / Close-Up or Aspect Ratio
+  // Re-apply camera framing whenever user toggles Upper-Body / Close-Up, Aspect Ratio, or Quality
   useEffect(() => {
     if (cameraRef.current) {
-      applyCameraFraming(cameraRef.current, framing, aspectRatio)
+      applyCameraFraming(cameraRef.current, framing, aspectRatio, qualityPreset)
     }
-  }, [applyCameraFraming, framing, aspectRatio])
+  }, [applyCameraFraming, framing, aspectRatio, qualityPreset])
 
   const swapAvatarController = useCallback((next: AvatarController | null) => {
     const scene = sceneRef.current
@@ -837,9 +929,20 @@ export function Presenter3DPage() {
 
   const handleGenerate3dPopLayer = useCallback(
     async (enableAfter = true) => {
+      if (isRenderingRef.current || isPlayingRef.current) {
+        return
+      }
       const sourceUrl = photoDataUrl || presenterMascotDataUrl
       if (!sourceUrl) {
         toast.error(t(language, "presenter3d.noPhotoError"))
+        return
+      }
+      const cachedCutout = pop3dSourceCacheRef.current.get(sourceUrl)
+      if (cachedCutout) {
+        setPresenter3dPopCutoutUrl(cachedCutout)
+        if (enableAfter) {
+          setPresenter3dPopEnabled(true)
+        }
         return
       }
       if (isExtracting3dPop) return
@@ -853,10 +956,10 @@ export function Presenter3DPage() {
           const objUrl = URL.createObjectURL(cutoutBlob)
           const img = new Image()
           img.onload = () => {
+            const c = document.createElement("canvas")
             try {
               const max = 640
               const k = Math.min(1, max / Math.max(img.width, img.height, 1))
-              const c = document.createElement("canvas")
               c.width = Math.max(1, Math.round(img.width * k))
               c.height = Math.max(1, Math.round(img.height * k))
               c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height)
@@ -864,6 +967,8 @@ export function Presenter3DPage() {
             } catch (e) {
               reject(e)
             } finally {
+              c.width = 0
+              c.height = 0
               URL.revokeObjectURL(objUrl)
             }
           }
@@ -873,6 +978,7 @@ export function Presenter3DPage() {
           }
           img.src = objUrl
         })
+        pop3dSourceCacheRef.current.set(sourceUrl, cutoutUrl)
         setPresenter3dPopCutoutUrl(cutoutUrl)
         if (enableAfter) {
           setPresenter3dPopEnabled(true)
@@ -1002,10 +1108,10 @@ export function Presenter3DPage() {
     const url = URL.createObjectURL(file)
     const img = new Image()
     img.onload = () => {
+      const canvas = document.createElement("canvas")
       try {
         const max = 256
         const scale = Math.min(1, max / Math.max(img.width, img.height))
-        const canvas = document.createElement("canvas")
         canvas.width = Math.max(1, Math.round(img.width * scale))
         canvas.height = Math.max(1, Math.round(img.height * scale))
         const ctx = canvas.getContext("2d")
@@ -1016,6 +1122,8 @@ export function Presenter3DPage() {
       } catch {
         toast.error(t(language, "presenter3d.logoInvalid"))
       } finally {
+        canvas.width = 0
+        canvas.height = 0
         URL.revokeObjectURL(url)
       }
     }
@@ -1036,8 +1144,22 @@ export function Presenter3DPage() {
       return
     }
 
+    const cacheKey = `${file.name}:${file.size}:${file.lastModified}`
+    if (pipRemoveBg && pipCutoutCacheRef.current.has(cacheKey)) {
+      const cachedDataUrl = pipCutoutCacheRef.current.get(cacheKey)!
+      const finalImg = new Image()
+      finalImg.onload = () => {
+        pipImageRef.current = finalImg
+        setPipImageDataUrl(cachedDataUrl)
+        setPipEnabled(true)
+        toast.success(t(language, "presenter3d.pipLoaded"))
+      }
+      finalImg.src = cachedDataUrl
+      return
+    }
+
     let workingBlob: Blob = file
-    if (pipRemoveBg) {
+    if (pipRemoveBg && !isRenderingRef.current && !isPlayingRef.current) {
       setIsRemovingPipBg(true)
       try {
         const { removeBackground } = await import("@imgly/background-removal")
@@ -1052,15 +1174,18 @@ export function Presenter3DPage() {
     const url = URL.createObjectURL(workingBlob)
     const img = new Image()
     img.onload = () => {
+      const canvas = document.createElement("canvas")
       try {
         const max = 640
         const scale = Math.min(1, max / Math.max(img.width, img.height, 1))
-        const canvas = document.createElement("canvas")
         canvas.width = Math.max(1, Math.round(img.width * scale))
         canvas.height = Math.max(1, Math.round(img.height * scale))
         const ctx = canvas.getContext("2d")
         ctx?.drawImage(img, 0, 0, canvas.width, canvas.height)
         const dataUrl = canvas.toDataURL("image/png")
+        if (pipRemoveBg && workingBlob !== file) {
+          pipCutoutCacheRef.current.set(cacheKey, dataUrl)
+        }
 
         const finalImg = new Image()
         finalImg.onload = () => {
@@ -1073,6 +1198,8 @@ export function Presenter3DPage() {
       } catch {
         toast.error(t(language, "presenter3d.pipInvalid"))
       } finally {
+        canvas.width = 0
+        canvas.height = 0
         URL.revokeObjectURL(url)
       }
     }
@@ -1152,6 +1279,7 @@ export function Presenter3DPage() {
   }
 
   const handleConvertImageTo3d = async () => {
+    if (isRenderingRef.current || isPlayingRef.current) return
     const source = converterSourceFile || converterSourceUrl || photoDataUrl || presenterMascotDataUrl
     if (!source) {
       toast.error(t(language, "presenter3d.img3dNoImageError"))
@@ -1289,10 +1417,10 @@ export function Presenter3DPage() {
       setPresenterMascotDataUrl(existingDataUrl)
       return
     }
+    const c = document.createElement("canvas")
     try {
       const max = 640
       const k = Math.min(1, max / Math.max(img.width, img.height, 1))
-      const c = document.createElement("canvas")
       c.width = Math.max(1, Math.round(img.width * k))
       c.height = Math.max(1, Math.round(img.height * k))
       c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height)
@@ -1301,6 +1429,9 @@ export function Presenter3DPage() {
       setPresenterMascotDataUrl(dataUrl)
     } catch {
       setPhotoDataUrl("")
+    } finally {
+      c.width = 0
+      c.height = 0
     }
   }
 
@@ -1474,7 +1605,8 @@ export function Presenter3DPage() {
         throw new Error("Canvas captureStream is not supported in this browser.")
       }
 
-      const canvasStream = canvas.captureStream(30)
+      const targetFps = QUALITY_FPS[qualityPreset]
+      const canvasStream = canvas.captureStream(targetFps)
       const audioDest = ctx.createMediaStreamDestination()
 
       const source = ctx.createBufferSource()
@@ -1495,7 +1627,7 @@ export function Presenter3DPage() {
       ])
 
       const { mimeType, extension } = pickVideoRecorderMimeType()
-      const recorder = createSafeRecorder(combinedStream, mimeType)
+      const recorder = createSafeRecorder(combinedStream, mimeType, qualityPreset)
       const chunks: BlobPart[] = []
 
       recorder.ondataavailable = (ev) => {
@@ -1652,7 +1784,7 @@ export function Presenter3DPage() {
                 <span>{t(language, "presenter3d.safeZoneBtn")}</span>
               </button>
               <span className="rounded-full bg-[#EFEAE1] dark:bg-[#27272A] px-2.5 py-1 text-[11px] font-medium tabular-nums text-[#1C1917] dark:text-[#F5F5F4]">
-                {aspectRatio} • {framing === "close_up" ? "Close-Up" : "Upper-Body"}
+                {aspectRatio} • {qualityPreset === "mobile_fast" ? "540p 24fps" : "HD 30fps"}
               </span>
             </div>
           </div>
@@ -2574,6 +2706,46 @@ export function Presenter3DPage() {
                   {t(language, opt.labelKey)}
                 </button>
               ))}
+            </div>
+
+            {/* Render Quality Toggle: Mobile Fast (540p / 24fps) vs Studio HD (720p–1080p / 30fps) */}
+            <div className="pt-2 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                  {t(language, "presenter3d.qualityLabel")}
+                </span>
+                <span className="text-[10px] text-[#78716C] dark:text-[#A1A1AA] font-myanmar">
+                  {qualityPreset === "mobile_fast"
+                    ? t(language, "presenter3d.qualityMobileHint")
+                    : t(language, "presenter3d.qualityHdHint")}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    { id: "mobile_fast", labelKey: "presenter3d.qualityMobileFast" },
+                    { id: "studio_hd", labelKey: "presenter3d.qualityStudioHd" },
+                  ] as const
+                ).map((qOpt) => (
+                  <button
+                    key={qOpt.id}
+                    type="button"
+                    disabled={isRenderingVideo}
+                    onClick={() => {
+                      triggerHaptic(6)
+                      setQualityPreset(qOpt.id)
+                    }}
+                    className={cn(
+                      "rounded-2xl border py-2 px-2.5 text-[11px] font-semibold transition-all cursor-pointer font-myanmar disabled:opacity-50",
+                      qualityPreset === qOpt.id
+                        ? "border-emerald-600 dark:border-emerald-400 bg-emerald-600/12 text-emerald-800 dark:text-emerald-200"
+                        : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
+                    )}
+                  >
+                    {t(language, qOpt.labelKey)}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 

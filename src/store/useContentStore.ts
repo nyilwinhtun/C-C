@@ -774,6 +774,9 @@ export const useContentStore = create<ContentState>()(
           if (state.generatedAudioUrl && state.generatedAudioUrl !== params.audioUrl) {
             URL.revokeObjectURL(state.generatedAudioUrl)
           }
+          for (const seg of state.generatedAudioSegments) {
+            URL.revokeObjectURL(seg.audioUrl)
+          }
           return {
             generatedAudioUrl: params.audioUrl,
             generatedAudioBlob: params.blob,
@@ -782,6 +785,7 @@ export const useContentStore = create<ContentState>()(
             generatedAudioDuration: params.durationSeconds,
             generatedAudioTitle: params.title,
             generatedAudioSource: "my_voice",
+            generatedAudioSegments: [],
             selfRecordedBlob: params.rawBlob,
             selfRecordedMimeType: params.mimeType,
             selfRecordedNeedsTranscribe: true,
@@ -794,6 +798,12 @@ export const useContentStore = create<ContentState>()(
         set((state) => {
           if (state.generatedAudioUrl && state.generatedAudioUrl !== params.audioUrl) {
             URL.revokeObjectURL(state.generatedAudioUrl)
+          }
+          const nextSegUrls = new Set(params.segments.map((s) => s.audioUrl))
+          for (const seg of state.generatedAudioSegments) {
+            if (!nextSegUrls.has(seg.audioUrl)) {
+              URL.revokeObjectURL(seg.audioUrl)
+            }
           }
           return {
             generatedAudioUrl: params.audioUrl,
