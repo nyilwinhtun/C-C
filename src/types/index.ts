@@ -6,7 +6,6 @@ export type NavItemKey =
   | 'transcriber'
   | 'voiceover'
   | 'audiobook'
-  | 'autocut'
   | 'studio'
   | 'presenter3d'
   | 'socialQr'

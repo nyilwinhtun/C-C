@@ -159,6 +159,7 @@ function normalizePageKey(key: string): string {
     case "generator":
       return "text"
     case "photo-studio":
+    case "autocut":
       return "studio"
     case "planner":
       return "vault"
@@ -167,7 +168,6 @@ function normalizePageKey(key: string): string {
     case "transcriber":
     case "voiceover":
     case "audiobook":
-    case "autocut":
     case "studio":
     case "presenter3d":
     case "socialQr":
@@ -339,6 +339,7 @@ export const useUIStore = create<UIState>()(
         return {
           ...currentState,
           ...persisted,
+          activePageKey: normalizePageKey(persisted.activePageKey ?? currentState.activePageKey),
           aiProvider: provider,
           apiKeys,
           models,
@@ -346,6 +347,9 @@ export const useUIStore = create<UIState>()(
       },
       onRehydrateStorage: () => (state) => {
         applyThemeToDocument(state?.theme ?? "dark")
+        if (state && state.activePageKey === "autocut") {
+          state.setActivePageKey("studio")
+        }
         if (state && DEPRECATED_GEMINI_MODELS.has(state.models?.gemini ?? "")) {
           state.setProviderModel("gemini", DEFAULT_MODELS.gemini)
         }

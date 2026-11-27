@@ -6,7 +6,6 @@ import { VideoToContentSection } from "@/features/generator/VideoToContentSectio
 import { TranscriberPage } from "@/features/transcriber/page"
 import { VoiceoverPage } from "@/features/voiceover/page"
 import { AudiobookPage } from "@/features/audiobook/page"
-import { AutoCutPage } from "@/features/autocut/page"
 import { PhotoStudioPage } from "@/features/photo-studio/page"
 import { Presenter3DPage } from "@/features/presenter-3d/page"
 import { SocialQrPage } from "@/features/social-qr/page"
@@ -28,7 +27,6 @@ const pages: Record<string, React.FC> = {
   transcriber: TranscriberPage,
   voiceover: VoiceoverPage,
   audiobook: AudiobookPage,
-  autocut: AutoCutPage,
   studio: PhotoStudioPage,
   presenter3d: Presenter3DPage,
   socialQr: SocialQrPage,
