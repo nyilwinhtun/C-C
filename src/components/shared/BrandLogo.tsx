@@ -7,9 +7,10 @@ export interface BrandLogoProps extends React.SVGProps<SVGSVGElement> {
 }
 
 /**
- * Ultra-simple minimalist Content Creator (CC) brand mark.
- * Flat matte charcoal (#141414) rounded-square badge with subtle 1px border
- * and crisp white (#FFFFFF) bold geometric "CC" monogram.
+ * Bespoke minimalist single-C editorial brand mark.
+ * Matte charcoal (#141414) rounded-square badge with 1px #2A2A2A border,
+ * two interlocking architectural white (#FFFFFF) C strokes, a crisp silver (#A1A1AA)
+ * inner link accent, and a balanced circular focal dot in the C opening.
  */
 export function BrandLogo({ className, size = 36, ...props }: BrandLogoProps) {
   return (
@@ -31,22 +32,32 @@ export function BrandLogo({ className, size = 36, ...props }: BrandLogoProps) {
         height="98"
         rx="22"
         fill="#141414"
-        stroke="#FFFFFF"
-        strokeOpacity="0.14"
+        stroke="#2A2A2A"
         strokeWidth="1"
       />
+      {/* Upper architectural stroke ("Connect") */}
       <path
-        d="M44.77 40.97A13.5 13.5 0 1 0 44.77 59.03"
+        d="M 68.70 31.94 A 26 26 0 0 0 24.32 45.93"
         stroke="#FFFFFF"
-        strokeWidth="7.8"
-        strokeLinecap="round"
+        strokeWidth="8.5"
+        strokeLinecap="butt"
       />
+      {/* Lower architectural stroke ("Create") */}
       <path
-        d="M78.77 40.97A13.5 13.5 0 1 0 78.77 59.03"
+        d="M 24.32 54.07 A 26 26 0 0 0 68.70 68.06"
         stroke="#FFFFFF"
-        strokeWidth="7.8"
-        strokeLinecap="round"
+        strokeWidth="8.5"
+        strokeLinecap="butt"
       />
+      {/* Crisp silver inner link accent bridging the two strokes */}
+      <path
+        d="M 42.25 36.58 A 15.5 15.5 0 0 0 42.25 63.42"
+        stroke="#A1A1AA"
+        strokeWidth="4.8"
+        strokeLinecap="butt"
+      />
+      {/* Clean circular focal dot in the C opening */}
+      <circle cx="66.5" cy="50" r="4.5" fill="#FFFFFF" />
     </svg>
   )
 }
