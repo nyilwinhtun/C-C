@@ -62,6 +62,20 @@ export default defineConfig({
             },
           },
         },
+        {
+          urlPattern: /^https:\/\/staticimgly\.com\/@imgly\/background-removal-data\/.*/i,
+          handler: 'CacheFirst',
+          options: {
+            cacheName: 'imgly-bg-removal-models',
+            expiration: {
+              maxEntries: 30,
+              maxAgeSeconds: 60 * 60 * 24 * 90,
+            },
+            cacheableResponse: {
+              statuses: [0, 200],
+            },
+          },
+        },
       ],
     },
     manifest: {

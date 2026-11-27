@@ -46,6 +46,7 @@ function drawImageCover(
   h: number,
   radius: number
 ) {
+  if (!img.complete || img.naturalWidth === 0 || img.naturalHeight === 0) return
   ctx.save()
   roundRectPath(ctx, x, y, w, h, radius)
   ctx.clip()
@@ -100,6 +101,22 @@ function drawPlaceholderBox(
   ctx.restore()
 }
 
+function splitGraphemes(text: string): string[] {
+  if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+    const SegmenterCtor = (
+      Intl as unknown as {
+        Segmenter: new (
+          locale?: string,
+          options?: { granularity: "grapheme" }
+        ) => { segment: (input: string) => Iterable<{ segment: string }> }
+      }
+    ).Segmenter
+    const segmenter = new SegmenterCtor("my", { granularity: "grapheme" })
+    return Array.from(segmenter.segment(text), (s) => s.segment)
+  }
+  return Array.from(text)
+}
+
 function wrapTextLines(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -126,9 +143,9 @@ function wrapTextLines(
       if (ctx.measureText(word).width <= maxWidth) {
         current = word
       } else {
-        // Fallback character wrap for long unbroken strings / Burmese text
+        // Fallback grapheme-safe wrap for long unbroken strings / Burmese text
         let chunk = ""
-        for (const ch of Array.from(word)) {
+        for (const ch of splitGraphemes(word)) {
           if (ctx.measureText(chunk + ch).width <= maxWidth) {
             chunk += ch
           } else {
@@ -161,12 +178,24 @@ function drawPill(
   fontSize = 24,
   padX = 22,
   padY = 11,
-  alignRight = false
+  alignRight = false,
+  maxWidth?: number
 ): { width: number; height: number } {
   ctx.save()
-  ctx.font = `700 ${fontSize}px ${FONT_STACK}`
-  const metrics = ctx.measureText(text)
-  const pillW = Math.ceil(metrics.width + padX * 2)
+  let effectiveFontSize = fontSize
+  ctx.font = `700 ${effectiveFontSize}px ${FONT_STACK}`
+  let metrics = ctx.measureText(text)
+  let pillW = Math.ceil(metrics.width + padX * 2)
+
+  if (maxWidth && pillW > maxWidth) {
+    const minFontSize = Math.max(14, Math.floor(fontSize * 0.68))
+    const scale = (maxWidth - padX * 2) / Math.max(1, metrics.width)
+    effectiveFontSize = Math.max(minFontSize, Math.floor(fontSize * scale))
+    ctx.font = `700 ${effectiveFontSize}px ${FONT_STACK}`
+    metrics = ctx.measureText(text)
+    pillW = Math.min(maxWidth, Math.ceil(metrics.width + padX * 2))
+  }
+
   const pillH = Math.ceil(fontSize + padY * 2)
   const drawX = alignRight ? x - pillW : x
 
@@ -182,7 +211,7 @@ function drawPill(
   ctx.fillStyle = fg
   ctx.textAlign = "center"
   ctx.textBaseline = "middle"
-  ctx.fillText(text, drawX + pillW / 2, y + pillH / 2 + 1)
+  ctx.fillText(text, drawX + pillW / 2, y + pillH / 2 + 1, Math.max(20, pillW - padX * 1.4))
   ctx.restore()
 
   return { width: pillW, height: pillH }
@@ -207,7 +236,8 @@ function drawCodBadge(
     22,
     20,
     10,
-    true
+    true,
+    Math.round(canvasWidth * 0.48)
   )
 }
 
@@ -285,6 +315,7 @@ function drawImageContain(
   w: number,
   h: number
 ) {
+  if (!img.complete || img.naturalWidth === 0 || img.naturalHeight === 0) return
   const imgRatio = img.naturalWidth / Math.max(1, img.naturalHeight)
   const boxRatio = w / Math.max(1, h)
   let drawW = w
@@ -418,7 +449,8 @@ function renderSpotlight(
       32,
       28,
       16,
-      true
+      true,
+      268
     )
   }
 }
@@ -521,7 +553,9 @@ function renderFlashSale(
     theme.badgeText,
     36,
     30,
-    14
+    14,
+    false,
+    Math.max(180, pad + imgW - 28 - priceRowX)
   )
 }
 
@@ -544,7 +578,7 @@ function renderBeforeAfter(
 
   ctx.save()
   ctx.fillStyle = theme.text
-  ctx.font = `800 38px ${FONT_STACK}`
+  ctx.font = getTitleFont(state, 38)
   ctx.textAlign = "left"
   ctx.textBaseline = "middle"
   const titleMaxW = state.showCodBadge ? contentW - 280 : contentW
@@ -785,7 +819,8 @@ function renderReviewCard(
       24,
       22,
       10,
-      true
+      true,
+      280
     )
   }
 }

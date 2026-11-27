@@ -124,39 +124,121 @@ const SCENE_PRESETS = [
   },
 ] as const
 
+const MAX_UPLOAD_DIMENSION = 1600
+const MAX_CUTOUT_DIMENSION = 1024
+
+function releaseCanvasMemory(canvas: HTMLCanvasElement) {
+  canvas.width = 0
+  canvas.height = 0
+}
+
 async function compositeCutoutWithBackdrop(
   cutoutUrl: string,
   backdropHex: string
 ): Promise<string> {
   const img = await loadImageElement(cutoutUrl)
   const canvas = document.createElement("canvas")
-  canvas.width = img.naturalWidth || 1080
-  canvas.height = img.naturalHeight || 1080
-  const ctx = canvas.getContext("2d")
-  if (!ctx) throw new Error("Canvas context unavailable")
-  ctx.fillStyle = backdropHex
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-  return canvas.toDataURL("image/png")
+  try {
+    const scale = Math.min(
+      1,
+      MAX_UPLOAD_DIMENSION / Math.max(img.naturalWidth || 1080, img.naturalHeight || 1080, 1)
+    )
+    canvas.width = Math.max(1, Math.round((img.naturalWidth || 1080) * scale))
+    canvas.height = Math.max(1, Math.round((img.naturalHeight || 1080) * scale))
+    const ctx = canvas.getContext("2d")
+    if (!ctx) throw new Error("Canvas context unavailable")
+    ctx.fillStyle = backdropHex
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL("image/png")
+  } finally {
+    releaseCanvasMemory(canvas)
+  }
 }
 
 function loadImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image()
+    if (!src.startsWith("data:") && !src.startsWith("blob:")) {
+      img.crossOrigin = "anonymous"
+    }
     img.onload = () => resolve(img)
     img.onerror = () => reject(new Error("Failed to load image"))
     img.src = src
   })
 }
 
+/**
+ * Downscales large mobile camera photos (12MP+) before storing in state or
+ * running @imgly/background-removal so mobile Safari/Chrome does not OOM.
+ */
+async function downscaleImageFileToDataUrl(
+  file: File,
+  maxDim = MAX_UPLOAD_DIMENSION
+): Promise<string> {
+  const objectUrl = URL.createObjectURL(file)
+  const canvas = document.createElement("canvas")
+  try {
+    const img = await loadImageElement(objectUrl)
+    const srcW = img.naturalWidth || 1
+    const srcH = img.naturalHeight || 1
+    const scale = Math.min(1, maxDim / Math.max(srcW, srcH, 1))
+    const targetW = Math.max(1, Math.round(srcW * scale))
+    const targetH = Math.max(1, Math.round(srcH * scale))
+    canvas.width = targetW
+    canvas.height = targetH
+    const ctx = canvas.getContext("2d")
+    if (!ctx) throw new Error("Canvas context unavailable")
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = "high"
+    ctx.drawImage(img, 0, 0, targetW, targetH)
+    const keepPng = file.type === "image/png" || file.type === "image/webp"
+    return keepPng
+      ? canvas.toDataURL("image/png")
+      : canvas.toDataURL("image/jpeg", 0.92)
+  } finally {
+    releaseCanvasMemory(canvas)
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+async function prepareCutoutInputBlob(
+  sourceUrl: string,
+  maxDim = MAX_CUTOUT_DIMENSION
+): Promise<Blob> {
+  const img = await loadImageElement(sourceUrl)
+  const srcW = img.naturalWidth || 1
+  const srcH = img.naturalHeight || 1
+  const scale = Math.min(1, maxDim / Math.max(srcW, srcH, 1))
+  const targetW = Math.max(1, Math.round(srcW * scale))
+  const targetH = Math.max(1, Math.round(srcH * scale))
+  const canvas = document.createElement("canvas")
+  try {
+    canvas.width = targetW
+    canvas.height = targetH
+    const ctx = canvas.getContext("2d")
+    if (!ctx) throw new Error("Canvas context unavailable")
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = "high"
+    ctx.drawImage(img, 0, 0, targetW, targetH)
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), "image/png")
+    )
+    if (!blob) throw new Error("Failed to encode image for cutout")
+    return blob
+  } finally {
+    releaseCanvasMemory(canvas)
+  }
+}
+
 async function compressLogoToDataUrl(file: File, maxDim = 240): Promise<string> {
   const objectUrl = URL.createObjectURL(file)
+  const canvas = document.createElement("canvas")
   try {
     const img = await loadImageElement(objectUrl)
     const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight, 1))
     const w = Math.max(1, Math.round(img.naturalWidth * scale))
     const h = Math.max(1, Math.round(img.naturalHeight * scale))
-    const canvas = document.createElement("canvas")
     canvas.width = w
     canvas.height = h
     const ctx = canvas.getContext("2d")
@@ -164,6 +246,7 @@ async function compressLogoToDataUrl(file: File, maxDim = 240): Promise<string> 
     ctx.drawImage(img, 0, 0, w, h)
     return canvas.toDataURL("image/png")
   } finally {
+    releaseCanvasMemory(canvas)
     URL.revokeObjectURL(objectUrl)
   }
 }
@@ -265,6 +348,8 @@ export function PhotoStudioPage() {
   const [cutoutDataUrl, setCutoutDataUrl] = useState<string | null>(null)
   const [backdropColor, setBackdropColor] = useState<string>("#FFFFFF")
   const [isRemovingBg, setIsRemovingBg] = useState(false)
+  const [cutoutProgress, setCutoutProgress] = useState<number | null>(null)
+  const [cutoutStage, setCutoutStage] = useState<"loading_model" | "processing">("processing")
   const [scenePrompt, setScenePrompt] = useState("")
   const [selectedScenePreset, setSelectedScenePreset] = useState<string | null>(null)
   const [isGeneratingScene, setIsGeneratingScene] = useState(false)
@@ -279,6 +364,32 @@ export function PhotoStudioPage() {
   const primaryInputRef = useRef<HTMLInputElement | null>(null)
   const secondaryInputRef = useRef<HTMLInputElement | null>(null)
   const logoInputRef = useRef<HTMLInputElement | null>(null)
+  const cutoutObjectUrlRef = useRef<string | null>(null)
+  const isMountedRef = useRef(true)
+
+  const replaceCutoutObjectUrl = useCallback((nextUrl: string | null) => {
+    if (cutoutObjectUrlRef.current && cutoutObjectUrlRef.current.startsWith("blob:")) {
+      URL.revokeObjectURL(cutoutObjectUrlRef.current)
+    }
+    cutoutObjectUrlRef.current = nextUrl
+    setCutoutDataUrl(nextUrl)
+  }, [])
+
+  // Release canvas backing buffer and cutout blob URL on unmount
+  useEffect(() => {
+    isMountedRef.current = true
+    const canvas = canvasRef.current
+    return () => {
+      isMountedRef.current = false
+      if (cutoutObjectUrlRef.current && cutoutObjectUrlRef.current.startsWith("blob:")) {
+        URL.revokeObjectURL(cutoutObjectUrlRef.current)
+        cutoutObjectUrlRef.current = null
+      }
+      if (canvas) {
+        releaseCanvasMemory(canvas)
+      }
+    }
+  }, [])
 
   // Auto-sync saved shopProfile from Settings unless manually overridden
   useEffect(() => {
@@ -362,11 +473,23 @@ export function PhotoStudioPage() {
     }
   }, [shopLogoDataUrl])
 
-  // Re-render HTML5 Canvas whenever poster state or images change
+  // Re-render HTML5 Canvas whenever poster state or images change, and once web fonts settle
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     renderPosterCanvas(canvas, poster, primaryImg, secondaryImg, logoImg)
+
+    let cancelled = false
+    if (typeof document !== "undefined" && "fonts" in document && document.fonts?.ready) {
+      void document.fonts.ready.then(() => {
+        if (!cancelled && canvasRef.current) {
+          renderPosterCanvas(canvasRef.current, poster, primaryImg, secondaryImg, logoImg)
+        }
+      })
+    }
+    return () => {
+      cancelled = true
+    }
   }, [poster, primaryImg, secondaryImg, logoImg])
 
   const updatePoster = useCallback(
@@ -376,31 +499,41 @@ export function PhotoStudioPage() {
     []
   )
 
+  const clearPrimaryPhoto = useCallback(() => {
+    setPrimaryDataUrl(null)
+    setOriginalPrimaryDataUrl(null)
+    replaceCutoutObjectUrl(null)
+    setAiCaption("")
+  }, [replaceCutoutObjectUrl])
+
   const handleImageFile = useCallback(
-    (file: File | undefined, slot: "primary" | "secondary") => {
+    async (file: File | undefined, slot: "primary" | "secondary") => {
       if (!file) return
       if (!file.type.startsWith("image/")) {
         toast.error(isMy ? "ပုံဖိုင် (JPG/PNG/WEBP) သာ ရွေးချယ်ပါ" : "Please select a valid image file")
         return
       }
-      const reader = new FileReader()
-      reader.onload = () => {
-        const result = typeof reader.result === "string" ? reader.result : null
-        if (!result) return
+      try {
+        const safeDataUrl = await downscaleImageFileToDataUrl(file, MAX_UPLOAD_DIMENSION)
+        if (!isMountedRef.current) return
         if (slot === "primary") {
-          setPrimaryDataUrl(result)
-          setOriginalPrimaryDataUrl(result)
-          setCutoutDataUrl(null)
+          setPrimaryDataUrl(safeDataUrl)
+          setOriginalPrimaryDataUrl(safeDataUrl)
+          replaceCutoutObjectUrl(null)
+          setAiCaption("")
         } else {
-          setSecondaryDataUrl(result)
+          setSecondaryDataUrl(safeDataUrl)
+        }
+      } catch {
+        if (isMountedRef.current) {
+          toast.error(isMy ? "ပုံဖတ်၍မရပါ — အခြားပုံဖြင့် စမ်းကြည့်ပါ" : "Could not process image file")
         }
       }
-      reader.readAsDataURL(file)
     },
-    [isMy]
+    [isMy, replaceCutoutObjectUrl]
   )
 
-  useImagePaste((file) => handleImageFile(file, "primary"), {
+  useImagePaste((file) => void handleImageFile(file, "primary"), {
     message: t(language, "dropzone.pasted"),
   })
 
@@ -411,29 +544,57 @@ export function PhotoStudioPage() {
       return
     }
     setIsRemovingBg(true)
+    setCutoutStage("loading_model")
+    setCutoutProgress(0)
     try {
       const { removeBackground } = await import("@imgly/background-removal")
-      const res = await fetch(sourceUrl)
-      const blob = await res.blob()
-      const cutoutBlob = await removeBackground(blob)
-      const cutoutUrl = await new Promise<string>((resolve, reject) => {
-        const r = new FileReader()
-        r.onload = () =>
-          typeof r.result === "string" ? resolve(r.result) : reject(new Error("Read failed"))
-        r.onerror = () => reject(new Error("Read failed"))
-        r.readAsDataURL(cutoutBlob)
+      const resizedBlob = await prepareCutoutInputBlob(sourceUrl, MAX_CUTOUT_DIMENSION)
+      const cutoutBlob = await removeBackground(resizedBlob, {
+        model: "isnet_quint8",
+        progress: (key: string, current: number, total: number) => {
+          if (!isMountedRef.current) return
+          const isFetch = key.startsWith("fetch:")
+          setCutoutStage(isFetch ? "loading_model" : "processing")
+          if (total > 0) {
+            setCutoutProgress(Math.min(100, Math.round((current / total) * 100)))
+          }
+        },
       })
-      setCutoutDataUrl(cutoutUrl)
+      if (!isMountedRef.current) return
+      const cutoutUrl = URL.createObjectURL(cutoutBlob)
+      replaceCutoutObjectUrl(cutoutUrl)
       const composited = await compositeCutoutWithBackdrop(cutoutUrl, backdropColor)
+      if (!isMountedRef.current) return
       setPrimaryDataUrl(composited)
       toast.success(t(language, "photoStudio.cutoutSuccess"))
     } catch (err) {
       console.error("Local background removal failed:", err)
-      toast.error(t(language, "photoStudio.cutoutError"))
+      if (!isMountedRef.current) return
+      const isOffline =
+        typeof navigator !== "undefined" && navigator.onLine === false
+      const errMsg = err instanceof Error ? err.message.toLowerCase() : ""
+      const isNetworkErr =
+        isOffline ||
+        errMsg.includes("fetch") ||
+        errMsg.includes("network") ||
+        errMsg.includes("failed to load") ||
+        errMsg.includes("timeout")
+      if (isNetworkErr) {
+        toast.error(
+          isMy
+            ? "အင်တာနက်ချိတ်ဆက်မှုမရှိပါ — ပထမဆုံးအကြိမ် နောက်ခံဖယ်မော်ဒယ် ဒေါင်းလုဒ်လုပ်ရန် အင်တာနက်လိုအပ်ပါသည်။"
+            : "Network unavailable — first-time background removal needs an internet connection to cache the cutout model."
+        )
+      } else {
+        toast.error(t(language, "photoStudio.cutoutError"))
+      }
     } finally {
-      setIsRemovingBg(false)
+      if (isMountedRef.current) {
+        setIsRemovingBg(false)
+        setCutoutProgress(null)
+      }
     }
-  }, [originalPrimaryDataUrl, primaryDataUrl, backdropColor, language])
+  }, [originalPrimaryDataUrl, primaryDataUrl, backdropColor, language, isMy, replaceCutoutObjectUrl])
 
   const handleSelectBackdrop = useCallback(
     async (hex: string) => {
@@ -466,7 +627,7 @@ export function PhotoStudioPage() {
         mimeType: mimeMatch?.[1] || "image/jpeg",
         scenePrompt: promptToUse,
       })
-      setCutoutDataUrl(null)
+      replaceCutoutObjectUrl(null)
       setPrimaryDataUrl(result.imageDataUrl)
       toast.success(t(language, "photoStudio.sceneGenerateSuccess"))
     } catch (err) {
@@ -476,7 +637,7 @@ export function PhotoStudioPage() {
     } finally {
       setIsGeneratingScene(false)
     }
-  }, [originalPrimaryDataUrl, primaryDataUrl, scenePrompt, language])
+  }, [originalPrimaryDataUrl, primaryDataUrl, scenePrompt, language, replaceCutoutObjectUrl])
 
   const handleAiSuggest = useCallback(async () => {
     const sourceUrl = originalPrimaryDataUrl ?? primaryDataUrl
@@ -523,8 +684,8 @@ export function PhotoStudioPage() {
   const handleRevertToOriginal = useCallback(() => {
     if (!originalPrimaryDataUrl) return
     setPrimaryDataUrl(originalPrimaryDataUrl)
-    setCutoutDataUrl(null)
-  }, [originalPrimaryDataUrl])
+    replaceCutoutObjectUrl(null)
+  }, [originalPrimaryDataUrl, replaceCutoutObjectUrl])
 
   const handleLogoFile = useCallback(
     async (file: File | undefined) => {
@@ -563,28 +724,47 @@ export function PhotoStudioPage() {
       link.click()
       document.body.removeChild(link)
       if (revokeAfter) {
-        window.setTimeout(() => URL.revokeObjectURL(href), 2000)
+        // Keep blob URL alive for 60s so mobile Safari/Chrome download manager finishes saving
+        window.setTimeout(() => URL.revokeObjectURL(href), 60_000)
       }
       toast.success(isMy ? "Poster PNG ဒေါင်းလုဒ်လုပ်ပြီးပါပြီ" : "Poster PNG downloaded!")
     }
 
-    if (typeof canvas.toBlob === "function") {
-      canvas.toBlob(
-        (blob) => {
-          if (blob) {
-            const url = URL.createObjectURL(blob)
-            triggerLink(url, true)
-          } else {
-            triggerLink(canvas.toDataURL("image/png"))
-          }
-        },
-        "image/png",
-        1.0
-      )
-      return
+    const fallbackDataUrl = () => {
+      try {
+        triggerLink(canvas.toDataURL("image/png"))
+      } catch (err) {
+        console.error("Poster PNG export failed:", err)
+        toast.error(
+          isMy
+            ? "Poster PNG ထုတ်ယူ၍မရပါ — ပုံကို ပြန်တင်ပြီး ထပ်စမ်းကြည့်ပါ"
+            : "Could not export Poster PNG. Please re-upload the image and try again."
+        )
+      }
     }
 
-    triggerLink(canvas.toDataURL("image/png"))
+    if (typeof canvas.toBlob === "function") {
+      try {
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              const url = URL.createObjectURL(blob)
+              triggerLink(url, true)
+            } else {
+              fallbackDataUrl()
+            }
+          },
+          "image/png",
+          1.0
+        )
+        return
+      } catch {
+        fallbackDataUrl()
+        return
+      }
+    }
+
+    fallbackDataUrl()
   }, [poster, primaryImg, secondaryImg, logoImg, isMy])
 
   const handleSharePoster = useCallback(async () => {
@@ -658,7 +838,7 @@ export function PhotoStudioPage() {
     <div className="mx-auto max-w-5xl space-y-3 pb-4">
       {/* Compact Header Bar: Aspect Ratio Switcher + 1-Tap PNG Download */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2 shadow-sm">
-        <div className="flex items-center gap-1.5">
+        <div className="flex max-w-full flex-wrap items-center gap-1.5">
           {(["1:1", "4:5", "9:16"] as AspectRatioId[]).map((ratio) => {
             const active = poster.aspectRatio === ratio
             return (
@@ -667,7 +847,7 @@ export function PhotoStudioPage() {
                 type="button"
                 onClick={() => updatePoster("aspectRatio", ratio)}
                 className={cn(
-                  "rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap",
+                  "min-h-8 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap",
                   active
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -683,23 +863,23 @@ export function PhotoStudioPage() {
           })}
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex w-full items-center gap-1.5 sm:w-auto">
           <Button
             size="sm"
             variant="outline"
             onClick={handleSharePoster}
-            className="h-8 gap-1.5 rounded-lg px-3 text-xs font-semibold border-border/70"
+            className="h-9 flex-1 gap-1.5 rounded-lg px-3 text-xs font-semibold border-border/70 sm:h-8 sm:flex-none"
           >
-            <Share2 className="h-3.5 w-3.5" />
-            {isMy ? "1-Tap မျှဝေမည်" : "1-Tap Share"}
+            <Share2 className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{isMy ? "1-Tap မျှဝေမည်" : "1-Tap Share"}</span>
           </Button>
           <Button
             size="sm"
             onClick={handleDownloadPng}
-            className="h-8 gap-1.5 rounded-lg px-3 text-xs font-semibold"
+            className="h-9 flex-1 gap-1.5 rounded-lg px-3 text-xs font-semibold sm:h-8 sm:flex-none"
           >
-            <Download className="h-3.5 w-3.5" />
-            {isMy ? "PNG ဒေါင်းလုဒ်" : "Download PNG"}
+            <Download className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{isMy ? "PNG ဒေါင်းလုဒ်" : "Download PNG"}</span>
           </Button>
         </div>
       </div>
@@ -722,7 +902,7 @@ export function PhotoStudioPage() {
             />
           </div>
 
-          <FileDropzone accept={["image/*"]} onFiles={(f) => handleImageFile(f[0], "primary")}>
+          <FileDropzone accept={["image/*"]} onFiles={(f) => void handleImageFile(f[0], "primary")}>
           {/* Quick Image Upload Strip */}
           <input
             ref={primaryInputRef}
@@ -730,7 +910,7 @@ export function PhotoStudioPage() {
             accept="image/*"
             className="hidden"
             onChange={(e) => {
-              handleImageFile(e.target.files?.[0], "primary")
+              void handleImageFile(e.target.files?.[0], "primary")
               e.target.value = ""
             }}
           />
@@ -740,23 +920,25 @@ export function PhotoStudioPage() {
             accept="image/*"
             className="hidden"
             onChange={(e) => {
-              handleImageFile(e.target.files?.[0], "secondary")
+              void handleImageFile(e.target.files?.[0], "secondary")
               e.target.value = ""
             }}
           />
 
           {poster.template === "before_after" ? (
             <div className="grid grid-cols-2 gap-2">
-              <div className="flex items-center gap-1">
+              <div className="flex min-w-0 items-center gap-1">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => primaryInputRef.current?.click()}
-                  className="h-9 flex-1 gap-1.5 text-xs"
+                  className="h-9 min-w-0 flex-1 gap-1.5 px-2 text-xs"
                 >
-                  <ImagePlus className="h-3.5 w-3.5" />
-                  {primaryDataUrl ? t(language, "photoStudio.changeBefore") : t(language, "photoStudio.beforePhoto")}
+                  <ImagePlus className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">
+                    {primaryDataUrl ? t(language, "photoStudio.changeBefore") : t(language, "photoStudio.beforePhoto")}
+                  </span>
                 </Button>
                 {primaryDataUrl && (
                   <Button
@@ -764,7 +946,7 @@ export function PhotoStudioPage() {
                     variant="ghost"
                     size="icon"
                     className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
-                    onClick={() => setPrimaryDataUrl(null)}
+                    onClick={clearPrimaryPhoto}
                     aria-label="Remove Before photo"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -772,16 +954,18 @@ export function PhotoStudioPage() {
                 )}
               </div>
 
-              <div className="flex items-center gap-1">
+              <div className="flex min-w-0 items-center gap-1">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => secondaryInputRef.current?.click()}
-                  className="h-9 flex-1 gap-1.5 text-xs"
+                  className="h-9 min-w-0 flex-1 gap-1.5 px-2 text-xs"
                 >
-                  <ImagePlus className="h-3.5 w-3.5" />
-                  {secondaryDataUrl ? t(language, "photoStudio.changeAfter") : t(language, "photoStudio.afterPhoto")}
+                  <ImagePlus className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">
+                    {secondaryDataUrl ? t(language, "photoStudio.changeAfter") : t(language, "photoStudio.afterPhoto")}
+                  </span>
                 </Button>
                 {secondaryDataUrl && (
                   <Button
@@ -807,7 +991,7 @@ export function PhotoStudioPage() {
                 onClick={() => primaryInputRef.current?.click()}
                 className="h-9 flex-1 gap-1.5 text-xs font-medium"
               >
-                <ImagePlus className="h-3.5 w-3.5" />
+                <ImagePlus className="h-3.5 w-3.5 shrink-0" />
                 {primaryDataUrl
                   ? isMy
                     ? "ပုံပြောင်းမည်"
@@ -821,8 +1005,9 @@ export function PhotoStudioPage() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => setPrimaryDataUrl(null)}
+                  onClick={clearPrimaryPhoto}
                   className="h-9 px-2.5 text-xs text-muted-foreground hover:text-destructive"
+                  aria-label="Remove product photo"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
@@ -922,12 +1107,17 @@ export function PhotoStudioPage() {
                       variant="outline"
                       disabled={!primaryDataUrl || isRemovingBg || isGeneratingScene}
                       onClick={handleRemoveBackground}
-                      className="h-8 gap-1.5 rounded-lg text-xs font-semibold"
+                      className="h-9 gap-1.5 rounded-lg text-xs font-semibold"
                     >
                       {isRemovingBg ? (
                         <>
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          <span>{t(language, "photoStudio.cutoutProcessing")}</span>
+                          <span>
+                            {cutoutStage === "loading_model"
+                              ? t(language, "photoStudio.cutoutLoadingModel")
+                              : t(language, "photoStudio.cutoutProcessing")}
+                            {cutoutProgress !== null ? ` (${cutoutProgress}%)` : ""}
+                          </span>
                         </>
                       ) : (
                         <>
@@ -942,7 +1132,7 @@ export function PhotoStudioPage() {
                         size="sm"
                         variant="ghost"
                         onClick={handleRevertToOriginal}
-                        className="h-8 gap-1 text-xs text-muted-foreground"
+                        className="h-9 gap-1 text-xs text-muted-foreground"
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
                         <span>{t(language, "photoStudio.sceneResetOriginal")}</span>
@@ -950,12 +1140,23 @@ export function PhotoStudioPage() {
                     )}
                   </div>
 
+                  {isRemovingBg && (
+                    <div className="space-y-1">
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all duration-300"
+                          style={{ width: `${Math.max(8, cutoutProgress ?? 12)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
                   {cutoutDataUrl && (
                     <div className="space-y-1.5 pt-2 border-t border-border/60">
                       <Label className="text-[11px] text-muted-foreground">
                         {t(language, "photoStudio.backdropPickerLabel")}
                       </Label>
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2.5">
                         {STUDIO_BACKDROPS.map((b) => {
                           const active = backdropColor === b.color
                           return (
@@ -964,10 +1165,11 @@ export function PhotoStudioPage() {
                               type="button"
                               onClick={() => handleSelectBackdrop(b.color)}
                               title={t(language, b.labelKey)}
+                              aria-label={t(language, b.labelKey)}
                               className={cn(
-                                "h-7 w-7 rounded-full border-2 transition-transform cursor-pointer",
+                                "h-9 w-9 rounded-full border-2 transition-transform cursor-pointer",
                                 active
-                                  ? "border-primary scale-110 ring-2 ring-primary/30"
+                                  ? "border-primary scale-105 ring-2 ring-primary/30"
                                   : "border-border hover:scale-105"
                               )}
                               style={{ backgroundColor: b.color }}
@@ -1081,18 +1283,18 @@ export function PhotoStudioPage() {
                 </div>
 
                 {poster.template === "before_after" && (
-                  <div className="flex items-center justify-between rounded-xl border border-border bg-muted/30 p-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted/30 p-2.5">
                     <span className="text-xs font-medium text-muted-foreground">
                       {isMy ? "ပုံစီစဉ်မှု" : "Split Layout"}
                     </span>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <button
                         type="button"
                         onClick={() =>
                           updatePoster("splitDirection", "side-by-side")
                         }
                         className={cn(
-                          "inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium",
+                          "inline-flex min-h-8 items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium",
                           poster.splitDirection === "side-by-side"
                             ? "bg-primary text-primary-foreground"
                             : "bg-background text-muted-foreground"
@@ -1107,7 +1309,7 @@ export function PhotoStudioPage() {
                           updatePoster("splitDirection", "top-bottom")
                         }
                         className={cn(
-                          "inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium",
+                          "inline-flex min-h-8 items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium",
                           poster.splitDirection === "top-bottom"
                             ? "bg-primary text-primary-foreground"
                             : "bg-background text-muted-foreground"
@@ -1355,7 +1557,7 @@ export function PhotoStudioPage() {
                         className="resize-none text-sm"
                       />
                     </div>
-                    <div className="grid grid-cols-2 gap-2.5">
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                       <div className="space-y-1">
                         <Label htmlFor="reviewer-name" className="text-xs">
                           {isMy ? "အမည် / Source" : "Author / Reviewer"}
@@ -1475,7 +1677,7 @@ export function PhotoStudioPage() {
 
             {activeTab === "shop_footer" && (
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <button
                     type="button"
                     onClick={() =>
@@ -1584,7 +1786,7 @@ export function PhotoStudioPage() {
                 </div>
 
                 <div className="border-t border-border pt-2.5 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <button
                       type="button"
                       onClick={() => updatePoster("showShopLogo", !poster.showShopLogo)}
