@@ -46,6 +46,8 @@ import {
 import {
   convertImageToGlb,
   type ImageTo3dEngine,
+  type ImageTo3dFallbackReason,
+  type ImageTo3dMode,
   type ImageTo3dProgress,
 } from "@/lib/imageTo3d"
 import {
@@ -80,7 +82,7 @@ function detectMobileDevice(): boolean {
     return true
   }
   if (window.innerWidth < 768) return true
-  if (window.matchMedia?.("(pointer: coarse)").matches && window.innerWidth <= 1024) {
+  if (window.matchMedia?.("(pointer: coarse)").matches) {
     return true
   }
   return false
@@ -296,11 +298,15 @@ export function Presenter3DPage() {
 
   // Step 2: 2D Photo -> 3D .glb Converter state
   const [converterOpen, setConverterOpen] = useState(true)
+  const [convert3dMode, setConvert3dMode] = useState<ImageTo3dMode>(() =>
+    detectMobileDevice() ? "fast_25d" : "full_3d"
+  )
   const [hfTokenOpen, setHfTokenOpen] = useState(false)
   const [converterSourceUrl, setConverterSourceUrl] = useState<string | null>(null)
   const [converterSourceName, setConverterSourceName] = useState("")
   const [converterSourceFile, setConverterSourceFile] = useState<File | null>(null)
   const converterObjectUrlRef = useRef<string | null>(null)
+  const convert3dAbortRef = useRef<AbortController | null>(null)
   const [isConverting3d, setIsConverting3d] = useState(false)
   const [convert3dProgress, setConvert3dProgress] = useState<ImageTo3dProgress | null>(null)
   const [convertedGlbResult, setConvertedGlbResult] = useState<{
@@ -308,6 +314,7 @@ export function Presenter3DPage() {
     fileName: string
     engine: ImageTo3dEngine
     usedFallback: boolean
+    fallbackReason?: ImageTo3dFallbackReason
   } | null>(null)
   const convertedGlbUrlRef = useRef<string | null>(null)
   const [autoOrbit3d, setAutoOrbit3d] = useState(false)
@@ -1238,6 +1245,8 @@ export function Presenter3DPage() {
 
   useEffect(() => {
     return () => {
+      convert3dAbortRef.current?.abort()
+      convert3dAbortRef.current = null
       if (converterObjectUrlRef.current) URL.revokeObjectURL(converterObjectUrlRef.current)
       if (convertedGlbUrlRef.current) URL.revokeObjectURL(convertedGlbUrlRef.current)
     }
@@ -1253,8 +1262,16 @@ export function Presenter3DPage() {
       return
     }
 
+    // Abort any in-flight 3D conversion and release previous temporary object URLs
+    convert3dAbortRef.current?.abort()
+    convert3dAbortRef.current = null
     if (converterObjectUrlRef.current) {
       URL.revokeObjectURL(converterObjectUrlRef.current)
+    }
+    if (convertedGlbUrlRef.current) {
+      URL.revokeObjectURL(convertedGlbUrlRef.current)
+      convertedGlbUrlRef.current = null
+      setConvertedGlbResult(null)
     }
     const url = URL.createObjectURL(file)
     converterObjectUrlRef.current = url
@@ -1269,9 +1286,16 @@ export function Presenter3DPage() {
       toast.error(t(language, "presenter3d.noPhotoError"))
       return
     }
+    convert3dAbortRef.current?.abort()
+    convert3dAbortRef.current = null
     if (converterObjectUrlRef.current) {
       URL.revokeObjectURL(converterObjectUrlRef.current)
       converterObjectUrlRef.current = null
+    }
+    if (convertedGlbUrlRef.current) {
+      URL.revokeObjectURL(convertedGlbUrlRef.current)
+      convertedGlbUrlRef.current = null
+      setConvertedGlbResult(null)
     }
     setConverterSourceUrl(existing)
     setConverterSourceFile(null)
@@ -1288,15 +1312,27 @@ export function Presenter3DPage() {
     if (isConverting3d) return
 
     triggerHaptic(8)
+    convert3dAbortRef.current?.abort()
+    const controller = new AbortController()
+    convert3dAbortRef.current = controller
+
     setIsConverting3d(true)
-    setConvert3dProgress({ stage: "preparing", percent: 10 })
+    setConvert3dProgress({
+      stage: convert3dMode === "fast_25d" ? "generating_fast_25d" : "preparing",
+      percent: 10,
+    })
 
     try {
       const result = await convertImageToGlb(source, {
+        mode: convert3dMode,
+        timeoutMs: 12_000,
         hfToken,
-        removeBg: true,
+        removeBg: convert3dMode === "full_3d",
+        signal: controller.signal,
         onProgress: setConvert3dProgress,
       })
+
+      if (controller.signal.aborted) return
 
       if (convertedGlbUrlRef.current) {
         URL.revokeObjectURL(convertedGlbUrlRef.current)
@@ -1308,30 +1344,47 @@ export function Presenter3DPage() {
         fileName: result.fileName,
         engine: result.engine,
         usedFallback: result.usedFallback,
+        fallbackReason: result.fallbackReason,
       })
 
       // Automatically load the generated .glb onto the Live 3D Stage
       setIsLoadingAvatar(true)
-      const controller = await loadAvatarController(result.file)
+      const avatarController = await loadAvatarController(result.file)
+      if (controller.signal.aborted) {
+        avatarController.dispose()
+        return
+      }
       orbitDragRef.current.currentYaw = 0
       orbitDragRef.current.currentPitch = 0
-      controller.setOrbitRotation?.(0, 0)
-      controller.setAutoOrbit?.(true)
+      avatarController.setOrbitRotation?.(0, 0)
+      avatarController.setAutoOrbit?.(true)
       setAutoOrbit3d(true)
-      swapAvatarController(controller)
+      swapAvatarController(avatarController)
       setAvatarMode("custom")
       setCustomAvatarName(result.fileName)
       setCharacterKind("model")
 
-      toast.success(
-        result.usedFallback
-          ? t(language, "presenter3d.img3dSuccessLocal")
-          : t(language, "presenter3d.img3dSuccessCloud")
-      )
+      if (result.usedFallback) {
+        toast.info(
+          result.fallbackReason === "timeout"
+            ? t(language, "presenter3d.img3dFallbackTimeout")
+            : t(language, "presenter3d.img3dFallbackError")
+        )
+      } else if (result.engine === "fast_25d") {
+        toast.success(t(language, "presenter3d.img3dSuccessFast25d"))
+      } else {
+        toast.success(t(language, "presenter3d.img3dSuccessCloud"))
+      }
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return
+      }
       console.error("Image-to-3D conversion failed:", err)
       toast.error(t(language, "presenter3d.img3dError"))
     } finally {
+      if (convert3dAbortRef.current === controller) {
+        convert3dAbortRef.current = null
+      }
       setIsConverting3d(false)
       setIsLoadingAvatar(false)
     }
@@ -2446,6 +2499,41 @@ export function Presenter3DPage() {
                       {t(language, "presenter3d.img3dSubtitle")}
                     </p>
 
+                    {/* Mode Toggle: Fast Mobile 2.5D (default on mobile) vs Full 3D Mesh (Desktop) */}
+                    <div className="space-y-1">
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {(
+                          [
+                            { id: "fast_25d", labelKey: "presenter3d.img3dModeFast" },
+                            { id: "full_3d", labelKey: "presenter3d.img3dModeFull" },
+                          ] as const
+                        ).map((modeOpt) => (
+                          <button
+                            key={modeOpt.id}
+                            type="button"
+                            disabled={isConverting3d}
+                            onClick={() => {
+                              triggerHaptic(6)
+                              setConvert3dMode(modeOpt.id)
+                            }}
+                            className={cn(
+                              "rounded-xl border py-1.5 px-2 text-[11px] font-semibold transition-all cursor-pointer font-myanmar disabled:opacity-50",
+                              convert3dMode === modeOpt.id
+                                ? "border-amber-600 dark:border-amber-400 bg-amber-500/15 text-amber-800 dark:text-amber-200"
+                                : "border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
+                            )}
+                          >
+                            {t(language, modeOpt.labelKey)}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-[#78716C] dark:text-[#A1A1AA] font-myanmar">
+                        {convert3dMode === "fast_25d"
+                          ? t(language, "presenter3d.img3dModeFastHint")
+                          : t(language, "presenter3d.img3dModeFullHint")}
+                      </p>
+                    </div>
+
                     <FileDropzone
                       accept={[".jpg", ".jpeg", ".png", ".webp"]}
                       onFiles={(f) => handleSelectConverterImage(f[0])}
@@ -2494,44 +2582,46 @@ export function Presenter3DPage() {
                       </div>
                     )}
 
-                    {/* Optional Collapsible Hugging Face Token */}
-                    <div className="rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] px-2.5 py-1.5 border border-[#E7E5E4]/80 dark:border-[#3F3F46]/80">
-                      <button
-                        type="button"
-                        onClick={() => setHfTokenOpen((v) => !v)}
-                        className="w-full flex items-center justify-between text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] cursor-pointer font-myanmar"
-                      >
-                        <span className="inline-flex items-center gap-1.5">
-                          <KeyRound className="h-3 w-3 text-amber-600 dark:text-amber-400" />
-                          <span>{t(language, "presenter3d.img3dTokenToggle")}</span>
-                          {hfToken && (
-                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
-                              • Saved
-                            </span>
+                    {/* Optional Collapsible Hugging Face Token (Desktop Full 3D Mode only) */}
+                    {convert3dMode === "full_3d" && (
+                      <div className="rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] px-2.5 py-1.5 border border-[#E7E5E4]/80 dark:border-[#3F3F46]/80">
+                        <button
+                          type="button"
+                          onClick={() => setHfTokenOpen((v) => !v)}
+                          className="w-full flex items-center justify-between text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] cursor-pointer font-myanmar"
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            <KeyRound className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                            <span>{t(language, "presenter3d.img3dTokenToggle")}</span>
+                            {hfToken && (
+                              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                                • Saved
+                              </span>
+                            )}
+                          </span>
+                          {hfTokenOpen ? (
+                            <ChevronUp className="h-3.5 w-3.5" />
+                          ) : (
+                            <ChevronDown className="h-3.5 w-3.5" />
                           )}
-                        </span>
-                        {hfTokenOpen ? (
-                          <ChevronUp className="h-3.5 w-3.5" />
-                        ) : (
-                          <ChevronDown className="h-3.5 w-3.5" />
-                        )}
-                      </button>
+                        </button>
 
-                      {hfTokenOpen && (
-                        <div className="mt-2 space-y-1">
-                          <Input
-                            type="password"
-                            value={hfToken}
-                            onChange={(e) => setHfToken(e.target.value)}
-                            placeholder="hf_..."
-                            className="h-8 rounded-lg bg-white dark:bg-[#27272A] border-[#E7E5E4] dark:border-[#3F3F46] text-xs font-mono"
-                          />
-                          <p className="text-[10px] text-[#78716C] dark:text-[#A1A1AA] font-myanmar">
-                            {t(language, "presenter3d.img3dTokenHint")}
-                          </p>
-                        </div>
-                      )}
-                    </div>
+                        {hfTokenOpen && (
+                          <div className="mt-2 space-y-1">
+                            <Input
+                              type="password"
+                              value={hfToken}
+                              onChange={(e) => setHfToken(e.target.value)}
+                              placeholder="hf_..."
+                              className="h-8 rounded-lg bg-white dark:bg-[#27272A] border-[#E7E5E4] dark:border-[#3F3F46] text-xs font-mono"
+                            />
+                            <p className="text-[10px] text-[#78716C] dark:text-[#A1A1AA] font-myanmar">
+                              {t(language, "presenter3d.img3dTokenHint")}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Convert to 3D (.glb) Action */}
                     <Button
@@ -2545,46 +2635,65 @@ export function Presenter3DPage() {
                         <>
                           <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
                           <span>
-                            {convert3dProgress?.stage === "preparing"
-                              ? t(language, "presenter3d.img3dProgressPreparing")
-                              : convert3dProgress?.stage === "generating_local"
-                                ? t(language, "presenter3d.img3dProgressLocal")
-                                : convert3dProgress?.stage === "ready"
-                                  ? t(language, "presenter3d.img3dProgressReady")
-                                  : t(language, "presenter3d.img3dProgressGenerating")}
+                            {convert3dProgress?.stage === "generating_fast_25d"
+                              ? t(language, "presenter3d.img3dProgressFast25d")
+                              : convert3dProgress?.stage === "fallback_fast"
+                                ? t(language, "presenter3d.img3dProgressFallback")
+                                : convert3dProgress?.stage === "preparing"
+                                  ? t(language, "presenter3d.img3dProgressPreparing")
+                                  : convert3dProgress?.stage === "generating_local"
+                                    ? t(language, "presenter3d.img3dProgressLocal")
+                                    : convert3dProgress?.stage === "ready"
+                                      ? t(language, "presenter3d.img3dProgressReady")
+                                      : t(language, "presenter3d.img3dProgressGenerating")}
                           </span>
                         </>
                       ) : (
                         <>
                           <Wand2 className="h-3.5 w-3.5 mr-1.5" />
-                          <span>{t(language, "presenter3d.img3dConvertBtn")}</span>
+                          <span>
+                            {convert3dMode === "fast_25d"
+                              ? t(language, "presenter3d.img3dConvertFastBtn")
+                              : t(language, "presenter3d.img3dConvertBtn")}
+                          </span>
                         </>
                       )}
                     </Button>
 
                     {/* Result Actions */}
                     {convertedGlbResult && !isConverting3d && (
-                      <div className="flex items-center justify-between gap-2 rounded-xl bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-2">
-                        <div className="min-w-0">
-                          <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 truncate font-myanmar">
-                            ✓ {t(language, "presenter3d.img3dProgressReady")}
-                          </p>
-                          <p className="text-[10px] text-[#57534E] dark:text-[#A1A1AA] truncate">
-                            {convertedGlbResult.usedFallback
-                              ? t(language, "presenter3d.img3dEngineLocal")
-                              : t(language, "presenter3d.img3dEngineCloud")}
-                          </p>
+                      <div className="space-y-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 truncate font-myanmar">
+                              ✓ {t(language, "presenter3d.img3dProgressReady")}
+                            </p>
+                            <p className="text-[10px] text-[#57534E] dark:text-[#A1A1AA] truncate font-myanmar">
+                              {convertedGlbResult.engine === "fast_25d"
+                                ? t(language, "presenter3d.img3dEngineFast25d")
+                                : convertedGlbResult.usedFallback
+                                  ? t(language, "presenter3d.img3dEngineLocal")
+                                  : t(language, "presenter3d.img3dEngineCloud")}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={handleDownloadConvertedGlb}
+                            className="h-8 rounded-lg border-emerald-500/40 bg-white dark:bg-[#18181B] text-[11px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] shrink-0 cursor-pointer font-myanmar"
+                          >
+                            <Download className="h-3.5 w-3.5 mr-1" />
+                            <span>{t(language, "presenter3d.img3dDownloadBtn")}</span>
+                          </Button>
                         </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={handleDownloadConvertedGlb}
-                          className="h-8 rounded-lg border-emerald-500/40 bg-white dark:bg-[#18181B] text-[11px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] shrink-0 cursor-pointer font-myanmar"
-                        >
-                          <Download className="h-3.5 w-3.5 mr-1" />
-                          <span>{t(language, "presenter3d.img3dDownloadBtn")}</span>
-                        </Button>
+                        {convertedGlbResult.usedFallback && (
+                          <p className="text-[10px] text-amber-700 dark:text-amber-300 font-myanmar leading-snug">
+                            {convertedGlbResult.fallbackReason === "timeout"
+                              ? t(language, "presenter3d.img3dFallbackTimeout")
+                              : t(language, "presenter3d.img3dFallbackError")}
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>

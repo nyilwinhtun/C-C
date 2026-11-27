@@ -4,10 +4,16 @@ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js"
 export type ImageTo3dStage =
   | "preparing"
   | "generating_cloud"
+  | "generating_fast_25d"
   | "generating_local"
+  | "fallback_fast"
   | "ready"
 
-export type ImageTo3dEngine = "triposr" | "instantmesh" | "local_relief"
+export type ImageTo3dMode = "fast_25d" | "full_3d"
+
+export type ImageTo3dEngine = "triposr" | "instantmesh" | "fast_25d" | "local_relief"
+
+export type ImageTo3dFallbackReason = "timeout" | "error"
 
 export interface ImageTo3dProgress {
   stage: ImageTo3dStage
@@ -16,11 +22,15 @@ export interface ImageTo3dProgress {
 }
 
 export interface ConvertImageTo3dOptions {
+  /** Conversion mode: instant mobile-first 2.5D relief or full cloud 3D mesh (default: "full_3d") */
+  mode?: ImageTo3dMode
+  /** Timeout in milliseconds before full 3D automatically falls back to Fast 2.5D Relief (default: 12000) */
+  timeoutMs?: number
   /** Optional Hugging Face API token (`hf_...`) for higher ZeroGPU quota/priority */
   hfToken?: string
-  /** Whether to run @imgly/background-removal before 3D conversion (default: true) */
+  /** Whether to run @imgly/background-removal before full 3D conversion (default: true) */
   removeBg?: boolean
-  /** Relief depth scale for local GLTFExporter fallback (default: 0.22) */
+  /** Relief depth scale for 2.5D / local GLTFExporter meshes (default: 0.22) */
   reliefDepth?: number
   /** Optional abort signal */
   signal?: AbortSignal
@@ -34,7 +44,37 @@ export interface ConvertImageTo3dResult {
   fileName: string
   engine: ImageTo3dEngine
   usedFallback: boolean
+  fallbackReason?: ImageTo3dFallbackReason
   previewCutoutDataUrl: string
+}
+
+export interface Fast25dReliefOptions {
+  /** Relief extrusion amplitude (default: 0.22) */
+  reliefDepth?: number
+  /** Optional abort signal */
+  signal?: AbortSignal
+  /** Progress callback */
+  onProgress?: (progress: ImageTo3dProgress) => void
+}
+
+const DEFAULT_FULL_3D_TIMEOUT_MS = 12_000
+const FAST_25D_DEPTH_SIZE = 256
+const FAST_25D_TEXTURE_SIZE = 512
+
+function disposeCanvas(canvas: HTMLCanvasElement | null | undefined): void {
+  if (!canvas) return
+  canvas.width = 0
+  canvas.height = 0
+}
+
+function yieldToMainThread(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(() => resolve())
+    } else {
+      setTimeout(resolve, 0)
+    }
+  })
 }
 
 interface PreparedSubject {
@@ -155,65 +195,74 @@ async function prepareImageFor3d(
 
   const img = await loadImageElement(workingBlob)
   const rawCanvas = document.createElement("canvas")
-  const maxInput = 768
-  const rawScale = Math.min(1, maxInput / Math.max(img.width, img.height, 1))
-  rawCanvas.width = Math.max(1, Math.round(img.width * rawScale))
-  rawCanvas.height = Math.max(1, Math.round(img.height * rawScale))
-
-  const rawCtx = rawCanvas.getContext("2d")
-  if (!rawCtx) throw new Error("2D canvas context unavailable.")
-  rawCtx.drawImage(img, 0, 0, rawCanvas.width, rawCanvas.height)
-
-  const bounds = findOpaqueBounds(rawCtx, rawCanvas.width, rawCanvas.height)
-  const cropW = Math.max(1, bounds.maxX - bounds.minX + 1)
-  const cropH = Math.max(1, bounds.maxY - bounds.minY + 1)
-
-  const targetSize = 512
-  const paddingRatio = 0.82
-  const fitScale = Math.min(
-    (targetSize * paddingRatio) / cropW,
-    (targetSize * paddingRatio) / cropH
-  )
-  const drawW = Math.round(cropW * fitScale)
-  const drawH = Math.round(cropH * fitScale)
-  const drawX = Math.round((targetSize - drawW) / 2)
-  const drawY = Math.round((targetSize - drawH) / 2)
-
-  // Transparent square cutout canvas (for preview + local 3D relief texture)
-  const cutoutCanvas = document.createElement("canvas")
-  cutoutCanvas.width = targetSize
-  cutoutCanvas.height = targetSize
-  const cutoutCtx = cutoutCanvas.getContext("2d")
-  if (!cutoutCtx) throw new Error("2D canvas context unavailable.")
-  cutoutCtx.drawImage(
-    rawCanvas,
-    bounds.minX,
-    bounds.minY,
-    cropW,
-    cropH,
-    drawX,
-    drawY,
-    drawW,
-    drawH
-  )
-
-  // White-backed square PNG for Hugging Face TripoSR / InstantMesh
   const paddedCanvas = document.createElement("canvas")
-  paddedCanvas.width = targetSize
-  paddedCanvas.height = targetSize
-  const paddedCtx = paddedCanvas.getContext("2d")
-  if (!paddedCtx) throw new Error("2D canvas context unavailable.")
-  paddedCtx.fillStyle = "#ffffff"
-  paddedCtx.fillRect(0, 0, targetSize, targetSize)
-  paddedCtx.drawImage(cutoutCanvas, 0, 0)
+  const cutoutCanvas = document.createElement("canvas")
 
-  const squarePngBlob = await canvasToPngBlob(paddedCanvas)
-  const previewCutoutDataUrl = cutoutCanvas.toDataURL("image/png")
+  try {
+    const maxInput = 768
+    const rawScale = Math.min(1, maxInput / Math.max(img.width, img.height, 1))
+    rawCanvas.width = Math.max(1, Math.round(img.width * rawScale))
+    rawCanvas.height = Math.max(1, Math.round(img.height * rawScale))
 
-  return {
-    squarePngBlob,
-    cutoutCanvas,
-    previewCutoutDataUrl,
+    const rawCtx = rawCanvas.getContext("2d")
+    if (!rawCtx) throw new Error("2D canvas context unavailable.")
+    rawCtx.drawImage(img, 0, 0, rawCanvas.width, rawCanvas.height)
+
+    const bounds = findOpaqueBounds(rawCtx, rawCanvas.width, rawCanvas.height)
+    const cropW = Math.max(1, bounds.maxX - bounds.minX + 1)
+    const cropH = Math.max(1, bounds.maxY - bounds.minY + 1)
+
+    const targetSize = 512
+    const paddingRatio = 0.82
+    const fitScale = Math.min(
+      (targetSize * paddingRatio) / cropW,
+      (targetSize * paddingRatio) / cropH
+    )
+    const drawW = Math.round(cropW * fitScale)
+    const drawH = Math.round(cropH * fitScale)
+    const drawX = Math.round((targetSize - drawW) / 2)
+    const drawY = Math.round((targetSize - drawH) / 2)
+
+    // Transparent square cutout canvas (for preview + local 3D relief texture)
+    cutoutCanvas.width = targetSize
+    cutoutCanvas.height = targetSize
+    const cutoutCtx = cutoutCanvas.getContext("2d")
+    if (!cutoutCtx) throw new Error("2D canvas context unavailable.")
+    cutoutCtx.drawImage(
+      rawCanvas,
+      bounds.minX,
+      bounds.minY,
+      cropW,
+      cropH,
+      drawX,
+      drawY,
+      drawW,
+      drawH
+    )
+
+    // White-backed square PNG for Hugging Face TripoSR / InstantMesh
+    paddedCanvas.width = targetSize
+    paddedCanvas.height = targetSize
+    const paddedCtx = paddedCanvas.getContext("2d")
+    if (!paddedCtx) throw new Error("2D canvas context unavailable.")
+    paddedCtx.fillStyle = "#ffffff"
+    paddedCtx.fillRect(0, 0, targetSize, targetSize)
+    paddedCtx.drawImage(cutoutCanvas, 0, 0)
+
+    const squarePngBlob = await canvasToPngBlob(paddedCanvas)
+    const previewCutoutDataUrl = cutoutCanvas.toDataURL("image/png")
+
+    return {
+      squarePngBlob,
+      cutoutCanvas,
+      previewCutoutDataUrl,
+    }
+  } catch (err) {
+    disposeCanvas(cutoutCanvas)
+    throw err
+  } finally {
+    disposeCanvas(rawCanvas)
+    disposeCanvas(paddedCanvas)
   }
 }
 
@@ -666,19 +715,398 @@ export async function createLocalReliefGlb(
     backGeom.dispose()
     backTex.dispose()
     backMat.dispose()
+    disposeCanvas(frontCanvas)
+    disposeCanvas(backCanvas)
+  }
+}
+
+/**
+ * Computes a normalized 256×256 luminance heightmap with alpha modulation
+ * and smooth perimeter tapering so the displaced 2.5D relief sits seamlessly
+ * on the backing slab without jagged edges.
+ */
+function buildLuminanceDepthMap(
+  imageData: ImageData,
+  size: number
+): Float32Array {
+  const { data } = imageData
+  const depth = new Float32Array(size * size)
+  const invSize = 1 / Math.max(1, size - 1)
+
+  for (let y = 0; y < size; y++) {
+    const ny = y * invSize
+    const dy = (ny - 0.5) * 2
+    const edgeY = Math.min(ny, 1 - ny)
+
+    for (let x = 0; x < size; x++) {
+      const idx = y * size + x
+      const p = idx * 4
+      const alpha = data[p + 3] / 255
+      if (alpha <= 0.02) {
+        depth[idx] = 0
+        continue
+      }
+
+      const luma = (0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2]) / 255
+      const nx = x * invSize
+      const dx = (nx - 0.5) * 2
+      const radial = Math.max(0, 1 - (dx * dx + dy * dy) * 0.55)
+
+      // Smooth border taper over outer 8% so mesh perimeter stays flush with slab
+      const edgeX = Math.min(nx, 1 - nx)
+      const border = Math.min(1, Math.min(edgeX, edgeY) / 0.08)
+      const smoothBorder = border * border * (3 - 2 * border)
+
+      // Combine luminance relief + gentle subject dome
+      const rawHeight = (luma * 0.68 + radial * 0.32) * alpha * smoothBorder
+      depth[idx] = rawHeight
+    }
+  }
+
+  return depth
+}
+
+/**
+ * Fast edge-aware smoothing pass (3×3 bilateral-style filter) over a 256×256
+ * depth buffer. Preserves strong subject edges while removing high-frequency
+ * noise so the resulting 2.5D mesh tilts smoothly under studio lighting.
+ */
+function smoothDepthEdgeAware(
+  src: Float32Array,
+  size: number,
+  edgeStrength = 28
+): Float32Array {
+  const dst = new Float32Array(src.length)
+
+  for (let y = 0; y < size; y++) {
+    const y0 = y > 0 ? y - 1 : 0
+    const y2 = y < size - 1 ? y + 1 : size - 1
+
+    for (let x = 0; x < size; x++) {
+      const x0 = x > 0 ? x - 1 : 0
+      const x2 = x < size - 1 ? x + 1 : size - 1
+      const cIdx = y * size + x
+      const center = src[cIdx]
+
+      let sum = center * 2.0
+      let weightSum = 2.0
+
+      // 8-neighborhood with fast rational range kernel: 1 / (1 + diff^2 * k)
+      const neighbors = [
+        src[y0 * size + x0],
+        src[y0 * size + x],
+        src[y0 * size + x2],
+        src[y * size + x0],
+        src[y * size + x2],
+        src[y2 * size + x0],
+        src[y2 * size + x],
+        src[y2 * size + x2],
+      ]
+
+      for (let i = 0; i < 8; i++) {
+        const val = neighbors[i]
+        const diff = val - center
+        const spatial = i === 1 || i === 3 || i === 4 || i === 6 ? 1.0 : 0.7
+        const w = spatial / (1 + diff * diff * edgeStrength)
+        sum += val * w
+        weightSum += w
+      }
+
+      dst[cIdx] = sum / weightSum
+    }
+  }
+
+  return dst
+}
+
+function sampleDepthBilinear(
+  depth: Float32Array,
+  size: number,
+  u: number,
+  v: number
+): number {
+  const fx = Math.max(0, Math.min(1, u)) * (size - 1)
+  const fy = Math.max(0, Math.min(1, v)) * (size - 1)
+  const x0 = Math.floor(fx)
+  const y0 = Math.floor(fy)
+  const x1 = Math.min(size - 1, x0 + 1)
+  const y1 = Math.min(size - 1, y0 + 1)
+  const tx = fx - x0
+  const ty = fy - y0
+
+  const d00 = depth[y0 * size + x0]
+  const d10 = depth[y0 * size + x1]
+  const d01 = depth[y1 * size + x0]
+  const d11 = depth[y1 * size + x1]
+
+  const top = d00 + (d10 - d00) * tx
+  const bottom = d01 + (d11 - d01) * tx
+  return top + (bottom - top) * ty
+}
+
+/**
+ * Instant mobile-first 2.5D Depth Relief generator (zero heavy ML downloads).
+ * Downscales the image to 256×256, builds an edge-aware smoothed luminance
+ * depth map, displaces a lightweight 64×64 Three.js relief mesh mounted on a
+ * sleek studio slab, and exports a binary `.glb` in under 1–2 seconds.
+ */
+export async function generateFast25dRelief(
+  source: File | Blob | string,
+  options: Fast25dReliefOptions = {}
+): Promise<ConvertImageTo3dResult> {
+  const { reliefDepth = 0.22, signal, onProgress } = options
+
+  if (signal?.aborted) {
+    throw new DOMException("Conversion aborted", "AbortError")
+  }
+
+  onProgress?.({ stage: "generating_fast_25d", percent: 20 })
+  const img = await loadImageElement(source)
+
+  if (signal?.aborted) {
+    throw new DOMException("Conversion aborted", "AbortError")
+  }
+
+  const depthCanvas = document.createElement("canvas")
+  const textureCanvas = document.createElement("canvas")
+  const backCanvas = createShowcaseBackCanvas()
+
+  let slabGeom: THREE.ExtrudeGeometry | null = null
+  let slabMat: THREE.MeshStandardMaterial | null = null
+  let rimGeom: THREE.ExtrudeGeometry | null = null
+  let rimMat: THREE.MeshStandardMaterial | null = null
+  let frontGeom: THREE.PlaneGeometry | null = null
+  let frontTex: THREE.CanvasTexture | null = null
+  let frontMat: THREE.MeshStandardMaterial | null = null
+  let backGeom: THREE.PlaneGeometry | null = null
+  let backTex: THREE.CanvasTexture | null = null
+  let backMat: THREE.MeshStandardMaterial | null = null
+
+  try {
+    // 1. Fit source image into a clean studio card texture (512×614) & 256×256 depth canvas
+    const texW = FAST_25D_TEXTURE_SIZE
+    const texH = Math.round(FAST_25D_TEXTURE_SIZE * (1.12 / 0.94))
+    textureCanvas.width = texW
+    textureCanvas.height = texH
+    const texCtx = textureCanvas.getContext("2d")
+    if (!texCtx) throw new Error("2D canvas context unavailable.")
+
+    // Subtle studio gradient behind image (visible if PNG has transparency or letterbox)
+    const bg = texCtx.createRadialGradient(
+      texW * 0.5,
+      texH * 0.4,
+      texW * 0.08,
+      texW * 0.5,
+      texH * 0.5,
+      texH * 0.72
+    )
+    bg.addColorStop(0, "#FAF8F5")
+    bg.addColorStop(1, "#E7E0D5")
+    texCtx.fillStyle = bg
+    texCtx.fillRect(0, 0, texW, texH)
+
+    const pad = 0.92
+    const fitScale = Math.min(
+      (texW * pad) / Math.max(img.width, 1),
+      (texH * pad) / Math.max(img.height, 1)
+    )
+    const drawW = Math.round(img.width * fitScale)
+    const drawH = Math.round(img.height * fitScale)
+    const drawX = Math.round((texW - drawW) / 2)
+    const drawY = Math.round((texH - drawH) / 2)
+    texCtx.drawImage(img, drawX, drawY, drawW, drawH)
+
+    const previewCutoutDataUrl = textureCanvas.toDataURL("image/webp", 0.86)
+
+    // Downscale onto 256×256 canvas for fast luminance depth extraction
+    depthCanvas.width = FAST_25D_DEPTH_SIZE
+    depthCanvas.height = FAST_25D_DEPTH_SIZE
+    const depthCtx = depthCanvas.getContext("2d", { willReadFrequently: true })
+    if (!depthCtx) throw new Error("2D canvas context unavailable.")
+    depthCtx.drawImage(textureCanvas, 0, 0, FAST_25D_DEPTH_SIZE, FAST_25D_DEPTH_SIZE)
+    const depthImgData = depthCtx.getImageData(
+      0,
+      0,
+      FAST_25D_DEPTH_SIZE,
+      FAST_25D_DEPTH_SIZE
+    )
+
+    onProgress?.({ stage: "generating_fast_25d", percent: 45 })
+    await yieldToMainThread()
+
+    if (signal?.aborted) {
+      throw new DOMException("Conversion aborted", "AbortError")
+    }
+
+    // 2. Luminance heightmap + 2-pass edge-aware smoothing
+    let depthMap = buildLuminanceDepthMap(depthImgData, FAST_25D_DEPTH_SIZE)
+    depthMap = smoothDepthEdgeAware(depthMap, FAST_25D_DEPTH_SIZE, 28)
+    await yieldToMainThread()
+    depthMap = smoothDepthEdgeAware(depthMap, FAST_25D_DEPTH_SIZE, 18)
+
+    if (signal?.aborted) {
+      throw new DOMException("Conversion aborted", "AbortError")
+    }
+
+    onProgress?.({ stage: "generating_fast_25d", percent: 72 })
+
+    // 3. Build lightweight 2.5D sculpted relief mesh + studio backing slab
+    const cardW = 0.94
+    const cardH = 1.12
+    const cornerR = 0.085
+    const slabDepth = Math.max(0.036, Math.min(0.09, reliefDepth * 0.24))
+    const bevelThickness = 0.011
+    const bevelSize = 0.011
+
+    const slabShape = createRoundedRectShape(cardW, cardH, cornerR)
+    slabGeom = new THREE.ExtrudeGeometry(slabShape, {
+      depth: slabDepth,
+      bevelEnabled: true,
+      bevelThickness,
+      bevelSize,
+      bevelSegments: 3,
+      curveSegments: 16,
+    })
+    slabGeom.translate(0, 0, -slabDepth / 2)
+    slabMat = new THREE.MeshStandardMaterial({
+      color: 0x1e1b18,
+      roughness: 0.18,
+      metalness: 0.2,
+    })
+    const slabMesh = new THREE.Mesh(slabGeom, slabMat)
+    slabMesh.name = "Fast25dBackingSlab"
+
+    const rimPad = 0.02
+    const rimOuter = createRoundedRectShape(cardW + rimPad, cardH + rimPad, cornerR + 0.01)
+    rimOuter.holes.push(
+      createRoundedRectPath(cardW - 0.015, cardH - 0.015, Math.max(0.02, cornerR - 0.008))
+    )
+    rimGeom = new THREE.ExtrudeGeometry(rimOuter, {
+      depth: slabDepth + bevelThickness * 1.35,
+      bevelEnabled: true,
+      bevelThickness: 0.005,
+      bevelSize: 0.005,
+      bevelSegments: 2,
+      curveSegments: 16,
+    })
+    rimGeom.translate(0, 0, -(slabDepth + bevelThickness * 1.35) / 2)
+    rimMat = new THREE.MeshStandardMaterial({
+      color: 0xd4af37,
+      roughness: 0.24,
+      metalness: 0.84,
+    })
+    const rimMesh = new THREE.Mesh(rimGeom, rimMat)
+    rimMesh.name = "Fast25dMetallicRim"
+
+    const faceW = cardW - 0.038
+    const faceH = cardH - 0.038
+    const faceZ = slabDepth / 2 + bevelThickness + 0.001
+    const reliefAmp = Math.max(0.045, Math.min(0.14, reliefDepth * 0.42))
+
+    // 64×64 subdivided mesh for smooth 3D-tilting relief with low mobile overhead
+    const segs = 64
+    frontGeom = new THREE.PlaneGeometry(faceW, faceH, segs, segs)
+    const pos = frontGeom.getAttribute("position")
+    const uv = frontGeom.getAttribute("uv")
+
+    for (let i = 0; i < pos.count; i++) {
+      const u = uv.getX(i)
+      const vTopDown = 1 - uv.getY(i)
+      const h = sampleDepthBilinear(depthMap, FAST_25D_DEPTH_SIZE, u, vTopDown)
+      pos.setZ(i, h * reliefAmp)
+    }
+    pos.needsUpdate = true
+    flipPlaneUvForGltf(frontGeom)
+    frontGeom.computeVertexNormals()
+
+    frontTex = new THREE.CanvasTexture(textureCanvas)
+    frontTex.colorSpace = THREE.SRGBColorSpace
+    frontTex.flipY = false
+    frontTex.needsUpdate = true
+
+    frontMat = new THREE.MeshStandardMaterial({
+      map: frontTex,
+      roughness: 0.36,
+      metalness: 0.04,
+    })
+    const frontMesh = new THREE.Mesh(frontGeom, frontMat)
+    frontMesh.name = "Fast25dDepthRelief"
+    frontMesh.position.z = faceZ
+
+    backTex = new THREE.CanvasTexture(backCanvas)
+    backTex.colorSpace = THREE.SRGBColorSpace
+    backTex.flipY = false
+    backTex.needsUpdate = true
+
+    backGeom = new THREE.PlaneGeometry(faceW, faceH)
+    flipPlaneUvForGltf(backGeom)
+    backMat = new THREE.MeshStandardMaterial({
+      map: backTex,
+      roughness: 0.32,
+      metalness: 0.14,
+    })
+    const backMesh = new THREE.Mesh(backGeom, backMat)
+    backMesh.name = "Fast25dBackFace"
+    backMesh.rotation.y = Math.PI
+    backMesh.position.z = -faceZ
+
+    const group = new THREE.Group()
+    group.name = "Fast25dDepthRelief3D"
+    group.add(slabMesh, rimMesh, frontMesh, backMesh)
+
+    const exporter = new GLTFExporter()
+    const glbBuffer = await exporter.parseAsync(group, { binary: true })
+    if (!(glbBuffer instanceof ArrayBuffer)) {
+      throw new Error("Expected binary ArrayBuffer from GLTFExporter.")
+    }
+
+    const blob = new Blob([glbBuffer], { type: "model/gltf-binary" })
+    const timestamp = new Date().toISOString().slice(11, 19).replace(/:/g, "")
+    const fileName = `mascot-25d-relief-${timestamp}.glb`
+    const file = new File([blob], fileName, { type: "model/gltf-binary" })
+
+    onProgress?.({ stage: "ready", percent: 100 })
+
+    return {
+      blob,
+      file,
+      fileName,
+      engine: "fast_25d",
+      usedFallback: false,
+      previewCutoutDataUrl,
+    }
+  } finally {
+    slabGeom?.dispose()
+    slabMat?.dispose()
+    rimGeom?.dispose()
+    rimMat?.dispose()
+    frontGeom?.dispose()
+    frontTex?.dispose()
+    frontMat?.dispose()
+    backGeom?.dispose()
+    backTex?.dispose()
+    backMat?.dispose()
+    disposeCanvas(depthCanvas)
+    disposeCanvas(textureCanvas)
+    disposeCanvas(backCanvas)
   }
 }
 
 /**
  * Converts any 2D mascot or product photo into a downloadable/loadable `.glb` 3D mesh.
- * Tries public Hugging Face ZeroGPU Gradio Spaces (`TripoSR` -> `InstantMesh`) first,
- * and seamlessly falls back to a local 3D Extruded Relief `.glb` via `GLTFExporter`.
+ * - In `"fast_25d"` mode (mobile default): generates a smooth 2.5D depth relief mesh
+ *   in under 1–2 seconds with zero heavy ML weight downloads.
+ * - In `"full_3d"` mode (desktop option): attempts cloud ZeroGPU Spaces (`TripoSR` ->
+ *   `InstantMesh`) with a strict 12-second timeout, automatically aborting and falling
+ *   back cleanly to `generateFast25dRelief` on timeout or memory/network failure.
  */
 export async function convertImageToGlb(
   source: File | Blob | string,
   options: ConvertImageTo3dOptions = {}
 ): Promise<ConvertImageTo3dResult> {
   const {
+    mode = "full_3d",
+    timeoutMs = DEFAULT_FULL_3D_TIMEOUT_MS,
     hfToken,
     removeBg = true,
     reliefDepth = 0.22,
@@ -686,59 +1114,120 @@ export async function convertImageToGlb(
     onProgress,
   } = options
 
-  onProgress?.({ stage: "preparing", percent: 15 })
-  const prepared = await prepareImageFor3d(source, removeBg)
-
   if (signal?.aborted) {
     throw new DOMException("Conversion aborted", "AbortError")
   }
 
-  onProgress?.({ stage: "generating_cloud", percent: 45 })
+  // Instant mobile-first path: skip @imgly/background-removal and cloud queues entirely
+  if (mode === "fast_25d") {
+    return generateFast25dRelief(source, {
+      reliefDepth,
+      signal,
+      onProgress,
+    })
+  }
 
-  let finalBlob: Blob | null = null
-  let usedEngine: ImageTo3dEngine = "local_relief"
-  let usedFallback = false
+  // Full 3D path with strict timeout (default 12s) + automatic fallback to Fast 2.5D Relief
+  const full3dController = new AbortController()
+  let timedOut = false
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
 
-  for (const space of HF_SPACES) {
+  const onOuterAbort = () => full3dController.abort()
+  signal?.addEventListener("abort", onOuterAbort, { once: true })
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      timedOut = true
+      full3dController.abort()
+      reject(new Error("Full 3D conversion timed out"))
+    }, timeoutMs)
+  })
+
+  const runFull3dPipeline = async (): Promise<ConvertImageTo3dResult> => {
+    onProgress?.({ stage: "preparing", percent: 15 })
+    const prepared = await prepareImageFor3d(source, removeBg)
+
+    try {
+      if (full3dController.signal.aborted) {
+        throw new DOMException("Conversion aborted", "AbortError")
+      }
+
+      onProgress?.({ stage: "generating_cloud", percent: 45 })
+
+      let finalBlob: Blob | null = null
+      let usedEngine: ImageTo3dEngine = "triposr"
+
+      for (const space of HF_SPACES) {
+        if (full3dController.signal.aborted) {
+          throw new DOMException("Conversion aborted", "AbortError")
+        }
+        try {
+          finalBlob = await tryHuggingFaceSpace(
+            space,
+            prepared.squarePngBlob,
+            hfToken,
+            full3dController.signal
+          )
+          usedEngine = space.id
+          break
+        } catch (err) {
+          if (full3dController.signal.aborted) {
+            throw err
+          }
+          console.warn(`Hugging Face Space (${space.id}) unavailable, trying next:`, err)
+        }
+      }
+
+      if (!finalBlob) {
+        throw new Error("All cloud 3D spaces were unavailable.")
+      }
+
+      onProgress?.({ stage: "ready", percent: 100 })
+      const timestamp = new Date().toISOString().slice(11, 19).replace(/:/g, "")
+      const fileName = `mascot-3d-${usedEngine}-${timestamp}.glb`
+      const file = new File([finalBlob], fileName, { type: "model/gltf-binary" })
+
+      return {
+        blob: finalBlob,
+        file,
+        fileName,
+        engine: usedEngine,
+        usedFallback: false,
+        previewCutoutDataUrl: prepared.previewCutoutDataUrl,
+      }
+    } finally {
+      disposeCanvas(prepared.cutoutCanvas)
+    }
+  }
+
+  try {
+    return await Promise.race([runFull3dPipeline(), timeoutPromise])
+  } catch (err) {
+    // Propagate explicit user cancellation
     if (signal?.aborted) {
       throw new DOMException("Conversion aborted", "AbortError")
     }
-    try {
-      finalBlob = await tryHuggingFaceSpace(
-        space,
-        prepared.squarePngBlob,
-        hfToken,
-        signal
-      )
-      usedEngine = space.id
-      break
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError" && signal?.aborted) {
-        throw err
-      }
-      console.warn(`Hugging Face Space (${space.id}) unavailable, trying next:`, err)
+
+    const fallbackReason: ImageTo3dFallbackReason = timedOut ? "timeout" : "error"
+    console.warn(
+      `Full 3D conversion ${fallbackReason}; falling back to Fast 2.5D Relief:`,
+      err
+    )
+
+    onProgress?.({ stage: "fallback_fast", percent: 75 })
+    const fastResult = await generateFast25dRelief(source, {
+      reliefDepth,
+      signal,
+      onProgress,
+    })
+
+    return {
+      ...fastResult,
+      usedFallback: true,
+      fallbackReason,
     }
-  }
-
-  if (!finalBlob) {
-    usedFallback = true
-    usedEngine = "local_relief"
-    onProgress?.({ stage: "generating_local", percent: 75 })
-    finalBlob = await createLocalReliefGlb(prepared.cutoutCanvas, reliefDepth)
-  }
-
-  onProgress?.({ stage: "ready", percent: 100 })
-
-  const timestamp = new Date().toISOString().slice(11, 19).replace(/:/g, "")
-  const fileName = `mascot-3d-${usedEngine}-${timestamp}.glb`
-  const file = new File([finalBlob], fileName, { type: "model/gltf-binary" })
-
-  return {
-    blob: finalBlob,
-    file,
-    fileName,
-    engine: usedEngine,
-    usedFallback,
-    previewCutoutDataUrl: prepared.previewCutoutDataUrl,
+  } finally {
+    if (timeoutId !== null) clearTimeout(timeoutId)
+    signal?.removeEventListener("abort", onOuterAbort)
   }
 }
