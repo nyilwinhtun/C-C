@@ -403,185 +403,250 @@ async function tryHuggingFaceSpace(
   }
 }
 
+function createRoundedRectShape(width: number, height: number, radius: number): THREE.Shape {
+  const shape = new THREE.Shape()
+  const hw = width / 2
+  const hh = height / 2
+  const r = Math.min(radius, hw, hh)
+
+  shape.moveTo(-hw + r, -hh)
+  shape.lineTo(hw - r, -hh)
+  shape.quadraticCurveTo(hw, -hh, hw, -hh + r)
+  shape.lineTo(hw, hh - r)
+  shape.quadraticCurveTo(hw, hh, hw - r, hh)
+  shape.lineTo(-hw + r, hh)
+  shape.quadraticCurveTo(-hw, hh, -hw, hh - r)
+  shape.lineTo(-hw, -hh + r)
+  shape.quadraticCurveTo(-hw, -hh, -hw + r, -hh)
+  return shape
+}
+
+function createRoundedRectPath(width: number, height: number, radius: number): THREE.Path {
+  const path = new THREE.Path()
+  const hw = width / 2
+  const hh = height / 2
+  const r = Math.min(radius, hw, hh)
+
+  path.moveTo(-hw + r, -hh)
+  path.lineTo(hw - r, -hh)
+  path.quadraticCurveTo(hw, -hh, hw, -hh + r)
+  path.lineTo(hw, hh - r)
+  path.quadraticCurveTo(hw, hh, hw - r, hh)
+  path.lineTo(-hw + r, hh)
+  path.quadraticCurveTo(-hw, hh, -hw, hh - r)
+  path.lineTo(-hw, -hh + r)
+  path.quadraticCurveTo(-hw, -hh, -hw + r, -hh)
+  return path
+}
+
+function flipPlaneUvForGltf(geom: THREE.PlaneGeometry): void {
+  const uv = geom.getAttribute("uv")
+  for (let i = 0; i < uv.count; i++) {
+    uv.setY(i, 1 - uv.getY(i))
+  }
+  uv.needsUpdate = true
+}
+
+function createShowcaseFrontCanvas(cutoutCanvas: HTMLCanvasElement): HTMLCanvasElement {
+  const w = 640
+  const h = 768
+  const canvas = document.createElement("canvas")
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext("2d")
+  if (!ctx) throw new Error("2D canvas context unavailable.")
+
+  // Sleek studio card background with subtle radial highlight
+  const bg = ctx.createRadialGradient(w * 0.5, h * 0.38, w * 0.08, w * 0.5, h * 0.5, h * 0.72)
+  bg.addColorStop(0, "#FAF8F5")
+  bg.addColorStop(1, "#E7E0D5")
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, w, h)
+
+  // Subtle studio floor shadow under the subject
+  ctx.save()
+  ctx.fillStyle = "rgba(28, 25, 23, 0.10)"
+  ctx.beginPath()
+  ctx.ellipse(w / 2, h * 0.84, w * 0.28, h * 0.032, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+
+  // Draw crisp, un-warped subject cutout centered inside card
+  const pad = 0.84
+  const scale = Math.min((w * pad) / cutoutCanvas.width, (h * pad) / cutoutCanvas.height)
+  const drawW = cutoutCanvas.width * scale
+  const drawH = cutoutCanvas.height * scale
+  const drawX = (w - drawW) / 2
+  const drawY = (h - drawH) / 2
+
+  ctx.save()
+  ctx.shadowColor = "rgba(28, 25, 23, 0.22)"
+  ctx.shadowBlur = 24
+  ctx.shadowOffsetY = 12
+  ctx.drawImage(cutoutCanvas, drawX, drawY, drawW, drawH)
+  ctx.restore()
+
+  // Subtle inner metallic-tint hairline
+  ctx.strokeStyle = "rgba(212, 175, 55, 0.35)"
+  ctx.lineWidth = 4
+  ctx.beginPath()
+  ctx.roundRect(14, 14, w - 28, h - 28, 42)
+  ctx.stroke()
+
+  return canvas
+}
+
+function createShowcaseBackCanvas(): HTMLCanvasElement {
+  const w = 640
+  const h = 768
+  const canvas = document.createElement("canvas")
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext("2d")
+  if (!ctx) throw new Error("2D canvas context unavailable.")
+
+  const bg = ctx.createLinearGradient(0, 0, w, h)
+  bg.addColorStop(0, "#232120")
+  bg.addColorStop(1, "#121110")
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, w, h)
+
+  // Gold accent border
+  ctx.strokeStyle = "rgba(245, 158, 11, 0.55)"
+  ctx.lineWidth = 4
+  ctx.beginPath()
+  ctx.roundRect(24, 24, w - 48, h - 48, 38)
+  ctx.stroke()
+
+  // Center studio emblem
+  const cx = w / 2
+  const cy = h * 0.44
+  ctx.strokeStyle = "rgba(250, 204, 21, 0.85)"
+  ctx.lineWidth = 5
+  ctx.beginPath()
+  ctx.arc(cx, cy, 66, 0, Math.PI * 2)
+  ctx.stroke()
+
+  ctx.fillStyle = "#FACC15"
+  ctx.font = '700 34px "Inter", system-ui, sans-serif'
+  ctx.textAlign = "center"
+  ctx.textBaseline = "middle"
+  ctx.fillText("3D", cx, cy)
+
+  ctx.fillStyle = "#FAF8F5"
+  ctx.font = '700 32px "Inter", system-ui, sans-serif'
+  ctx.fillText("THE BOYS MOBILE", cx, h * 0.62)
+
+  ctx.fillStyle = "rgba(250, 248, 245, 0.62)"
+  ctx.font = '600 18px "Inter", system-ui, sans-serif'
+  ctx.fillText("3D STUDIO SHOWCASE", cx, h * 0.68)
+
+  return canvas
+}
+
 /**
- * Generates a watertight, double-sided 3D Extruded Relief `.glb` model locally
- * in the browser using THREE.GLTFExporter from the subject cutout + luminance depth map.
+ * Generates a sleek, non-distorted 3D Studio Showcase Card `.glb` model locally
+ * in the browser using THREE.GLTFExporter: an extruded rounded-rectangle acrylic/glass
+ * slab with metallic rim bevel, crisp un-warped front texture, and branded back face.
  * Guarantees 0-cost offline conversion even if cloud ZeroGPU Spaces are busy.
  */
 export async function createLocalReliefGlb(
   cutoutCanvas: HTMLCanvasElement,
   reliefDepth = 0.22
 ): Promise<Blob> {
-  const grid = 76
-  const sampleCanvas = document.createElement("canvas")
-  sampleCanvas.width = grid
-  sampleCanvas.height = grid
-  const sCtx = sampleCanvas.getContext("2d")
-  if (!sCtx) throw new Error("2D canvas context unavailable.")
-  sCtx.drawImage(cutoutCanvas, 0, 0, grid, grid)
-  const { data } = sCtx.getImageData(0, 0, grid, grid)
+  const cardW = 0.94
+  const cardH = 1.12
+  const cornerR = 0.085
+  const slabDepth = Math.max(0.036, Math.min(0.11, reliefDepth * 0.25))
+  const bevelThickness = 0.012
+  const bevelSize = 0.012
 
-  const mask = new Uint8Array(grid * grid)
-  const lum = new Float32Array(grid * grid)
-
-  for (let i = 0; i < grid * grid; i++) {
-    const r = data[i * 4]
-    const g = data[i * 4 + 1]
-    const b = data[i * 4 + 2]
-    const a = data[i * 4 + 3]
-    mask[i] = a > 28 ? 1 : 0
-    lum[i] = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-  }
-
-  // Compute normalized interior distance (0 at silhouette edge -> 1 at center)
-  // for smooth rounded 3D relief beveling
-  const dist = new Float32Array(grid * grid)
-  const maxPass = 6
-  for (let i = 0; i < grid * grid; i++) {
-    dist[i] = mask[i] ? maxPass : 0
-  }
-  for (let pass = 0; pass < maxPass; pass++) {
-    for (let y = 1; y < grid - 1; y++) {
-      for (let x = 1; x < grid - 1; x++) {
-        const idx = y * grid + x
-        if (!mask[idx]) continue
-        const minNeighbor = Math.min(
-          dist[idx - 1],
-          dist[idx + 1],
-          dist[idx - grid],
-          dist[idx + grid]
-        )
-        dist[idx] = Math.min(dist[idx], minNeighbor + 1)
-      }
-    }
-  }
-
-  const depthMap = new Float32Array(grid * grid)
-  for (let i = 0; i < grid * grid; i++) {
-    if (!mask[i]) continue
-    const edgeFactor = Math.sin((Math.min(dist[i], maxPass) / maxPass) * (Math.PI / 2))
-    depthMap[i] = (edgeFactor * 0.72 + lum[i] * 0.28) * reliefDepth
-  }
-
-  const positions: number[] = []
-  const uvs: number[] = []
-  const indices: number[] = []
-
-  const frontIndex = new Int32Array(grid * grid).fill(-1)
-  const backIndex = new Int32Array(grid * grid).fill(-1)
-
-  const widthWorld = 1.0
-  const heightWorld = 1.0
-
-  // Create front & back vertices for all opaque grid points
-  for (let y = 0; y < grid; y++) {
-    for (let x = 0; x < grid; x++) {
-      const idx = y * grid + x
-      // Include a vertex if it or any of its 4-cell neighbors is opaque
-      const active =
-        mask[idx] ||
-        (x > 0 && mask[idx - 1]) ||
-        (y > 0 && mask[idx - grid]) ||
-        (x > 0 && y > 0 && mask[idx - grid - 1])
-
-      if (!active) continue
-
-      const wx = (x / (grid - 1) - 0.5) * widthWorld
-      const wy = (0.5 - y / (grid - 1)) * heightWorld
-      const u = x / (grid - 1)
-      // glTF textures use flipY = false where v = 0 is the top row of the canvas
-      const v = y / (grid - 1)
-      const z = mask[idx] ? depthMap[idx] : 0
-
-      frontIndex[idx] = positions.length / 3
-      positions.push(wx, wy, z * 0.65)
-      uvs.push(u, v)
-
-      backIndex[idx] = positions.length / 3
-      positions.push(wx, wy, -z * 0.45)
-      uvs.push(u, v)
-    }
-  }
-
-  const cellActive = (cx: number, cy: number): boolean => {
-    if (cx < 0 || cy < 0 || cx >= grid - 1 || cy >= grid - 1) return false
-    const i00 = cy * grid + cx
-    const i10 = i00 + 1
-    const i01 = i00 + grid
-    const i11 = i01 + 1
-    return Boolean(mask[i00] || mask[i10] || mask[i01] || mask[i11])
-  }
-
-  // Triangulate front, back, and silhouette side walls
-  for (let y = 0; y < grid - 1; y++) {
-    for (let x = 0; x < grid - 1; x++) {
-      if (!cellActive(x, y)) continue
-
-      const i00 = y * grid + x
-      const i10 = i00 + 1
-      const i01 = i00 + grid
-      const i11 = i01 + 1
-
-      const f00 = frontIndex[i00]
-      const f10 = frontIndex[i10]
-      const f01 = frontIndex[i01]
-      const f11 = frontIndex[i11]
-
-      const b00 = backIndex[i00]
-      const b10 = backIndex[i10]
-      const b01 = backIndex[i01]
-      const b11 = backIndex[i11]
-
-      if (f00 >= 0 && f10 >= 0 && f01 >= 0 && f11 >= 0) {
-        // Front face (+Z)
-        indices.push(f00, f01, f10)
-        indices.push(f10, f01, f11)
-        // Back face (-Z)
-        indices.push(b00, b10, b01)
-        indices.push(b10, b11, b01)
-
-        // Stitch boundary edges
-        if (!cellActive(x, y - 1)) {
-          indices.push(f00, f10, b00, f10, b10, b00)
-        }
-        if (!cellActive(x, y + 1)) {
-          indices.push(f11, f01, b11, f01, b01, b11)
-        }
-        if (!cellActive(x - 1, y)) {
-          indices.push(f01, f00, b01, f00, b00, b01)
-        }
-        if (!cellActive(x + 1, y)) {
-          indices.push(f10, f11, b10, f11, b11, b10)
-        }
-      }
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry()
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3))
-  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2))
-  geometry.setIndex(indices)
-  geometry.computeVertexNormals()
-
-  const texture = new THREE.CanvasTexture(cutoutCanvas)
-  texture.colorSpace = THREE.SRGBColorSpace
-  texture.flipY = false
-  texture.needsUpdate = true
-
-  const material = new THREE.MeshStandardMaterial({
-    map: texture,
-    roughness: 0.45,
-    metalness: 0.08,
-    alphaTest: 0.1,
-    transparent: false,
+  // 1. Acrylic/glass core slab
+  const slabShape = createRoundedRectShape(cardW, cardH, cornerR)
+  const slabGeom = new THREE.ExtrudeGeometry(slabShape, {
+    depth: slabDepth,
+    bevelEnabled: true,
+    bevelThickness,
+    bevelSize,
+    bevelSegments: 4,
+    curveSegments: 20,
   })
+  slabGeom.translate(0, 0, -slabDepth / 2)
 
-  const mesh = new THREE.Mesh(geometry, material)
-  mesh.name = "MascotRelief3D"
+  const slabMat = new THREE.MeshStandardMaterial({
+    color: 0x1e1b18,
+    roughness: 0.16,
+    metalness: 0.2,
+  })
+  const slabMesh = new THREE.Mesh(slabGeom, slabMat)
+  slabMesh.name = "ShowcaseAcrylicSlab"
+
+  // 2. Subtle metallic rim bevel frame
+  const rimPad = 0.022
+  const rimOuter = createRoundedRectShape(cardW + rimPad, cardH + rimPad, cornerR + 0.01)
+  rimOuter.holes.push(createRoundedRectPath(cardW - 0.015, cardH - 0.015, Math.max(0.02, cornerR - 0.008)))
+  const rimGeom = new THREE.ExtrudeGeometry(rimOuter, {
+    depth: slabDepth + bevelThickness * 1.4,
+    bevelEnabled: true,
+    bevelThickness: 0.006,
+    bevelSize: 0.006,
+    bevelSegments: 3,
+    curveSegments: 20,
+  })
+  rimGeom.translate(0, 0, -(slabDepth + bevelThickness * 1.4) / 2)
+
+  const rimMat = new THREE.MeshStandardMaterial({
+    color: 0xd4af37,
+    roughness: 0.24,
+    metalness: 0.86,
+  })
+  const rimMesh = new THREE.Mesh(rimGeom, rimMat)
+  rimMesh.name = "ShowcaseMetallicRim"
+
+  // 3. Un-warped crisp front cutout face (+Z)
+  const faceW = cardW - 0.035
+  const faceH = cardH - 0.035
+  const faceZ = slabDepth / 2 + bevelThickness + 0.002
+
+  const frontCanvas = createShowcaseFrontCanvas(cutoutCanvas)
+  const frontTex = new THREE.CanvasTexture(frontCanvas)
+  frontTex.colorSpace = THREE.SRGBColorSpace
+  frontTex.flipY = false
+  frontTex.needsUpdate = true
+
+  const frontGeom = new THREE.PlaneGeometry(faceW, faceH)
+  flipPlaneUvForGltf(frontGeom)
+  const frontMat = new THREE.MeshStandardMaterial({
+    map: frontTex,
+    roughness: 0.35,
+    metalness: 0.05,
+  })
+  const frontMesh = new THREE.Mesh(frontGeom, frontMat)
+  frontMesh.name = "ShowcaseFrontFace"
+  frontMesh.position.z = faceZ
+
+  // 4. Branded back face (-Z)
+  const backCanvas = createShowcaseBackCanvas()
+  const backTex = new THREE.CanvasTexture(backCanvas)
+  backTex.colorSpace = THREE.SRGBColorSpace
+  backTex.flipY = false
+  backTex.needsUpdate = true
+
+  const backGeom = new THREE.PlaneGeometry(faceW, faceH)
+  flipPlaneUvForGltf(backGeom)
+  const backMat = new THREE.MeshStandardMaterial({
+    map: backTex,
+    roughness: 0.32,
+    metalness: 0.14,
+  })
+  const backMesh = new THREE.Mesh(backGeom, backMat)
+  backMesh.name = "ShowcaseBackFace"
+  backMesh.rotation.y = Math.PI
+  backMesh.position.z = -faceZ
 
   const group = new THREE.Group()
-  group.name = "Presenter3DRelief"
-  group.add(mesh)
+  group.name = "StudioShowcaseCard3D"
+  group.add(slabMesh, rimMesh, frontMesh, backMesh)
 
   const exporter = new GLTFExporter()
   try {
@@ -591,9 +656,16 @@ export async function createLocalReliefGlb(
     }
     throw new Error("Expected binary ArrayBuffer from GLTFExporter.")
   } finally {
-    geometry.dispose()
-    texture.dispose()
-    material.dispose()
+    slabGeom.dispose()
+    slabMat.dispose()
+    rimGeom.dispose()
+    rimMat.dispose()
+    frontGeom.dispose()
+    frontTex.dispose()
+    frontMat.dispose()
+    backGeom.dispose()
+    backTex.dispose()
+    backMat.dispose()
   }
 }
 

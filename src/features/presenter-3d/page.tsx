@@ -17,6 +17,8 @@ import {
   Play,
   RotateCw,
   Share2,
+  ShieldCheck,
+  Smartphone,
   Sparkles,
   Square,
   Upload,
@@ -52,12 +54,15 @@ import {
   drawBroadcastLowerThird,
   drawCaptionBar,
   drawCornerLogoWatermark,
+  drawPipPhoneOverlay,
   drawPresenter3dPopFrame,
   drawPresenterCardFrame,
   loadAvatarController,
   type AvatarController,
   type BuiltinPresenterId,
+  type CaptionStyle,
   type LipSyncAnalyzer,
+  type PipCorner,
   type Presenter3dPopMotionPreset,
   type PresenterStudioSet,
   type StudioBackdropController,
@@ -230,6 +235,16 @@ export function Presenter3DPage() {
   const [mascotName, setMascotName] = useState("")
   const [captionsOn, setCaptionsOn] = useState(false)
   const [captionText, setCaptionText] = useState("")
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("dynamic_pop")
+  const [showSafeZone, setShowSafeZone] = useState(false)
+  const [pipEnabled, setPipEnabled] = useState(false)
+  const [pipImageDataUrl, setPipImageDataUrl] = useState<string | null>(null)
+  const [pipRemoveBg, setPipRemoveBg] = useState(true)
+  const [isRemovingPipBg, setIsRemovingPipBg] = useState(false)
+  const [pipPriceText, setPipPriceText] = useState("")
+  const [pipPromoTag, setPipPromoTag] = useState("")
+  const [pipCorner, setPipCorner] = useState<PipCorner>("top_left")
+  const pipImageRef = useRef<HTMLImageElement | null>(null)
   const [isExtracting3dPop, setIsExtracting3dPop] = useState(false)
   const characterPhotoRef = useRef<HTMLImageElement | null>(null)
   const cutoutPhotoRef = useRef<HTMLImageElement | null>(null)
@@ -336,6 +351,11 @@ export function Presenter3DPage() {
     mascotName,
     captionsOn,
     captionText,
+    captionStyle,
+    pipEnabled,
+    pipPriceText,
+    pipPromoTag,
+    pipCorner,
     presenter3dPopEnabled,
     presenter3dPopDepth,
     presenter3dPopMotion,
@@ -358,6 +378,11 @@ export function Presenter3DPage() {
     mascotName,
     captionsOn,
     captionText,
+    captionStyle,
+    pipEnabled,
+    pipPriceText,
+    pipPromoTag,
+    pipCorner,
     presenter3dPopEnabled,
     presenter3dPopDepth,
     presenter3dPopMotion,
@@ -694,9 +719,34 @@ export function Presenter3DPage() {
         )
       }
 
-      // 5. Optional live Burmese captions
+      // 5. Picture-in-Picture (PiP) Phone + Price Tag & Trust Badge Overlay
+      if (settings.pipEnabled) {
+        drawPipPhoneOverlay(
+          ctx,
+          {
+            phoneImg: pipImageRef.current,
+            priceText: settings.pipPriceText,
+            promoTag: settings.pipPromoTag,
+            corner: settings.pipCorner,
+            lip,
+            elapsed,
+            hasCornerLogo: Boolean(settings.presenterShowCornerLogo && cornerLogoImgRef.current),
+            hasLowerThird: settings.presenterShowLowerThird,
+            captionsOn: settings.captionsOn,
+          },
+          dims.width,
+          dims.height
+        )
+      }
+
+      // 6. Optional live Burmese captions
       if (settings.captionsOn) {
-        drawCaptionBar(ctx, settings.captionText, dims.width, dims.height)
+        drawCaptionBar(ctx, settings.captionText, dims.width, dims.height, {
+          style: settings.captionStyle,
+          lip,
+          elapsed,
+          hasLowerThird: settings.presenterShowLowerThird,
+        })
       }
     }
 
@@ -972,6 +1022,63 @@ export function Presenter3DPage() {
     img.onerror = () => {
       URL.revokeObjectURL(url)
       toast.error(t(language, "presenter3d.logoInvalid"))
+    }
+    img.src = url
+  }
+
+  const handleUploadPipPhone = async (e: React.ChangeEvent<HTMLInputElement> | File) => {
+    const file = e instanceof File ? e : e.target.files?.[0]
+    if (!(e instanceof File)) e.target.value = ""
+    if (!file) return
+
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) && !/\.(jpe?g|png|webp)$/i.test(file.name)) {
+      toast.error(t(language, "presenter3d.pipInvalid"))
+      return
+    }
+
+    let workingBlob: Blob = file
+    if (pipRemoveBg) {
+      setIsRemovingPipBg(true)
+      try {
+        const { removeBackground } = await import("@imgly/background-removal")
+        workingBlob = await removeBackground(file)
+      } catch (err) {
+        console.warn("PiP background removal skipped; using original image:", err)
+      } finally {
+        setIsRemovingPipBg(false)
+      }
+    }
+
+    const url = URL.createObjectURL(workingBlob)
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const max = 640
+        const scale = Math.min(1, max / Math.max(img.width, img.height, 1))
+        const canvas = document.createElement("canvas")
+        canvas.width = Math.max(1, Math.round(img.width * scale))
+        canvas.height = Math.max(1, Math.round(img.height * scale))
+        const ctx = canvas.getContext("2d")
+        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height)
+        const dataUrl = canvas.toDataURL("image/png")
+
+        const finalImg = new Image()
+        finalImg.onload = () => {
+          pipImageRef.current = finalImg
+          setPipImageDataUrl(dataUrl)
+          setPipEnabled(true)
+          toast.success(t(language, "presenter3d.pipLoaded"))
+        }
+        finalImg.src = dataUrl
+      } catch {
+        toast.error(t(language, "presenter3d.pipInvalid"))
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      toast.error(t(language, "presenter3d.pipInvalid"))
     }
     img.src = url
   }
@@ -1527,9 +1634,27 @@ export function Presenter3DPage() {
             <span className="text-xs font-semibold uppercase tracking-wider text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
               {t(language, "presenter3d.stagePreview")}
             </span>
-            <span className="rounded-full bg-[#EFEAE1] dark:bg-[#27272A] px-2.5 py-1 text-[11px] font-medium tabular-nums text-[#1C1917] dark:text-[#F5F5F4]">
-              {aspectRatio} • {framing === "close_up" ? "Close-Up" : "Upper-Body"}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic(6)
+                  setShowSafeZone((v) => !v)
+                }}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold border transition-colors cursor-pointer font-myanmar",
+                  showSafeZone
+                    ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                    : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white/80 dark:bg-[#27272A] text-[#57534E] dark:text-[#A1A1AA]"
+                )}
+              >
+                <ShieldCheck className="h-3 w-3" />
+                <span>{t(language, "presenter3d.safeZoneBtn")}</span>
+              </button>
+              <span className="rounded-full bg-[#EFEAE1] dark:bg-[#27272A] px-2.5 py-1 text-[11px] font-medium tabular-nums text-[#1C1917] dark:text-[#F5F5F4]">
+                {aspectRatio} • {framing === "close_up" ? "Close-Up" : "Upper-Body"}
+              </span>
+            </div>
           </div>
 
           {/* Canvas Preview Container */}
@@ -1559,6 +1684,37 @@ export function Presenter3DPage() {
                   characterKind === "model" && hasLoaded3dAvatar && "cursor-grab active:cursor-grabbing touch-none"
                 )}
               />
+              {/* Preview-only TikTok / Reels Safe-Zone Guide (strictly excluded from MediaRecorder exports) */}
+              {showSafeZone && (
+                <div className="pointer-events-none select-none absolute inset-0 z-10">
+                  {aspectRatio === "9:16" ? (
+                    <>
+                      {/* Top Header Danger Band */}
+                      <div className="absolute inset-x-0 top-0 h-[12%] border-b border-dashed border-rose-400/80 bg-rose-500/15 flex items-end justify-center pb-1">
+                        <span className="rounded bg-rose-950/75 px-1.5 py-0.5 text-[9px] font-semibold text-rose-200 font-myanmar">
+                          {t(language, "presenter3d.safeZoneHeader")}
+                        </span>
+                      </div>
+                      {/* Right Action Rail Danger Band */}
+                      <div className="absolute right-0 top-[44%] bottom-[22%] w-[16%] border-l border-y border-dashed border-rose-400/80 bg-rose-500/15 flex items-center justify-center">
+                        <span className="-rotate-90 whitespace-nowrap rounded bg-rose-950/75 px-1.5 py-0.5 text-[9px] font-semibold text-rose-200 font-myanmar">
+                          {t(language, "presenter3d.safeZoneActions")}
+                        </span>
+                      </div>
+                      {/* Bottom Caption / CTA Danger Band */}
+                      <div className="absolute inset-x-0 bottom-0 h-[22%] border-t border-dashed border-rose-400/80 bg-rose-500/15 flex items-start justify-center pt-1.5">
+                        <span className="rounded bg-rose-950/75 px-1.5 py-0.5 text-[9px] font-semibold text-rose-200 font-myanmar">
+                          {t(language, "presenter3d.safeZoneBottom")}
+                        </span>
+                      </div>
+                      {/* Inner Safe Area Frame */}
+                      <div className="absolute top-[12%] bottom-[22%] left-[3%] right-[16%] border border-dashed border-emerald-400/70 rounded-lg" />
+                    </>
+                  ) : (
+                    <div className="absolute inset-[6%] border border-dashed border-emerald-400/75 rounded-xl" />
+                  )}
+                </div>
+              )}
               {characterKind === "model" && hasLoaded3dAvatar && !isLoadingAvatar && (
                 <button
                   type="button"
@@ -2325,12 +2481,44 @@ export function Presenter3DPage() {
                 </button>
               </div>
               {captionsOn && (
-                <Input
-                  value={captionText}
-                  onChange={(e) => setCaptionText(e.target.value)}
-                  placeholder={t(language, "presenter3d.captionPlaceholder")}
-                  className="h-9 rounded-xl bg-white dark:bg-[#27272A] border-[#E7E5E4] dark:border-[#3F3F46] text-xs font-myanmar"
-                />
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                      {t(language, "presenter3d.captionStyleLabel")}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {(
+                        [
+                          { id: "dynamic_pop", labelKey: "presenter3d.captionStylePop" },
+                          { id: "classic", labelKey: "presenter3d.captionStyleClassic" },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => {
+                            triggerHaptic(6)
+                            setCaptionStyle(opt.id)
+                          }}
+                          className={cn(
+                            "rounded-full px-2.5 py-1 text-[10px] font-semibold border transition-colors cursor-pointer font-myanmar",
+                            captionStyle === opt.id
+                              ? "border-amber-500/70 bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                              : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#57534E] dark:text-[#A1A1AA]"
+                          )}
+                        >
+                          {t(language, opt.labelKey)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <Input
+                    value={captionText}
+                    onChange={(e) => setCaptionText(e.target.value)}
+                    placeholder={t(language, "presenter3d.captionPlaceholder")}
+                    className="h-9 rounded-xl bg-white dark:bg-[#27272A] border-[#E7E5E4] dark:border-[#3F3F46] text-xs font-myanmar"
+                  />
+                </div>
               )}
             </div>
           </div>
@@ -2578,6 +2766,191 @@ export function Presenter3DPage() {
                 />
               )}
             </div>
+          </div>
+
+          {/* 4. Picture-in-Picture (PiP) Phone + Price Tag & Trust Badge Overlay */}
+          <div className="rounded-3xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <Smartphone className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                <Label className="text-xs font-semibold uppercase tracking-wider text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                  {t(language, "presenter3d.pipTitle")}
+                </Label>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic(6)
+                  setPipEnabled((v) => !v)
+                }}
+                className={cn(
+                  "rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer transition-colors",
+                  pipEnabled
+                    ? "bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                    : "bg-[#EFEAE1] text-[#57534E] dark:bg-[#27272A] dark:text-[#A1A1AA]"
+                )}
+              >
+                {pipEnabled ? "ON" : "OFF"}
+              </button>
+            </div>
+
+            {pipEnabled && (
+              <div className="space-y-3 pt-1">
+                {/* Auto Remove Background Toggle */}
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                    {t(language, "presenter3d.pipRemoveBgToggle")}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic(6)
+                      setPipRemoveBg((v) => !v)
+                    }}
+                    className={cn(
+                      "rounded-full px-2.5 py-0.5 text-[10px] font-semibold cursor-pointer transition-colors",
+                      pipRemoveBg
+                        ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/40"
+                        : "bg-[#EFEAE1] text-[#57534E] dark:bg-[#27272A] dark:text-[#A1A1AA]"
+                    )}
+                  >
+                    {pipRemoveBg ? "ON" : "OFF"}
+                  </button>
+                </div>
+
+                {/* Featured Phone Uploader */}
+                <FileDropzone
+                  accept={[".jpg", ".jpeg", ".png", ".webp"]}
+                  onFiles={(f) => void handleUploadPipPhone(f[0])}
+                >
+                  <label className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-white/80 dark:bg-[#27272A]/80 py-2.5 px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
+                    {isRemovingPipBg ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600" />
+                        <span>{t(language, "presenter3d.pipRemovingBg")}</span>
+                      </>
+                    ) : pipImageDataUrl ? (
+                      <>
+                        <img
+                          src={pipImageDataUrl}
+                          alt="Featured phone"
+                          className="h-7 w-7 rounded-lg object-contain bg-zinc-900/10"
+                        />
+                        <span>{t(language, "presenter3d.pipChangePhone")}</span>
+                      </>
+                    ) : (
+                      <>
+                        <ImagePlus className="h-3.5 w-3.5" />
+                        <span>{t(language, "presenter3d.pipUploadPhone")}</span>
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                      onChange={(e) => void handleUploadPipPhone(e)}
+                      className="hidden"
+                    />
+                  </label>
+                </FileDropzone>
+
+                {pipImageDataUrl && (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic(6)
+                        pipImageRef.current = null
+                        setPipImageDataUrl(null)
+                      }}
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 dark:text-rose-400 hover:underline cursor-pointer font-myanmar"
+                    >
+                      <X className="h-3 w-3" />
+                      <span>{t(language, "presenter3d.pipClearPhone")}</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* Price Pill Input */}
+                <div className="space-y-1">
+                  <span className="text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                    {t(language, "presenter3d.pipPriceLabel")}
+                  </span>
+                  <Input
+                    value={pipPriceText}
+                    onChange={(e) => setPipPriceText(e.target.value)}
+                    placeholder={t(language, "presenter3d.pipPricePlaceholder")}
+                    className="h-9 rounded-xl bg-white dark:bg-[#27272A] border-[#E7E5E4] dark:border-[#3F3F46] text-xs font-myanmar"
+                  />
+                </div>
+
+                {/* Promo / Trust Badge Input + Quick Chips */}
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                    {t(language, "presenter3d.pipPromoLabel")}
+                  </span>
+                  <Input
+                    value={pipPromoTag}
+                    onChange={(e) => setPipPromoTag(e.target.value)}
+                    placeholder={t(language, "presenter3d.pipPromoPlaceholder")}
+                    className="h-9 rounded-xl bg-white dark:bg-[#27272A] border-[#E7E5E4] dark:border-[#3F3F46] text-xs font-myanmar"
+                  />
+                  <div className="flex flex-wrap gap-1.5">
+                    {["0% Downpayment", "COD", "Official Warranty"].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic(6)
+                          setPipPromoTag(preset)
+                        }}
+                        className={cn(
+                          "rounded-full border px-2.5 py-0.5 text-[10px] font-semibold transition-colors cursor-pointer",
+                          pipPromoTag === preset
+                            ? "border-emerald-500/70 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                            : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#57534E] dark:text-[#A1A1AA]"
+                        )}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 4-Corner Placement */}
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                    {t(language, "presenter3d.pipCornerLabel")}
+                  </span>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(
+                      [
+                        { id: "top_left", labelKey: "presenter3d.pipCornerTopLeft" },
+                        { id: "top_right", labelKey: "presenter3d.pipCornerTopRight" },
+                        { id: "bottom_left", labelKey: "presenter3d.pipCornerBottomLeft" },
+                        { id: "bottom_right", labelKey: "presenter3d.pipCornerBottomRight" },
+                      ] as const
+                    ).map((cornerOpt) => (
+                      <button
+                        key={cornerOpt.id}
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic(6)
+                          setPipCorner(cornerOpt.id)
+                        }}
+                        className={cn(
+                          "rounded-xl border py-1.5 px-2.5 text-[11px] font-semibold transition-colors cursor-pointer font-myanmar",
+                          pipCorner === cornerOpt.id
+                            ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                            : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
+                        )}
+                      >
+                        {t(language, cornerOpt.labelKey)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

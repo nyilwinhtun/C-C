@@ -732,21 +732,23 @@ export function drawPresenter3dPopFrame(
   drawAudioSpectrumBar(ctx, canvasW, canvasH, lip, elapsed)
 }
 
-export function drawCaptionBar(
+export type CaptionStyle = "classic" | "dynamic_pop"
+
+export interface CaptionBarOptions {
+  style?: CaptionStyle
+  lip?: LipSyncWeights
+  elapsed?: number
+  hasLowerThird?: boolean
+}
+
+function wrapCaptionLines(
   ctx: CanvasRenderingContext2D,
   text: string,
-  canvasW: number,
-  canvasH: number
-): void {
-  const clean = text.trim()
-  if (!clean) return
-  const fontSize = Math.round(canvasW * 0.045)
-  ctx.save()
-  ctx.font = `600 ${fontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
-  const maxW = canvasW * 0.86
+  maxW: number
+): string[] {
   const lines: string[] = []
   let line = ""
-  const tokens = clean.includes(" ") ? clean.split(/(\s+)/) : Array.from(clean)
+  const tokens = text.includes(" ") ? text.split(/(\s+)/) : Array.from(text)
   for (const tok of tokens) {
     const pieces = ctx.measureText(tok).width > maxW ? Array.from(tok) : [tok]
     for (const p of pieces) {
@@ -759,6 +761,84 @@ export function drawCaptionBar(
     }
   }
   if (line.trim()) lines.push(line.trim())
+  return lines
+}
+
+export function drawCaptionBar(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  canvasW: number,
+  canvasH: number,
+  options?: CaptionBarOptions
+): void {
+  const clean = text.trim()
+  if (!clean) return
+
+  const style: CaptionStyle = options?.style ?? "classic"
+  const isVertical = canvasH > canvasW
+
+  if (style === "dynamic_pop") {
+    const fontSize = Math.round(canvasW * 0.048)
+    ctx.save()
+    ctx.font = `800 ${fontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
+    const maxW = canvasW * 0.84
+    const lines = wrapCaptionLines(ctx, clean, maxW)
+    const shown = lines.slice(-3)
+    const lh = fontSize * 1.48
+    const padY = fontSize * 0.45
+    const boxH = shown.length * lh + padY * 2
+    const safeBottomOffset = isVertical
+      ? canvasH * (options?.hasLowerThird ? 0.25 : 0.225)
+      : canvasH * 0.08
+    const boxY = canvasH - boxH - safeBottomOffset
+    const centerY = boxY + boxH / 2
+
+    const energy = options?.lip?.energy ?? 0
+    const popScale = 1 + Math.min(0.085, energy * 0.08)
+
+    ctx.translate(canvasW / 2, centerY)
+    ctx.scale(popScale, popScale)
+    ctx.translate(-canvasW / 2, -centerY)
+
+    // Sleek dark pill backdrop with subtle gold rim
+    ctx.shadowColor = "rgba(0, 0, 0, 0.42)"
+    ctx.shadowBlur = 18
+    ctx.fillStyle = "rgba(15, 15, 18, 0.78)"
+    ctx.beginPath()
+    ctx.roundRect(canvasW * 0.06, boxY, canvasW * 0.88, boxH, fontSize * 0.55)
+    ctx.fill()
+
+    ctx.shadowBlur = 0
+    ctx.strokeStyle = "rgba(250, 204, 21, 0.36)"
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.roundRect(canvasW * 0.06, boxY, canvasW * 0.88, boxH, fontSize * 0.55)
+    ctx.stroke()
+
+    ctx.textAlign = "center"
+    ctx.textBaseline = "middle"
+    ctx.lineJoin = "round"
+    ctx.lineWidth = Math.max(4, fontSize * 0.2)
+    ctx.strokeStyle = "rgba(9, 9, 11, 0.96)"
+
+    shown.forEach((l, i) => {
+      const y = boxY + padY + lh * (i + 0.5)
+      const isHighlight =
+        shown.length === 1 ? energy > 0.22 : i % 2 === 1
+      ctx.strokeText(l, canvasW / 2, y, maxW)
+      ctx.fillStyle = isHighlight ? "#FACC15" : "#FFFFFF"
+      ctx.fillText(l, canvasW / 2, y, maxW)
+    })
+
+    ctx.restore()
+    return
+  }
+
+  const fontSize = Math.round(canvasW * 0.045)
+  ctx.save()
+  ctx.font = `600 ${fontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
+  const maxW = canvasW * 0.86
+  const lines = wrapCaptionLines(ctx, clean, maxW)
   const shown = lines.slice(-4)
   const lh = fontSize * 1.5
   const boxH = shown.length * lh + fontSize * 0.6
@@ -1455,6 +1535,161 @@ export function drawBroadcastLowerThird(
     ctx.textAlign = "left"
     ctx.textBaseline = "middle"
     ctx.fillText(single, textStartX, cardY + cardH * 0.5, maxTextW)
+  }
+
+  ctx.restore()
+}
+
+export type PipCorner = "top_left" | "top_right" | "bottom_left" | "bottom_right"
+
+export interface PipPhoneOverlayOptions {
+  phoneImg: HTMLImageElement | null
+  priceText: string
+  promoTag: string
+  corner: PipCorner
+  lip: LipSyncWeights
+  elapsed: number
+  hasCornerLogo?: boolean
+  hasLowerThird?: boolean
+  captionsOn?: boolean
+}
+
+/**
+ * Draws a Picture-in-Picture (PiP) featured phone showcase card with optional
+ * Promo/Installment Trust Badge and Price Pill in the chosen corner.
+ */
+export function drawPipPhoneOverlay(
+  ctx: CanvasRenderingContext2D,
+  options: PipPhoneOverlayOptions,
+  canvasW: number,
+  canvasH: number
+): void {
+  const cleanPrice = options.priceText.trim()
+  const cleanPromo = options.promoTag.trim()
+  if (!options.phoneImg && !cleanPrice && !cleanPromo) return
+
+  const isVertical = canvasH > canvasW
+  const cardW = Math.round(canvasW * (isVertical ? 0.31 : 0.25))
+  const cardH = Math.round(cardW * (options.phoneImg ? 1.24 : 0.56))
+  const marginX = Math.round(canvasW * 0.042)
+
+  const topSafeY = isVertical ? Math.round(canvasH * 0.125) : Math.round(canvasH * 0.045)
+  const logoClearanceY =
+    options.corner === "top_right" && options.hasCornerLogo
+      ? Math.max(topSafeY, Math.round(canvasW * 0.155))
+      : topSafeY
+
+  let bottomClearance = isVertical ? Math.round(canvasH * 0.23) : Math.round(canvasH * 0.05)
+  if (options.captionsOn) {
+    bottomClearance = Math.max(bottomClearance, Math.round(canvasH * (isVertical ? 0.32 : 0.2)))
+  }
+  if (options.hasLowerThird) {
+    bottomClearance += Math.round(canvasW * 0.115)
+  }
+
+  const floatY = Math.sin(options.elapsed * 2.2) * 3.5
+  const vocalPop = 1 + Math.min(0.035, options.lip.energy * 0.03)
+
+  const x =
+    options.corner === "top_left" || options.corner === "bottom_left"
+      ? marginX
+      : canvasW - marginX - cardW
+
+  const y =
+    options.corner === "top_left" || options.corner === "top_right"
+      ? logoClearanceY + floatY
+      : canvasH - bottomClearance - cardH + floatY
+
+  const cx = x + cardW / 2
+  const cy = y + cardH / 2
+  const radius = Math.round(cardW * 0.11)
+
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.scale(vocalPop, vocalPop)
+  ctx.translate(-cx, -cy)
+
+  // Dark-glass showcase card container
+  ctx.shadowColor = "rgba(0, 0, 0, 0.36)"
+  ctx.shadowBlur = 20
+  ctx.shadowOffsetY = 8
+  ctx.fillStyle = "rgba(20, 20, 24, 0.80)"
+  ctx.beginPath()
+  ctx.roundRect(x, y, cardW, cardH, radius)
+  ctx.fill()
+
+  ctx.shadowBlur = 0
+  ctx.shadowOffsetY = 0
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.20)"
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.roundRect(x, y, cardW, cardH, radius)
+  ctx.stroke()
+
+  // Featured Phone Photo (contained cleanly inside card)
+  if (options.phoneImg) {
+    const imgPadX = cardW * 0.1
+    const imgTop = cleanPromo ? cardH * 0.16 : cardH * 0.08
+    const imgBottom = cleanPrice ? cardH * 0.2 : cardH * 0.08
+    const availW = cardW - imgPadX * 2
+    const availH = Math.max(24, cardH - imgTop - imgBottom)
+    const scale = Math.min(availW / options.phoneImg.width, availH / options.phoneImg.height)
+    const drawW = options.phoneImg.width * scale
+    const drawH = options.phoneImg.height * scale
+    const drawX = x + (cardW - drawW) / 2
+    const drawY = y + imgTop + (availH - drawH) / 2
+
+    ctx.save()
+    ctx.shadowColor = "rgba(0, 0, 0, 0.4)"
+    ctx.shadowBlur = 12
+    ctx.shadowOffsetY = 4
+    ctx.drawImage(options.phoneImg, drawX, drawY, drawW, drawH)
+    ctx.restore()
+  }
+
+  // Promo / Installment / Trust Badge Pill (top)
+  if (cleanPromo) {
+    const promoFontSize = Math.max(11, Math.round(cardW * 0.072))
+    ctx.font = `700 ${promoFontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
+    const pillH = Math.round(promoFontSize * 1.65)
+    const textW = ctx.measureText(cleanPromo).width
+    const pillW = Math.min(cardW * 0.94, Math.max(cardW * 0.56, textW + promoFontSize * 1.3))
+    const pillX = x + (cardW - pillW) / 2
+    const pillY = y - pillH * 0.35
+
+    ctx.fillStyle = "#10B981"
+    ctx.beginPath()
+    ctx.roundRect(pillX, pillY, pillW, pillH, pillH / 2)
+    ctx.fill()
+
+    ctx.fillStyle = "#FFFFFF"
+    ctx.textAlign = "center"
+    ctx.textBaseline = "middle"
+    ctx.fillText(cleanPromo, pillX + pillW / 2, pillY + pillH / 2 + 0.5, pillW - 10)
+  }
+
+  // Price Pill (bottom)
+  if (cleanPrice) {
+    const priceFontSize = Math.max(12, Math.round(cardW * 0.084))
+    ctx.font = `800 ${priceFontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
+    const pillH = Math.round(priceFontSize * 1.72)
+    const textW = ctx.measureText(cleanPrice).width
+    const pillW = Math.min(cardW * 0.96, Math.max(cardW * 0.68, textW + priceFontSize * 1.4))
+    const pillX = x + (cardW - pillW) / 2
+    const pillY = y + cardH - pillH * 0.72
+
+    ctx.shadowColor = "rgba(0, 0, 0, 0.32)"
+    ctx.shadowBlur = 10
+    ctx.fillStyle = "#FACC15"
+    ctx.beginPath()
+    ctx.roundRect(pillX, pillY, pillW, pillH, pillH / 2)
+    ctx.fill()
+
+    ctx.shadowBlur = 0
+    ctx.fillStyle = "#18181B"
+    ctx.textAlign = "center"
+    ctx.textBaseline = "middle"
+    ctx.fillText(cleanPrice, pillX + pillW / 2, pillY + pillH / 2 + 0.5, pillW - 12)
   }
 
   ctx.restore()
