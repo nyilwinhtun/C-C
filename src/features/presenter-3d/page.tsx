@@ -47,6 +47,8 @@ import {
 import { revokeBlobUrlAfterDelay } from "@/lib/videoAudioMerger"
 import {
   convertImageToGlb,
+  extractForegroundCutout,
+  type ForegroundCutoutMode,
   type ImageTo3dEngine,
   type ImageTo3dFallbackReason,
   type ImageTo3dMode,
@@ -289,6 +291,10 @@ export function Presenter3DPage() {
   const [pipCorner, setPipCorner] = useState<PipCorner>("top_left")
   const pipImageRef = useRef<HTMLImageElement | null>(null)
   const [isExtracting3dPop, setIsExtracting3dPop] = useState(false)
+  const [pop3dStage, setPop3dStage] = useState<"cutting_out" | "building_foreground" | null>(null)
+  const [foregroundCutoutMode, setForegroundCutoutMode] = useState<ForegroundCutoutMode>(() =>
+    detectMobileDevice() ? "instant" : "smart"
+  )
   const characterPhotoRef = useRef<HTMLImageElement | null>(null)
   const cutoutPhotoRef = useRef<HTMLImageElement | null>(null)
   const characterPhotoUrlRef = useRef<string | null>(null)
@@ -940,7 +946,7 @@ export function Presenter3DPage() {
   }, [presenter3dPopCutoutUrl])
 
   const handleGenerate3dPopLayer = useCallback(
-    async (enableAfter = true) => {
+    async (enableAfter = true, modeOverride?: ForegroundCutoutMode) => {
       if (isRenderingRef.current || isPlayingRef.current) {
         return
       }
@@ -949,7 +955,9 @@ export function Presenter3DPage() {
         toast.error(t(language, "presenter3d.noPhotoError"))
         return
       }
-      const cachedCutout = pop3dSourceCacheRef.current.get(sourceUrl)
+      const activeCutoutMode = modeOverride ?? foregroundCutoutMode
+      const cacheKey = `${sourceUrl}::${activeCutoutMode}`
+      const cachedCutout = pop3dSourceCacheRef.current.get(cacheKey)
       if (cachedCutout) {
         setPresenter3dPopCutoutUrl(cachedCutout)
         if (enableAfter) {
@@ -959,53 +967,38 @@ export function Presenter3DPage() {
       }
       if (isExtracting3dPop) return
       setIsExtracting3dPop(true)
+      setPop3dStage("cutting_out")
       try {
-        const { removeBackground } = await import("@imgly/background-removal")
-        const res = await fetch(sourceUrl)
-        const blob = await res.blob()
-        const cutoutBlob = await removeBackground(blob)
-        const cutoutUrl = await new Promise<string>((resolve, reject) => {
-          const objUrl = URL.createObjectURL(cutoutBlob)
-          const img = new Image()
-          img.onload = () => {
-            const c = document.createElement("canvas")
-            try {
-              const max = 640
-              const k = Math.min(1, max / Math.max(img.width, img.height, 1))
-              c.width = Math.max(1, Math.round(img.width * k))
-              c.height = Math.max(1, Math.round(img.height * k))
-              c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height)
-              resolve(encodeCanvasForStorage(c))
-            } catch (e) {
-              reject(e)
-            } finally {
-              c.width = 0
-              c.height = 0
-              URL.revokeObjectURL(objUrl)
-            }
-          }
-          img.onerror = () => {
-            URL.revokeObjectURL(objUrl)
-            reject(new Error("Cutout image decode failed"))
-          }
-          img.src = objUrl
+        const mobile = detectMobileDevice()
+        const cutout = await extractForegroundCutout(sourceUrl, {
+          mode: activeCutoutMode,
+          maxDimension: mobile ? 512 : 640,
+          timeoutMs: 12_000,
+          onProgress: (p) => setPop3dStage(p.stage),
         })
-        pop3dSourceCacheRef.current.set(sourceUrl, cutoutUrl)
-        setPresenter3dPopCutoutUrl(cutoutUrl)
+        setPop3dStage("building_foreground")
+        pop3dSourceCacheRef.current.set(cacheKey, cutout.dataUrl)
+        setPresenter3dPopCutoutUrl(cutout.dataUrl)
         if (enableAfter) {
           setPresenter3dPopEnabled(true)
         }
-        toast.success(t(language, "presenter3d.pop3dSuccess"))
+        if (cutout.usedFallback) {
+          toast.info(t(language, "presenter3d.cutoutFallbackToast"))
+        } else {
+          toast.success(t(language, "presenter3d.pop3dSuccess"))
+        }
       } catch (err) {
         console.error("3D-Pop foreground extraction failed:", err)
         toast.error(t(language, "presenter3d.pop3dError"))
       } finally {
         setIsExtracting3dPop(false)
+        setPop3dStage(null)
       }
     },
     [
       photoDataUrl,
       presenterMascotDataUrl,
+      foregroundCutoutMode,
       isExtracting3dPop,
       language,
       setPresenter3dPopCutoutUrl,
@@ -1156,7 +1149,7 @@ export function Presenter3DPage() {
       return
     }
 
-    const cacheKey = `${file.name}:${file.size}:${file.lastModified}`
+    const cacheKey = `${file.name}:${file.size}:${file.lastModified}:${foregroundCutoutMode}`
     if (pipRemoveBg && pipCutoutCacheRef.current.has(cacheKey)) {
       const cachedDataUrl = pipCutoutCacheRef.current.get(cacheKey)!
       const finalImg = new Image()
@@ -1174,8 +1167,13 @@ export function Presenter3DPage() {
     if (pipRemoveBg && !isRenderingRef.current && !isPlayingRef.current) {
       setIsRemovingPipBg(true)
       try {
-        const { removeBackground } = await import("@imgly/background-removal")
-        workingBlob = await removeBackground(file)
+        const mobile = detectMobileDevice()
+        const cutout = await extractForegroundCutout(file, {
+          mode: foregroundCutoutMode,
+          maxDimension: mobile ? 512 : 640,
+          timeoutMs: 12_000,
+        })
+        workingBlob = cutout.blob
       } catch (err) {
         console.warn("PiP background removal skipped; using original image:", err)
       } finally {
@@ -1323,16 +1321,19 @@ export function Presenter3DPage() {
 
     setIsConverting3d(true)
     setConvert3dProgress({
-      stage: convert3dMode === "fast_25d" ? "generating_fast_25d" : "preparing",
+      stage: "cutting_out",
       percent: 10,
     })
 
     try {
+      const mobile = detectMobileDevice()
       const result = await convertImageToGlb(source, {
         mode: convert3dMode,
         timeoutMs: 12_000,
         hfToken,
-        removeBg: convert3dMode === "full_3d",
+        removeBg: true,
+        cutoutMode: foregroundCutoutMode,
+        maxCutoutSize: mobile ? 512 : 768,
         signal: controller.signal,
         onProgress: setConvert3dProgress,
       })
@@ -2004,7 +2005,11 @@ export function Presenter3DPage() {
               {characterKind === "photo" && isExtracting3dPop && (
                 <div className="absolute inset-0 bg-black/45 backdrop-blur-xs flex flex-col items-center justify-center gap-2 text-white text-xs font-myanmar px-4 text-center">
                   <Loader2 className="h-6 w-6 animate-spin text-amber-400" />
-                  <span>{t(language, "presenter3d.pop3dExtracting")}</span>
+                  <span>
+                    {pop3dStage === "building_foreground"
+                      ? t(language, "presenter3d.stageBuilding3d")
+                      : t(language, "presenter3d.stageCuttingOut")}
+                  </span>
                 </div>
               )}
             </div>
@@ -2270,6 +2275,44 @@ export function Presenter3DPage() {
                         </button>
                       </div>
 
+                      {/* Cutout Mode Selector: Instant Cutout (No Model) vs Smart Cutout */}
+                      <div className="space-y-1">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {(
+                            [
+                              { id: "instant", labelKey: "presenter3d.cutoutModeInstant" },
+                              { id: "smart", labelKey: "presenter3d.cutoutModeSmart" },
+                            ] as const satisfies readonly {
+                              id: ForegroundCutoutMode
+                              labelKey: string
+                            }[]
+                          ).map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              disabled={isExtracting3dPop}
+                              onClick={() => {
+                                triggerHaptic(6)
+                                setForegroundCutoutMode(opt.id)
+                              }}
+                              className={cn(
+                                "rounded-lg border py-1.5 px-1.5 text-[10px] font-semibold leading-snug text-center transition-all cursor-pointer font-myanmar disabled:opacity-50",
+                                foregroundCutoutMode === opt.id
+                                  ? "border-amber-600 dark:border-amber-400 bg-amber-500/15 text-amber-800 dark:text-amber-200"
+                                  : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#57534E] dark:text-[#A1A1AA]"
+                              )}
+                            >
+                              {t(language, opt.labelKey)}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-[#78716C] dark:text-[#A1A1AA] font-myanmar">
+                          {foregroundCutoutMode === "instant"
+                            ? t(language, "presenter3d.cutoutModeInstantHint")
+                            : t(language, "presenter3d.cutoutModeSmartHint")}
+                        </p>
+                      </div>
+
                       <div className="flex items-center justify-between gap-2">
                         <Button
                           type="button"
@@ -2282,7 +2325,11 @@ export function Presenter3DPage() {
                           {isExtracting3dPop ? (
                             <>
                               <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin text-amber-600" />
-                              <span>{t(language, "presenter3d.pop3dExtracting")}</span>
+                              <span>
+                                {pop3dStage === "building_foreground"
+                                  ? t(language, "presenter3d.stageBuilding3d")
+                                  : t(language, "presenter3d.stageCuttingOut")}
+                              </span>
                             </>
                           ) : (
                             <>
@@ -2557,6 +2604,44 @@ export function Presenter3DPage() {
                       </p>
                     </div>
 
+                    {/* Foreground Cutout Mode: Instant Cutout (No Model) vs Smart Cutout */}
+                    <div className="space-y-1">
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {(
+                          [
+                            { id: "instant", labelKey: "presenter3d.cutoutModeInstant" },
+                            { id: "smart", labelKey: "presenter3d.cutoutModeSmart" },
+                          ] as const satisfies readonly {
+                            id: ForegroundCutoutMode
+                            labelKey: string
+                          }[]
+                        ).map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            disabled={isConverting3d}
+                            onClick={() => {
+                              triggerHaptic(6)
+                              setForegroundCutoutMode(opt.id)
+                            }}
+                            className={cn(
+                              "rounded-xl border py-1.5 px-2 text-[10px] font-semibold leading-snug text-center transition-all cursor-pointer font-myanmar disabled:opacity-50",
+                              foregroundCutoutMode === opt.id
+                                ? "border-amber-600 dark:border-amber-400 bg-amber-500/15 text-amber-800 dark:text-amber-200"
+                                : "border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
+                            )}
+                          >
+                            {t(language, opt.labelKey)}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-[#78716C] dark:text-[#A1A1AA] font-myanmar">
+                        {foregroundCutoutMode === "instant"
+                          ? t(language, "presenter3d.cutoutModeInstantHint")
+                          : t(language, "presenter3d.cutoutModeSmartHint")}
+                      </p>
+                    </div>
+
                     <FileDropzone
                       accept={[".jpg", ".jpeg", ".png", ".webp"]}
                       onFiles={(f) => handleSelectConverterImage(f[0])}
@@ -2658,17 +2743,18 @@ export function Presenter3DPage() {
                         <>
                           <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
                           <span>
-                            {convert3dProgress?.stage === "generating_fast_25d"
-                              ? t(language, "presenter3d.img3dProgressFast25d")
-                              : convert3dProgress?.stage === "fallback_fast"
-                                ? t(language, "presenter3d.img3dProgressFallback")
-                                : convert3dProgress?.stage === "preparing"
-                                  ? t(language, "presenter3d.img3dProgressPreparing")
-                                  : convert3dProgress?.stage === "generating_local"
-                                    ? t(language, "presenter3d.img3dProgressLocal")
-                                    : convert3dProgress?.stage === "ready"
-                                      ? t(language, "presenter3d.img3dProgressReady")
-                                      : t(language, "presenter3d.img3dProgressGenerating")}
+                            {convert3dProgress?.stage === "cutting_out" ||
+                            convert3dProgress?.stage === "preparing"
+                              ? t(language, "presenter3d.stageCuttingOut")
+                              : convert3dProgress?.stage === "building_foreground" ||
+                                  convert3dProgress?.stage === "generating_fast_25d" ||
+                                  convert3dProgress?.stage === "generating_local"
+                                ? t(language, "presenter3d.stageBuilding3d")
+                                : convert3dProgress?.stage === "fallback_fast"
+                                  ? t(language, "presenter3d.img3dProgressFallback")
+                                  : convert3dProgress?.stage === "ready"
+                                    ? t(language, "presenter3d.img3dProgressReady")
+                                    : t(language, "presenter3d.img3dProgressGenerating")}
                           </span>
                         </>
                       ) : (
