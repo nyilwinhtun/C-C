@@ -174,61 +174,351 @@ export type PresenterStudioSet =
 
 export type Presenter3dPopMotionPreset = "orbit_sway" | "slow_push" | "vocal_bounce"
 
+export type MascotPosition = "left" | "center" | "right"
+
+export type StudioLightingPreset = "natural" | "warm_studio" | "crisp_daylight"
+
 export interface MascotCutoutFrameOptions {
   framing?: "upper_body" | "close_up"
+  position?: MascotPosition
+  hasShowcaseCard?: boolean
+  talkingImg?: HTMLImageElement | null
+  talkingBlend?: number
+  lighting?: StudioLightingPreset
+  lowPower?: boolean
+}
+
+export function getStudioLightingCssFilter(preset: StudioLightingPreset): string {
+  switch (preset) {
+    case "warm_studio":
+      return "brightness(1.03) contrast(1.04) saturate(1.06) sepia(0.11)"
+    case "crisp_daylight":
+      return "brightness(1.05) contrast(1.06) saturate(1.04) hue-rotate(-4deg)"
+    case "natural":
+    default:
+      return "none"
+  }
+}
+
+/**
+ * Draws a subtle studio lighting atmospheric tint over the stage backdrop so the
+ * mascot cutout and backdrop share cohesive lighting in both preview and export.
+ */
+export function drawStudioLightingAtmosphere(
+  ctx: CanvasRenderingContext2D,
+  canvasW: number,
+  canvasH: number,
+  preset: StudioLightingPreset
+): void {
+  if (preset === "natural") return
+  ctx.save()
+  if (preset === "warm_studio") {
+    const grad = ctx.createRadialGradient(
+      canvasW * 0.5,
+      canvasH * 0.25,
+      canvasW * 0.08,
+      canvasW * 0.5,
+      canvasH * 0.5,
+      canvasH * 0.85
+    )
+    grad.addColorStop(0, "rgba(255, 232, 196, 0.10)")
+    grad.addColorStop(1, "rgba(180, 120, 60, 0.05)")
+    ctx.fillStyle = grad
+    ctx.fillRect(0, 0, canvasW, canvasH)
+  } else if (preset === "crisp_daylight") {
+    const grad = ctx.createRadialGradient(
+      canvasW * 0.5,
+      canvasH * 0.2,
+      canvasW * 0.08,
+      canvasW * 0.5,
+      canvasH * 0.5,
+      canvasH * 0.85
+    )
+    grad.addColorStop(0, "rgba(224, 242, 254, 0.10)")
+    grad.addColorStop(1, "rgba(186, 230, 253, 0.04)")
+    ctx.fillStyle = grad
+    ctx.fillRect(0, 0, canvasW, canvasH)
+  }
+  ctx.restore()
+}
+
+export interface ShowcaseCardOptions {
+  side: "left" | "right"
+  /** Seconds elapsed since the card appeared or playback/render started */
+  entranceElapsed: number
+  elapsed: number
+  lip: LipSyncWeights
+  hasLowerThird?: boolean
+  captionsOn?: boolean
+  lighting?: StudioLightingPreset
   lowPower?: boolean
 }
 
 /**
- * Draws the glowing reactive audio spectrum bar beneath the 2D Mascot stage.
+ * Draws a sleek side-by-side Product / Slide Showcase Card on the opposite side of the mascot
+ * with rounded frame, subtle drop shadow, and smooth fade/slide entrance.
  */
-function drawAudioSpectrumBar(
+export function drawShowcaseCard(
+  ctx: CanvasRenderingContext2D,
+  mediaImg: HTMLImageElement,
+  canvasW: number,
+  canvasH: number,
+  options: ShowcaseCardOptions
+): void {
+  const isVertical = canvasH > canvasW
+  const lowPower = Boolean(options.lowPower)
+  const entranceDuration = 0.48
+  const rawProgress = clamp01(options.entranceElapsed / entranceDuration)
+  // Smooth easeOutCubic entrance
+  const eased = 1 - Math.pow(1 - rawProgress, 3)
+
+  const marginX = canvasW * 0.045
+  const cardW = canvasW * (isVertical ? 0.455 : 0.44)
+  const srcW = mediaImg.naturalWidth || mediaImg.width || 1
+  const srcH = mediaImg.naturalHeight || mediaImg.height || 1
+  const imgAspect = srcW / srcH
+
+  // Constrain card height nicely to avoid colliding with lower-third / captions
+  const maxCardH = canvasH * (isVertical ? 0.44 : 0.62)
+  const minCardH = canvasW * 0.34
+  const idealH = cardW / Math.max(0.55, Math.min(1.65, imgAspect))
+  const cardH = Math.max(minCardH, Math.min(maxCardH, idealH))
+
+  const baseX = options.side === "left" ? marginX : canvasW - marginX - cardW
+  const slideDist = canvasW * 0.055 * (1 - eased)
+  const cardX = options.side === "left" ? baseX - slideDist : baseX + slideDist
+
+  const topSafe = isVertical ? canvasH * 0.14 : canvasH * 0.10
+  let bottomSafe = isVertical ? canvasH * 0.24 : canvasH * 0.14
+  if (options.captionsOn) {
+    bottomSafe = Math.max(bottomSafe, canvasH * (isVertical ? 0.32 : 0.24))
+  }
+  if (options.hasLowerThird) {
+    bottomSafe += canvasW * 0.09
+  }
+  const availH = Math.max(cardH, canvasH - topSafe - bottomSafe)
+  const floatY = Math.sin(options.elapsed * 1.55 + 0.8) * (canvasH * 0.0035)
+  const cardY = topSafe + (availH - cardH) * 0.46 + floatY
+
+  const radius = Math.round(Math.min(cardW, cardH) * 0.085)
+  const framePad = Math.max(5, Math.round(cardW * 0.032))
+  const innerR = Math.max(4, radius - Math.round(framePad * 0.55))
+
+  ctx.save()
+  ctx.globalAlpha = eased
+
+  // Subtle drop shadow
+  if (!lowPower) {
+    ctx.shadowColor = "rgba(15, 15, 18, 0.28)"
+    ctx.shadowBlur = 24
+    ctx.shadowOffsetX = 0
+    ctx.shadowOffsetY = 10
+  } else {
+    ctx.shadowColor = "rgba(15, 15, 18, 0.18)"
+    ctx.shadowBlur = 10
+    ctx.shadowOffsetX = 0
+    ctx.shadowOffsetY = 5
+  }
+
+  // Crisp editorial card frame
+  ctx.fillStyle = "rgba(255, 255, 255, 0.94)"
+  ctx.beginPath()
+  ctx.roundRect(cardX, cardY, cardW, cardH, radius)
+  ctx.fill()
+
+  ctx.shadowBlur = 0
+  ctx.shadowOffsetY = 0
+
+  // Subtle hairline border
+  ctx.strokeStyle = "rgba(24, 24, 27, 0.12)"
+  ctx.lineWidth = 1.25
+  ctx.beginPath()
+  ctx.roundRect(cardX, cardY, cardW, cardH, radius)
+  ctx.stroke()
+
+  // Clipped inner media area (cover/contain cleanly without distortion)
+  const innerX = cardX + framePad
+  const innerY = cardY + framePad
+  const innerW = Math.max(10, cardW - framePad * 2)
+  const innerH = Math.max(10, cardH - framePad * 2)
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.roundRect(innerX, innerY, innerW, innerH, innerR)
+  ctx.clip()
+
+  ctx.fillStyle = "#F4F4F5"
+  ctx.fillRect(innerX, innerY, innerW, innerH)
+
+  // Use contain if extreme aspect ratio, otherwise gentle cover
+  const boxAspect = innerW / innerH
+  const aspectDiff = Math.abs(imgAspect - boxAspect) / Math.max(imgAspect, boxAspect)
+  const scale =
+    aspectDiff > 0.35
+      ? Math.min(innerW / srcW, innerH / srcH)
+      : Math.max(innerW / srcW, innerH / srcH)
+  const drawW = srcW * scale
+  const drawH = srcH * scale
+  const drawX = innerX + (innerW - drawW) / 2
+  const drawY = innerY + (innerH - drawH) / 2
+
+  const filterCss = options.lighting ? getStudioLightingCssFilter(options.lighting) : "none"
+  if (filterCss !== "none") {
+    ctx.filter = filterCss
+  }
+  ctx.drawImage(mediaImg, drawX, drawY, drawW, drawH)
+  ctx.filter = "none"
+  ctx.restore()
+
+  ctx.restore()
+}
+
+/**
+ * Draws a subtle damped Audio Waveform Bar along the bottom edge of the stage
+ * in a clean Matte Charcoal & Crisp White editorial aesthetic.
+ */
+export function drawBottomAudioWaveformBar(
   ctx: CanvasRenderingContext2D,
   canvasW: number,
   canvasH: number,
   lip: LipSyncWeights,
   elapsed: number,
-  lowPower = false
+  smoothedBars: Float32Array,
+  delta: number
 ): void {
-  const energy = Math.min(1, Math.max(0, lip.energy))
-  const bars = 28
-  const barAreaX = canvasW * 0.12
-  const barAreaW = canvasW * 0.76
-  const baseY = canvasH * 0.80
-  const maxH = canvasH * 0.06
-  const step = barAreaW / bars
+  const barCount = smoothedBars.length
+  if (barCount === 0) return
+
+  const energy = clamp01(lip.energy)
+  const marginX = Math.round(canvasW * 0.06)
+  const trackW = canvasW - marginX * 2
+  const barMaxH = Math.max(10, Math.round(canvasH * 0.026))
+  const barMinH = Math.max(2.5, Math.round(canvasH * 0.0038))
+  const bottomEdgeY = canvasH - Math.max(10, Math.round(canvasH * 0.016))
+  const railH = barMaxH + 10
+  const railY = bottomEdgeY - railH
+
+  // Damped temporal smoothing per bar
+  const attack = 1 - Math.exp(-16 * delta)
+  const release = 1 - Math.exp(-7 * delta)
+
   ctx.save()
-  if (!lowPower) {
-    ctx.shadowColor = "rgba(251,191,36,0.85)"
-    ctx.shadowBlur = 10 + energy * 14
-  }
-  for (let i = 0; i < bars; i++) {
-    const t = i / (bars - 1)
+
+  // Subtle matte charcoal frosted rail at bottom edge
+  ctx.fillStyle = "rgba(24, 24, 27, 0.52)"
+  ctx.beginPath()
+  ctx.roundRect(marginX - 8, railY, trackW + 16, railH, railH / 2)
+  ctx.fill()
+
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.10)"
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.roundRect(marginX - 8, railY, trackW + 16, railH, railH / 2)
+  ctx.stroke()
+
+  const step = trackW / barCount
+  const barW = Math.max(2, step * 0.48)
+  const centerY = railY + railH / 2
+
+  for (let i = 0; i < barCount; i++) {
+    const t = i / Math.max(1, barCount - 1)
     const band = t < 0.34 ? lip.aa : t < 0.67 ? lip.oh : lip.ee
+    const envelope = Math.sin(Math.PI * t) * 0.55 + 0.45
     const wave =
-      0.5 + 0.5 * Math.sin(elapsed * 7 + i * 0.9) * Math.cos(elapsed * 3.1 + i * 0.37)
-    const env = Math.sin(Math.PI * t) * 0.35 + 0.65
-    const h = Math.max(
-      canvasH * 0.0035,
-      maxH * (0.06 + (energy * 0.55 + band * 0.45) * wave * env)
-    )
-    const grad = ctx.createLinearGradient(0, baseY - h, 0, baseY + h)
-    grad.addColorStop(0, "#fde68a")
-    grad.addColorStop(1, "#f59e0b")
-    ctx.fillStyle = grad
+      0.5 + 0.5 * Math.sin(elapsed * 5.6 + i * 0.72) * Math.cos(elapsed * 2.4 + i * 0.29)
+    const target = clamp01((energy * 0.58 + band * 0.42) * wave * envelope)
+
+    const prev = smoothedBars[i]
+    const next = prev + (target - prev) * (target > prev ? attack : release)
+    smoothedBars[i] = next
+
+    const h = barMinH + (barMaxH - barMinH) * next
+    const x = marginX + i * step + (step - barW) / 2
+    const alpha = 0.38 + next * 0.62
+
+    ctx.fillStyle = `rgba(255, 255, 255, ${alpha.toFixed(2)})`
     ctx.beginPath()
-    ctx.roundRect(barAreaX + i * step + step * 0.18, baseY - h, step * 0.64, h * 2, step * 0.32)
+    ctx.roundRect(x, centerY - h / 2, barW, h, barW / 2)
     ctx.fill()
   }
+
   ctx.restore()
 }
 
 /**
+ * Helper to draw a mascot cutout image with optional 3-slice vocal mouth articulation.
+ */
+function drawCutoutImageLayer(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  px: number,
+  py: number,
+  pw: number,
+  ph: number,
+  mouthOpen: number,
+  mouthSpread: number,
+  useArticulation: boolean
+): void {
+  const srcW = img.naturalWidth || img.width || 1
+  const srcH = img.naturalHeight || img.height || 1
+
+  if (!useArticulation || (mouthOpen <= 0.01 && mouthSpread <= 0.01)) {
+    ctx.drawImage(img, px, py, pw, ph)
+    return
+  }
+
+  const splitTop = 0.44
+  const splitBot = 0.60
+  const sTopH = srcH * splitTop
+  const sMidH = srcH * (splitBot - splitTop)
+  const sBotH = srcH - sTopH - sMidH
+
+  const dTopH = ph * splitTop
+  const jawDropPx = ph * 0.024 * mouthOpen
+  const dMidH = ph * (splitBot - splitTop) + jawDropPx
+  const dBotH = ph * (1 - splitBot)
+  const midSpreadPx = pw * 0.012 * mouthSpread
+
+  // 1. Upper head (crisp, anchored)
+  ctx.drawImage(img, 0, 0, srcW, sTopH + 1, px, py, pw, dTopH + 1)
+
+  // 2. Mouth band (subtle vertical vocal openness + horizontal spread)
+  ctx.shadowBlur = 0
+  ctx.shadowOffsetY = 0
+  ctx.drawImage(
+    img,
+    0,
+    sTopH,
+    srcW,
+    sMidH + 1,
+    px - midSpreadPx / 2,
+    py + dTopH,
+    pw + midSpreadPx,
+    dMidH + 1
+  )
+
+  // 3. Lower chin & body (follows jaw drop cleanly)
+  ctx.drawImage(
+    img,
+    0,
+    sTopH + sMidH,
+    srcW,
+    sBotH,
+    px,
+    py + dTopH + dMidH,
+    pw,
+    dBotH
+  )
+}
+
+/**
  * Draws a crisp transparent 2D Mascot Cutout directly onto the stage backdrop with:
+ * - Left / Center / Right stage positioning (for side-by-side product showcase)
+ * - Optional 2-state expression swap (Idle vs. Talking/Expressive cutout)
  * - Subtle idle breathing & floating motion
  * - Gentle expressive tilt & bounce when speaking
  * - Seamless audio-reactive lower-face / mouth-zone lip-sync articulation
- * - Reactive audio equalizer bar beneath the mascot
+ * - Lightweight Canvas lighting filter presets
  */
 export function drawMascotCutoutFrame(
   ctx: CanvasRenderingContext2D,
@@ -241,35 +531,50 @@ export function drawMascotCutoutFrame(
 ): void {
   const lowPower = Boolean(options?.lowPower)
   const isCloseUp = options?.framing === "close_up"
+  const position: MascotPosition = options?.position ?? "center"
+  const hasShowcase = Boolean(options?.hasShowcaseCard) && position !== "center"
+  const talkingImg = options?.talkingImg ?? null
+  const talkingBlend = clamp01(options?.talkingBlend ?? 0)
+  const lighting: StudioLightingPreset = options?.lighting ?? "natural"
+
   const energy = clamp01(lip.energy)
   const mouthOpen = clamp01(lip.aa * 0.85 + lip.oh * 0.45)
   const mouthSpread = clamp01(lip.ee * 0.75 + lip.ih * 0.35)
 
-  // Fit cutout directly on stage backdrop
-  const areaX = canvasW * 0.06
-  const areaY = canvasH * (isCloseUp ? 0.05 : 0.08)
-  const areaW = canvasW * 0.88
+  // Stage placement box based on Left / Center / Right position
+  let areaX = canvasW * 0.06
+  let areaW = canvasW * 0.88
+  if (position === "left") {
+    areaX = canvasW * 0.02
+    areaW = canvasW * (hasShowcase ? 0.50 : 0.56)
+  } else if (position === "right") {
+    areaW = canvasW * (hasShowcase ? 0.50 : 0.56)
+    areaX = canvasW - areaW - canvasW * 0.02
+  }
+
+  const areaY = canvasH * (isCloseUp ? 0.06 : 0.09)
   const areaH = canvasH * (isCloseUp ? 0.72 : 0.66)
 
   const srcW = cutoutImg.naturalWidth || cutoutImg.width || 1
   const srcH = cutoutImg.naturalHeight || cutoutImg.height || 1
-  const fit = Math.min(areaW / srcW, areaH / srcH) * (isCloseUp ? 1.14 : 1.0)
+  const fitScale = isCloseUp ? 1.12 : 1.0
+  const fit = Math.min(areaW / srcW, areaH / srcH) * fitScale
   const pw = srcW * fit
   const ph = srcH * fit
   const px = areaX + (areaW - pw) / 2
 
   // Subtle breathing, floating motion & vocal bounce
   const breathe = Math.sin(elapsed * 1.6)
-  const floatY = breathe * (canvasH * 0.0055) - energy * (canvasH * 0.0095)
+  const floatY = breathe * (canvasH * 0.005) - energy * (canvasH * 0.009)
   const py = areaY + (areaH - ph) / 2 + floatY + (isCloseUp ? canvasH * 0.04 : 0)
 
   // Gentle tilt when speaking + subtle idle sway
-  const speakingTilt = Math.sin(elapsed * 3.4) * energy * 0.032
-  const idleSway = Math.sin(elapsed * 0.95) * 0.011
+  const speakingTilt = Math.sin(elapsed * 3.4) * energy * 0.03
+  const idleSway = Math.sin(elapsed * 0.95) * 0.01
   const tiltRad = speakingTilt + idleSway
 
-  const scaleX = 1 + breathe * 0.003 + energy * 0.014 + mouthSpread * 0.012
-  const scaleY = 1 + breathe * 0.005 + energy * 0.022
+  const scaleX = 1 + breathe * 0.003 + energy * 0.013 + mouthSpread * 0.01
+  const scaleY = 1 + breathe * 0.005 + energy * 0.02
 
   const pivotX = px + pw / 2
   const pivotY = py + ph * 0.78
@@ -280,75 +585,59 @@ export function drawMascotCutoutFrame(
   ctx.scale(scaleX, scaleY)
   ctx.translate(-pivotX, -pivotY)
 
-  // Soft stage contact drop-shadow & subtle speaking rim glow
+  const filterCss = getStudioLightingCssFilter(lighting)
+  if (filterCss !== "none") {
+    ctx.filter = filterCss
+  }
+
+  // Soft stage contact drop-shadow (skips expensive extra pass on lowPower)
   if (!lowPower) {
-    ctx.save()
-    ctx.shadowColor = `rgba(253, 230, 138, ${(0.22 + energy * 0.38).toFixed(2)})`
-    ctx.shadowBlur = 12 + energy * 18
+    ctx.shadowColor = "rgba(0, 0, 0, 0.26)"
+    ctx.shadowBlur = 20
     ctx.shadowOffsetX = 0
-    ctx.shadowOffsetY = -2
-    ctx.drawImage(cutoutImg, px, py, pw, ph)
+    ctx.shadowOffsetY = 11
+  }
+
+  const useTalkingSwap = Boolean(talkingImg) && talkingBlend > 0.02
+
+  if (!useTalkingSwap) {
+    // Single idle pose with subtle 3-slice mouth articulation
+    drawCutoutImageLayer(ctx, cutoutImg, px, py, pw, ph, mouthOpen, mouthSpread, true)
+  } else if (talkingImg && talkingBlend >= 0.96) {
+    // Full talking/expressive cutout anchored to same center-bottom as idle cutout
+    const tSrcW = talkingImg.naturalWidth || talkingImg.width || srcW
+    const tSrcH = talkingImg.naturalHeight || talkingImg.height || srcH
+    const tFit = Math.min(areaW / tSrcW, areaH / tSrcH) * fitScale
+    const tw = tSrcW * tFit
+    const th = tSrcH * tFit
+    const tx = px + (pw - tw) / 2
+    const ty = py + (ph - th)
+    drawCutoutImageLayer(ctx, talkingImg, tx, ty, tw, th, mouthOpen * 0.25, mouthSpread * 0.25, false)
+  } else if (talkingImg) {
+    // Smooth crossfade between Idle and Talking cutout
+    const tSrcW = talkingImg.naturalWidth || talkingImg.width || srcW
+    const tSrcH = talkingImg.naturalHeight || talkingImg.height || srcH
+    const tFit = Math.min(areaW / tSrcW, areaH / tSrcH) * fitScale
+    const tw = tSrcW * tFit
+    const th = tSrcH * tFit
+    const tx = px + (pw - tw) / 2
+    const ty = py + (ph - th)
+
+    ctx.save()
+    ctx.globalAlpha = 1 - talkingBlend
+    drawCutoutImageLayer(ctx, cutoutImg, px, py, pw, ph, mouthOpen * 0.4, mouthSpread * 0.4, false)
     ctx.restore()
 
-    ctx.shadowColor = "rgba(0, 0, 0, 0.28)"
-    ctx.shadowBlur = 22
-    ctx.shadowOffsetX = 0
-    ctx.shadowOffsetY = 12
-  }
-
-  // Seamless 3-slice audio-reactive lip-sync articulation:
-  // When silent (mouthOpen <= 0.01), draw full crisp image in 1 pass.
-  // When speaking, subtly articulate the lower-face / mouth band without tearing.
-  if (mouthOpen <= 0.01 && mouthSpread <= 0.01) {
-    ctx.drawImage(cutoutImg, px, py, pw, ph)
-  } else {
-    const splitTop = 0.44
-    const splitBot = 0.60
-    const sTopH = srcH * splitTop
-    const sMidH = srcH * (splitBot - splitTop)
-    const sBotH = srcH - sTopH - sMidH
-
-    const dTopH = ph * splitTop
-    const jawDropPx = ph * 0.024 * mouthOpen
-    const dMidH = ph * (splitBot - splitTop) + jawDropPx
-    const dBotH = ph * (1 - splitBot)
-    const midSpreadPx = pw * 0.012 * mouthSpread
-
-    // 1. Upper head (crisp, anchored)
-    ctx.drawImage(cutoutImg, 0, 0, srcW, sTopH + 1, px, py, pw, dTopH + 1)
-
-    // 2. Mouth band (subtle vertical vocal openness + horizontal spread)
+    ctx.save()
+    ctx.globalAlpha = talkingBlend
     ctx.shadowBlur = 0
     ctx.shadowOffsetY = 0
-    ctx.drawImage(
-      cutoutImg,
-      0,
-      sTopH,
-      srcW,
-      sMidH + 1,
-      px - midSpreadPx / 2,
-      py + dTopH,
-      pw + midSpreadPx,
-      dMidH + 1
-    )
-
-    // 3. Lower chin & body (follows jaw drop cleanly)
-    ctx.drawImage(
-      cutoutImg,
-      0,
-      sTopH + sMidH,
-      srcW,
-      sBotH,
-      px,
-      py + dTopH + dMidH,
-      pw,
-      dBotH
-    )
+    drawCutoutImageLayer(ctx, talkingImg, tx, ty, tw, th, 0, 0, false)
+    ctx.restore()
   }
 
+  ctx.filter = "none"
   ctx.restore()
-
-  drawAudioSpectrumBar(ctx, canvasW, canvasH, lip, elapsed, lowPower)
 }
 
 export type CaptionStyle = "classic" | "dynamic_pop"
@@ -521,12 +810,13 @@ export interface BroadcastLowerThirdOptions {
   lip: LipSyncWeights
   elapsed: number
   captionsOn: boolean
+  hasBottomVisualizer?: boolean
   lowPower?: boolean
 }
 
 /**
- * Draws a sleek TV-style glassmorphic/warm-charcoal lower-third nameplate above captions
- * with mini shop logo, presenter & shop name, and a compact 5-bar reactive audio equalizer.
+ * Draws a minimalist editorial Lower-Third Title/Shop Badge (Matte Charcoal & Crisp White)
+ * with optional mini shop logo and crisp typographic hierarchy.
  */
 export function drawBroadcastLowerThird(
   ctx: CanvasRenderingContext2D,
@@ -538,46 +828,68 @@ export function drawBroadcastLowerThird(
   const cleanShop = options.shopName.trim()
   if (!cleanPresenter && !cleanShop) return
 
-  const marginX = Math.round(canvasW * 0.045)
-  const cardW = canvasW - marginX * 2
-  const cardH = Math.round(canvasW * 0.105)
-  const bottomOffset = options.captionsOn ? canvasH * 0.18 : canvasH * 0.045
+  const marginX = Math.round(canvasW * 0.048)
+  const maxCardW = canvasW - marginX * 2
+  const cardH = Math.round(canvasW * 0.098)
+  const visualizerClearance = options.hasBottomVisualizer ? canvasH * 0.046 : 0
+  const bottomOffset = options.captionsOn
+    ? canvasH * 0.18 + visualizerClearance * 0.4
+    : canvasH * 0.036 + visualizerClearance
   const cardX = marginX
   const cardY = Math.round(canvasH - cardH - bottomOffset)
   const radius = Math.round(cardH * 0.24)
 
+  const titleFontSize = Math.max(12, Math.round(cardH * 0.31))
+  const subFontSize = Math.max(10, Math.round(cardH * 0.22))
+
   ctx.save()
+
+  // Measure content so the editorial badge hugs the text cleanly (capped to maxCardW)
+  ctx.font = `700 ${titleFontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
+  const titleW = cleanPresenter ? ctx.measureText(cleanPresenter).width : 0
+  ctx.font = `500 ${subFontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
+  const subW = cleanShop ? ctx.measureText(cleanShop).width : 0
+
+  const thumbSize = options.logoImg ? Math.round(cardH * 0.64) : 0
+  const leftChrome = 24 + (options.logoImg ? thumbSize + 12 : 0)
+  const rightPad = 20
+  const contentW = Math.max(titleW, subW)
+  const cardW = Math.min(maxCardW, Math.max(canvasW * 0.44, Math.ceil(leftChrome + contentW + rightPad)))
+
   if (!options.lowPower) {
-    ctx.shadowColor = "rgba(0, 0, 0, 0.32)"
-    ctx.shadowBlur = 18
+    ctx.shadowColor = "rgba(0, 0, 0, 0.26)"
+    ctx.shadowBlur = 16
+    ctx.shadowOffsetY = 6
   }
-  ctx.fillStyle = "rgba(24, 24, 27, 0.84)"
+  // Matte Charcoal pill background
+  ctx.fillStyle = "rgba(24, 24, 27, 0.90)"
   ctx.beginPath()
   ctx.roundRect(cardX, cardY, cardW, cardH, radius)
   ctx.fill()
 
   ctx.shadowBlur = 0
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.14)"
-  ctx.lineWidth = 1.5
+  ctx.shadowOffsetY = 0
+  // Crisp hairline border
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.16)"
+  ctx.lineWidth = 1.25
   ctx.beginPath()
   ctx.roundRect(cardX, cardY, cardW, cardH, radius)
   ctx.stroke()
 
-  // Warm amber left accent strip
-  const accentW = Math.max(4, Math.round(cardH * 0.07))
-  ctx.fillStyle = "#f59e0b"
+  // Crisp White editorial left accent bar
+  const accentW = Math.max(3, Math.round(cardH * 0.055))
+  ctx.fillStyle = "#FFFFFF"
   ctx.beginPath()
-  ctx.roundRect(cardX + 10, cardY + 12, accentW, cardH - 24, accentW / 2)
+  ctx.roundRect(cardX + 10, cardY + Math.round(cardH * 0.22), accentW, Math.round(cardH * 0.56), accentW / 2)
   ctx.fill()
 
-  let textStartX = cardX + 24
+  let textStartX = cardX + 22
 
   if (options.logoImg) {
-    const thumbSize = Math.round(cardH * 0.66)
     const thumbX = textStartX
     const thumbY = cardY + Math.round((cardH - thumbSize) / 2)
     ctx.save()
-    ctx.fillStyle = "#faf8f5"
+    ctx.fillStyle = "#FFFFFF"
     ctx.beginPath()
     ctx.arc(thumbX + thumbSize / 2, thumbY + thumbSize / 2, thumbSize / 2 + 1.5, 0, Math.PI * 2)
     ctx.fill()
@@ -586,54 +898,24 @@ export function drawBroadcastLowerThird(
     ctx.clip()
     ctx.drawImage(options.logoImg, thumbX, thumbY, thumbSize, thumbSize)
     ctx.restore()
-    textStartX = thumbX + thumbSize + 14
+    textStartX = thumbX + thumbSize + 12
   }
 
-  // Compact 5-bar reactive audio equalizer on the right
-  const eqBarCount = 5
-  const eqBarW = Math.max(4, Math.round(cardH * 0.065))
-  const eqGap = Math.max(3, Math.round(eqBarW * 0.7))
-  const eqTotalW = eqBarCount * eqBarW + (eqBarCount - 1) * eqGap
-  const eqX = cardX + cardW - 18 - eqTotalW
-  const eqMaxH = cardH * 0.52
-  const eqBaseY = cardY + cardH * 0.76
-  const bands = [
-    options.lip.aa,
-    options.lip.oh,
-    options.lip.energy,
-    options.lip.ee,
-    options.lip.ih,
-  ]
-
-  for (let i = 0; i < eqBarCount; i++) {
-    const wave = 0.45 + 0.55 * Math.abs(Math.sin(options.elapsed * 8.5 + i * 1.15))
-    const val = clamp01(0.18 + (bands[i] * 0.72 + options.lip.energy * 0.28) * wave)
-    const barH = Math.max(eqBarW, eqMaxH * val)
-    const bx = eqX + i * (eqBarW + eqGap)
-    const by = eqBaseY - barH
-    ctx.fillStyle = i === 2 ? "#fbbf24" : "#fde68a"
-    ctx.beginPath()
-    ctx.roundRect(bx, by, eqBarW, barH, eqBarW / 2)
-    ctx.fill()
-  }
-
-  const maxTextW = Math.max(60, eqX - textStartX - 14)
-  const titleFontSize = Math.round(cardH * 0.31)
-  const subFontSize = Math.round(cardH * 0.24)
+  const maxTextW = Math.max(60, cardX + cardW - textStartX - rightPad + 4)
 
   if (cleanPresenter && cleanShop) {
-    ctx.fillStyle = "#faf8f5"
+    ctx.fillStyle = "#FFFFFF"
     ctx.font = `700 ${titleFontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
     ctx.textAlign = "left"
     ctx.textBaseline = "middle"
     ctx.fillText(cleanPresenter, textStartX, cardY + cardH * 0.36, maxTextW)
 
-    ctx.fillStyle = "#fde68a"
-    ctx.font = `600 ${subFontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
+    ctx.fillStyle = "rgba(244, 244, 245, 0.78)"
+    ctx.font = `500 ${subFontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
     ctx.fillText(cleanShop, textStartX, cardY + cardH * 0.69, maxTextW)
   } else {
     const single = cleanPresenter || cleanShop
-    ctx.fillStyle = "#faf8f5"
+    ctx.fillStyle = "#FFFFFF"
     ctx.font = `700 ${titleFontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
     ctx.textAlign = "left"
     ctx.textBaseline = "middle"

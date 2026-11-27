@@ -43,15 +43,20 @@ import {
 } from "@/lib/mascotCutout"
 import {
   createLipSyncAnalyzer,
+  drawBottomAudioWaveformBar,
   drawBroadcastLowerThird,
   drawCaptionBar,
   drawCornerLogoWatermark,
   drawMascotCutoutFrame,
   drawPipPhoneOverlay,
+  drawShowcaseCard,
+  drawStudioLightingAtmosphere,
   type CaptionStyle,
   type LipSyncAnalyzer,
+  type MascotPosition,
   type PipCorner,
   type PresenterStudioSet,
+  type StudioLightingPreset,
 } from "@/lib/vrmLipSync"
 
 type AspectPreset = "9:16" | "1:1"
@@ -213,6 +218,10 @@ export function Presenter3DPage() {
   const [foregroundCutoutMode, setForegroundCutoutMode] = useState<ForegroundCutoutMode>(() =>
     isMobileViewport() ? "instant" : "smart"
   )
+  // Optional 2-State Expression Swap (Talking / Expressive Pose cutout)
+  const [talkingCutoutUrl, setTalkingCutoutUrl] = useState<string | null>(null)
+  const [talkingPhotoName, setTalkingPhotoName] = useState("")
+  const [isExtractingTalkingCutout, setIsExtractingTalkingCutout] = useState(false)
 
   // Captions, Safe Zone, and PiP state
   const [captionsOn, setCaptionsOn] = useState(false)
@@ -233,6 +242,11 @@ export function Presenter3DPage() {
     isMobileViewport() ? "mobile_fast" : "studio_hd"
   )
   const [framing, setFraming] = useState<FramingPreset>("upper_body")
+  const [mascotPosition, setMascotPosition] = useState<MascotPosition>("center")
+  const [showcaseImageUrl, setShowcaseImageUrl] = useState<string | null>(null)
+  const [dynamicCameraZoom, setDynamicCameraZoom] = useState(true)
+  const [studioLighting, setStudioLighting] = useState<StudioLightingPreset>("natural")
+  const [showAudioVisualizer, setShowAudioVisualizer] = useState(true)
   const [solidColor, setSolidColor] = useState("#F5EFE6")
   const [photoBlurRadius, setPhotoBlurRadius] = useState(14)
   const [badgeText, setBadgeText] = useState(shopProfile.name.trim() || "")
@@ -255,6 +269,15 @@ export function Presenter3DPage() {
   const displayCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const characterPhotoRef = useRef<HTMLImageElement | null>(null)
   const cutoutPhotoRef = useRef<HTMLImageElement | null>(null)
+  const talkingCutoutRef = useRef<HTMLImageElement | null>(null)
+  const talkingCutoutAbortRef = useRef<AbortController | null>(null)
+  const talkingBlendRef = useRef<number>(0)
+  const talkingHoldRef = useRef<number>(0)
+  const showcaseImageRef = useRef<HTMLImageElement | null>(null)
+  const showcaseImageObjUrlRef = useRef<string | null>(null)
+  const showcaseAnimStartMsRef = useRef<number>(0)
+  const cameraZoomRef = useRef<number>(1)
+  const waveformBarsRef = useRef<Float32Array>(new Float32Array(28))
   const characterPhotoUrlRef = useRef<string | null>(null)
   const pipImageRef = useRef<HTMLImageElement | null>(null)
   const cornerLogoImgRef = useRef<HTMLImageElement | null>(null)
@@ -279,6 +302,10 @@ export function Presenter3DPage() {
     aspectRatio,
     qualityPreset,
     framing,
+    mascotPosition,
+    dynamicCameraZoom,
+    studioLighting,
+    showAudioVisualizer,
     presenterStudioSet,
     solidColor,
     photoBlurRadius,
@@ -299,6 +326,10 @@ export function Presenter3DPage() {
     aspectRatio,
     qualityPreset,
     framing,
+    mascotPosition,
+    dynamicCameraZoom,
+    studioLighting,
+    showAudioVisualizer,
     presenterStudioSet,
     solidColor,
     photoBlurRadius,
@@ -457,6 +488,49 @@ export function Presenter3DPage() {
 
       ctx.clearRect(0, 0, dims.width, dims.height)
 
+      // Smooth 2-state expression swap (Idle vs. Talking/Expressive cutout) with vocal hold hysteresis
+      if (talkingCutoutRef.current) {
+        if (lip.energy > 0.2) {
+          talkingHoldRef.current = 0.14
+        } else {
+          talkingHoldRef.current = Math.max(0, talkingHoldRef.current - delta)
+        }
+        const targetBlend = talkingHoldRef.current > 0 ? 1 : 0
+        const blendAlpha =
+          targetBlend > talkingBlendRef.current
+            ? 1 - Math.exp(-26 * delta)
+            : 1 - Math.exp(-16 * delta)
+        talkingBlendRef.current += (targetBlend - talkingBlendRef.current) * blendAlpha
+      } else {
+        talkingBlendRef.current = 0
+        talkingHoldRef.current = 0
+      }
+
+      // Smooth audio-driven micro camera zoom (1.0x to 1.07x)
+      if (settings.dynamicCameraZoom) {
+        const ambientDrift = (0.5 + 0.5 * Math.sin(elapsed * 0.72)) * 0.012
+        const targetZoom = Math.min(1.07, 1.0 + lip.energy * 0.058 + ambientDrift)
+        const zoomAlpha =
+          targetZoom > cameraZoomRef.current
+            ? 1 - Math.exp(-3.4 * delta)
+            : 1 - Math.exp(-1.9 * delta)
+        cameraZoomRef.current += (targetZoom - cameraZoomRef.current) * zoomAlpha
+      } else {
+        cameraZoomRef.current += (1.0 - cameraZoomRef.current) * (1 - Math.exp(-8 * delta))
+      }
+
+      const stageZoom = cameraZoomRef.current
+      const zoomPivotX = dims.width * 0.5
+      const zoomPivotY = dims.height * 0.42
+
+      // Stage Layer (subject to subtle dynamic camera zoom)
+      ctx.save()
+      if (Math.abs(stageZoom - 1) > 0.0004) {
+        ctx.translate(zoomPivotX, zoomPivotY)
+        ctx.scale(stageZoom, stageZoom)
+        ctx.translate(-zoomPivotX, -zoomPivotY)
+      }
+
       // 1. Draw Stage Backdrop
       if (settings.presenterStudioSet === "custom_photo") {
         if (backdropImageRef.current) {
@@ -526,21 +600,51 @@ export function Presenter3DPage() {
         ctx.fillRect(0, 0, dims.width, dims.height)
       }
 
-      // 2. Draw 2D Mascot Cutout directly on the stage backdrop
+      // 1b. Studio Lighting Atmosphere tint (blends backdrop with cutout filter preset)
+      drawStudioLightingAtmosphere(ctx, dims.width, dims.height, settings.studioLighting)
+
+      // 2a. Side-by-Side Product / Media Showcase Card (opposite Left/Right mascot)
+      const hasShowcaseCard =
+        settings.mascotPosition !== "center" && Boolean(showcaseImageRef.current)
+      if (hasShowcaseCard && showcaseImageRef.current) {
+        const entranceElapsed =
+          showcaseAnimStartMsRef.current > 0
+            ? Math.max(0, (nowMs - showcaseAnimStartMsRef.current) / 1000)
+            : 1
+        drawShowcaseCard(ctx, showcaseImageRef.current, dims.width, dims.height, {
+          side: settings.mascotPosition === "left" ? "right" : "left",
+          entranceElapsed,
+          elapsed,
+          lip,
+          hasLowerThird: settings.presenterShowLowerThird,
+          captionsOn: settings.captionsOn,
+          lighting: settings.studioLighting,
+          lowPower,
+        })
+      }
+
+      // 2b. Draw 2D Mascot Cutout (Idle + optional Talking pose swap)
       const activeMascotImg = cutoutPhotoRef.current || characterPhotoRef.current
       if (activeMascotImg) {
         drawMascotCutoutFrame(ctx, activeMascotImg, dims.width, dims.height, lip, elapsed, {
           framing: settings.framing,
+          position: settings.mascotPosition,
+          hasShowcaseCard,
+          talkingImg: talkingCutoutRef.current,
+          talkingBlend: talkingBlendRef.current,
+          lighting: settings.studioLighting,
           lowPower,
         })
       }
+
+      ctx.restore() // End Stage Camera Zoom layer (HUD overlays stay rock-steady)
 
       // 3. Top-Right Corner Brand Bug (Watermark at 80% opacity)
       if (settings.presenterShowCornerLogo && cornerLogoImgRef.current) {
         drawCornerLogoWatermark(ctx, cornerLogoImgRef.current, dims.width, { lowPower })
       }
 
-      // 4. TV-Style Lower-Third Nameplate
+      // 4. Minimalist Editorial Lower-Third Nameplate (Matte Charcoal & Crisp White)
       if (settings.presenterShowLowerThird) {
         const presenterName =
           settings.mascotName.trim() ||
@@ -555,6 +659,7 @@ export function Presenter3DPage() {
             lip,
             elapsed,
             captionsOn: settings.captionsOn,
+            hasBottomVisualizer: settings.showAudioVisualizer,
             lowPower,
           },
           dims.width,
@@ -593,6 +698,19 @@ export function Presenter3DPage() {
           lowPower,
         })
       }
+
+      // 7. Subtle Damped Bottom Audio Waveform Bar
+      if (settings.showAudioVisualizer) {
+        drawBottomAudioWaveformBar(
+          ctx,
+          dims.width,
+          dims.height,
+          lip,
+          elapsed,
+          waveformBarsRef.current,
+          delta
+        )
+      }
     }
 
     rafId = requestAnimationFrame(renderFrame)
@@ -601,6 +719,8 @@ export function Presenter3DPage() {
       cancelAnimationFrame(rafId)
       cutoutAbortRef.current?.abort()
       cutoutAbortRef.current = null
+      talkingCutoutAbortRef.current?.abort()
+      talkingCutoutAbortRef.current = null
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
         try {
           mediaRecorderRef.current.stop()
@@ -617,6 +737,8 @@ export function Presenter3DPage() {
       backdropImageRef.current = null
       characterPhotoRef.current = null
       cutoutPhotoRef.current = null
+      talkingCutoutRef.current = null
+      showcaseImageRef.current = null
       if (backdropImageUrlRef.current) {
         URL.revokeObjectURL(backdropImageUrlRef.current)
         backdropImageUrlRef.current = null
@@ -624,6 +746,10 @@ export function Presenter3DPage() {
       if (characterPhotoUrlRef.current) {
         URL.revokeObjectURL(characterPhotoUrlRef.current)
         characterPhotoUrlRef.current = null
+      }
+      if (showcaseImageObjUrlRef.current) {
+        URL.revokeObjectURL(showcaseImageObjUrlRef.current)
+        showcaseImageObjUrlRef.current = null
       }
       pipCutoutCacheRef.current.clear()
       mascotCutoutCacheRef.current.clear()
@@ -954,6 +1080,104 @@ export function Presenter3DPage() {
     setPresenter3dPopCutoutUrl(null)
   }
 
+  const handleUploadTalkingPose = async (e: React.ChangeEvent<HTMLInputElement> | File) => {
+    const file = e instanceof File ? e : e.target.files?.[0]
+    if (!(e instanceof File)) e.target.value = ""
+    if (!file) return
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) && !/\.(jpe?g|png|webp)$/i.test(file.name)) {
+      toast.error(t(language, "presenter3d.photoInvalid"))
+      return
+    }
+    if (isRenderingRef.current) return
+
+    talkingCutoutAbortRef.current?.abort()
+    const controller = new AbortController()
+    talkingCutoutAbortRef.current = controller
+    setIsExtractingTalkingCutout(true)
+
+    try {
+      const mobile = isMobileViewport()
+      const cutout = await extractForegroundCutout(file, {
+        mode: foregroundCutoutMode,
+        maxDimension: mobile ? 512 : 640,
+        timeoutMs: 12_000,
+        signal: controller.signal,
+      })
+      if (controller.signal.aborted) return
+
+      const img = new Image()
+      img.onload = () => {
+        if (controller.signal.aborted) return
+        talkingCutoutRef.current = img
+        setTalkingCutoutUrl(cutout.dataUrl)
+        setTalkingPhotoName(file.name)
+        toast.success(t(language, "presenter3d.talkingPoseLoaded"))
+      }
+      img.onerror = () => {
+        toast.error(t(language, "presenter3d.photoCharLoadError"))
+      }
+      img.src = cutout.dataUrl
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return
+      console.error("Talking pose cutout failed:", err)
+      toast.error(t(language, "presenter3d.photoCharLoadError"))
+    } finally {
+      if (talkingCutoutAbortRef.current === controller) {
+        talkingCutoutAbortRef.current = null
+      }
+      setIsExtractingTalkingCutout(false)
+    }
+  }
+
+  const handleClearTalkingPose = () => {
+    triggerHaptic(6)
+    talkingCutoutAbortRef.current?.abort()
+    talkingCutoutAbortRef.current = null
+    talkingCutoutRef.current = null
+    talkingBlendRef.current = 0
+    talkingHoldRef.current = 0
+    setTalkingCutoutUrl(null)
+    setTalkingPhotoName("")
+  }
+
+  const handleUploadShowcaseImage = (e: React.ChangeEvent<HTMLInputElement> | File) => {
+    const file = e instanceof File ? e : e.target.files?.[0]
+    if (!(e instanceof File)) e.target.value = ""
+    if (!file) return
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) && !/\.(jpe?g|png|webp)$/i.test(file.name)) {
+      toast.error(t(language, "presenter3d.pipInvalid"))
+      return
+    }
+
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      if (showcaseImageObjUrlRef.current) {
+        URL.revokeObjectURL(showcaseImageObjUrlRef.current)
+      }
+      showcaseImageObjUrlRef.current = url
+      showcaseImageRef.current = img
+      showcaseAnimStartMsRef.current = performance.now()
+      setShowcaseImageUrl(url)
+      toast.success(t(language, "presenter3d.showcaseLoaded"))
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      toast.error(t(language, "presenter3d.photoLoadError"))
+    }
+    img.src = url
+  }
+
+  const handleClearShowcaseImage = () => {
+    triggerHaptic(6)
+    if (showcaseImageObjUrlRef.current) {
+      URL.revokeObjectURL(showcaseImageObjUrlRef.current)
+      showcaseImageObjUrlRef.current = null
+    }
+    showcaseImageRef.current = null
+    setShowcaseImageUrl(null)
+  }
+
   const handleSaveMascot = () => {
     const saveUrl = presenter3dPopCutoutUrl || photoDataUrl
     if (!saveUrl) return
@@ -1053,6 +1277,7 @@ export function Presenter3DPage() {
     activeSourceRef.current = source
     lipSyncRef.current = lipSync
     playbackStartCtxTimeRef.current = ctx.currentTime
+    showcaseAnimStartMsRef.current = performance.now()
     isPlayingRef.current = true
     setIsPlaying(true)
 
@@ -1191,6 +1416,7 @@ export function Presenter3DPage() {
       activeSourceRef.current = source
       lipSyncRef.current = lipSync
       playbackStartCtxTimeRef.current = ctx.currentTime
+      showcaseAnimStartMsRef.current = performance.now()
       isPlayingRef.current = true
       isRenderingRef.current = true
       setIsPlaying(true)
@@ -1670,6 +1896,68 @@ export function Presenter3DPage() {
                     )}
                   </Button>
 
+                  {/* Optional 2-State Expression Swap: Talking / Expressive Pose Cutout */}
+                  <div className="space-y-1.5 pt-2 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                        {t(language, "presenter3d.talkingPoseLabel")}
+                      </span>
+                      {talkingCutoutUrl && (
+                        <button
+                          type="button"
+                          onClick={handleClearTalkingPose}
+                          className="inline-flex items-center gap-0.5 text-[11px] font-medium text-rose-600 dark:text-rose-400 hover:underline cursor-pointer shrink-0 font-myanmar"
+                        >
+                          <X className="h-3 w-3" />
+                          <span>{t(language, "presenter3d.clearLogo")}</span>
+                        </button>
+                      )}
+                    </div>
+                    <FileDropzone
+                      accept={[".jpg", ".jpeg", ".png", ".webp"]}
+                      onFiles={(f) => {
+                        const file = f[0]
+                        if (file) void handleUploadTalkingPose(file)
+                      }}
+                    >
+                      <label className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-[#FAF8F5] dark:bg-[#18181B] py-2 px-2.5 text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
+                        {isExtractingTalkingCutout ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600 shrink-0" />
+                            <span>{t(language, "presenter3d.stageCuttingOut")}</span>
+                          </>
+                        ) : talkingCutoutUrl ? (
+                          <>
+                            <img
+                              src={talkingCutoutUrl}
+                              alt=""
+                              className="h-6 w-6 rounded-md object-contain bg-[#EFEAE1]/70 dark:bg-[#27272A] border border-black/10 shrink-0"
+                            />
+                            <div className="min-w-0 text-left flex-1">
+                              <p className="text-[11px] font-medium truncate">
+                                {talkingPhotoName || t(language, "presenter3d.talkingPoseChange")}
+                              </p>
+                              <p className="text-[10px] text-emerald-700 dark:text-emerald-400">
+                                ✓ {t(language, "presenter3d.talkingPoseReady")}
+                              </p>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <ImagePlus className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span>{t(language, "presenter3d.talkingPoseUpload")}</span>
+                          </>
+                        )}
+                        <input
+                          type="file"
+                          accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                          onChange={(e) => void handleUploadTalkingPose(e)}
+                          className="hidden"
+                        />
+                      </label>
+                    </FileDropzone>
+                  </div>
+
                   {/* Save Mascot Preset */}
                   <div className="space-y-1.5 rounded-xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] p-2">
                     <div className="flex gap-1.5">
@@ -1861,6 +2149,149 @@ export function Presenter3DPage() {
                   {t(language, opt.labelKey)}
                 </button>
               ))}
+            </div>
+
+            {/* Mascot Position (Left / Center / Right) & Side-by-Side Showcase Card */}
+            <div className="pt-2 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2">
+              <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar block">
+                {t(language, "presenter3d.positionLabel")}
+              </span>
+              <div className="grid grid-cols-3 gap-1.5">
+                {(
+                  [
+                    { id: "left", labelKey: "presenter3d.posLeft" },
+                    { id: "center", labelKey: "presenter3d.posCenter" },
+                    { id: "right", labelKey: "presenter3d.posRight" },
+                  ] as const satisfies readonly { id: MascotPosition; labelKey: string }[]
+                ).map((posOpt) => (
+                  <button
+                    key={posOpt.id}
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic(6)
+                      setMascotPosition(posOpt.id)
+                      if (posOpt.id !== "center" && showcaseImageRef.current) {
+                        showcaseAnimStartMsRef.current = performance.now()
+                      }
+                    }}
+                    className={cn(
+                      "rounded-xl border py-2 px-2 text-[11px] font-semibold transition-all cursor-pointer font-myanmar",
+                      mascotPosition === posOpt.id
+                        ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                        : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
+                    )}
+                  >
+                    {t(language, posOpt.labelKey)}
+                  </button>
+                ))}
+              </div>
+
+              {mascotPosition !== "center" && (
+                <div className="rounded-2xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white/80 dark:bg-[#27272A]/80 p-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                      {t(language, "presenter3d.showcaseLabel")}
+                    </span>
+                    {showcaseImageUrl && (
+                      <button
+                        type="button"
+                        onClick={handleClearShowcaseImage}
+                        className="inline-flex items-center gap-0.5 text-[11px] font-medium text-rose-600 dark:text-rose-400 hover:underline cursor-pointer shrink-0 font-myanmar"
+                      >
+                        <X className="h-3 w-3" />
+                        <span>{t(language, "presenter3d.clearLogo")}</span>
+                      </button>
+                    )}
+                  </div>
+                  <FileDropzone
+                    accept={[".jpg", ".jpeg", ".png", ".webp"]}
+                    onFiles={(f) => {
+                      const file = f[0]
+                      if (file) handleUploadShowcaseImage(file)
+                    }}
+                  >
+                    <label className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-[#FAF8F5] dark:bg-[#18181B] py-2 px-2.5 text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
+                      {showcaseImageUrl ? (
+                        <>
+                          <img
+                            src={showcaseImageUrl}
+                            alt=""
+                            className="h-6 w-6 rounded-md object-cover border border-black/10 shrink-0"
+                          />
+                          <span>{t(language, "presenter3d.showcaseChange")}</span>
+                        </>
+                      ) : (
+                        <>
+                          <ImagePlus className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                          <span>{t(language, "presenter3d.showcaseUpload")}</span>
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                        onChange={handleUploadShowcaseImage}
+                        className="hidden"
+                      />
+                    </label>
+                  </FileDropzone>
+                </div>
+              )}
+            </div>
+
+            {/* Dynamic Camera Zoom & Studio Lighting Filter Presets */}
+            <div className="pt-2 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                  {t(language, "presenter3d.dynamicZoomToggle")}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(6)
+                    setDynamicCameraZoom((v) => !v)
+                  }}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer transition-colors shrink-0",
+                    dynamicCameraZoom
+                      ? "bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                      : "bg-[#EFEAE1] text-[#57534E] dark:bg-[#27272A] dark:text-[#A1A1AA]"
+                  )}
+                >
+                  {dynamicCameraZoom ? "ON" : "OFF"}
+                </button>
+              </div>
+
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar block">
+                  {t(language, "presenter3d.lightingLabel")}
+                </span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      { id: "natural", labelKey: "presenter3d.lightingNatural" },
+                      { id: "warm_studio", labelKey: "presenter3d.lightingWarm" },
+                      { id: "crisp_daylight", labelKey: "presenter3d.lightingDaylight" },
+                    ] as const satisfies readonly { id: StudioLightingPreset; labelKey: string }[]
+                  ).map((lightOpt) => (
+                    <button
+                      key={lightOpt.id}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic(6)
+                        setStudioLighting(lightOpt.id)
+                      }}
+                      className={cn(
+                        "rounded-xl border py-2 px-1.5 text-[11px] font-semibold transition-all cursor-pointer font-myanmar truncate",
+                        studioLighting === lightOpt.id
+                          ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                          : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
+                      )}
+                    >
+                      {t(language, lightOpt.labelKey)}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
             {/* Render Quality Toggle: Mobile Fast (540p / 24fps) vs Studio HD (720p–1080p / 30fps) */}
@@ -2095,6 +2526,27 @@ export function Presenter3DPage() {
                   className="h-9 rounded-xl bg-white dark:bg-[#27272A] border-[#E7E5E4] dark:border-[#3F3F46] text-xs font-myanmar"
                 />
               )}
+
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
+                  {t(language, "presenter3d.audioVisualizerToggle")}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(6)
+                    setShowAudioVisualizer((v) => !v)
+                  }}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer transition-colors",
+                    showAudioVisualizer
+                      ? "bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
+                      : "bg-[#EFEAE1] text-[#57534E] dark:bg-[#27272A] dark:text-[#A1A1AA]"
+                  )}
+                >
+                  {showAudioVisualizer ? "ON" : "OFF"}
+                </button>
+              </div>
             </div>
           </div>
 
