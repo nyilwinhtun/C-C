@@ -248,8 +248,8 @@ export function VaultPage() {
       setActivePageKey("text")
       toast.success(
         language === "my"
-          ? "AI Generator ထဲသို့ ထည့်သွင်းပြီးပါပြီ"
-          : "Loaded into AI Generator"
+          ? "ပို့စ်ရေးရန် ထဲသို့ ထည့်သွင်းပြီးပါပြီ"
+          : "Loaded into Script & Caption Writer"
       )
     },
     [language, setActivePageKey, setDraftInput]

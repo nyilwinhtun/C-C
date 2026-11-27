@@ -343,8 +343,8 @@ export function TranscriberPage() {
       void playBlobUrlWithPrimedAudio(tts.audioUrl)
       toast.success(
         isMy
-          ? "Script ပြင်ဆင်ပြီး AI Voiceover အသံဖိုင် ထုတ်ပြီးပါပြီ!"
-          : "Polished script & AI voiceover ready!"
+          ? "Script ပြင်ဆင်ပြီး Voiceover အသံဖိုင် ထုတ်ပြီးပါပြီ!"
+          : "Polished script & voiceover ready!"
       )
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to generate polished voiceover."

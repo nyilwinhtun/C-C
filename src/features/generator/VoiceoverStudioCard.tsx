@@ -140,8 +140,8 @@ export function VoiceoverStudioCard({
       setMergedVideo(null)
       toast.success(
         language === "my"
-          ? "AI အသံနမူနာ ဖန်တီးပြီးပါပြီ။"
-          : "Burmese AI voiceover generated!"
+          ? "အသံနမူနာ ဖန်တီးပြီးပါပြီ။"
+          : "Burmese voiceover generated!"
       )
     } catch (err) {
       const msg =
@@ -173,8 +173,8 @@ export function VoiceoverStudioCard({
     if (!voiceoverResult) {
       toast.error(
         language === "my"
-          ? "အရင်ဆုံး AI Voiceover အသံဖန်တီးပါ။"
-          : "Generate the AI voice preview first."
+          ? "အရင်ဆုံး Voiceover အသံဖန်တီးပါ။"
+          : "Generate the voice preview first."
       )
       return
     }
@@ -209,7 +209,7 @@ export function VoiceoverStudioCard({
       toast.success(
         language === "my"
           ? "အသံနှင့် ဗီဒီယို ပေါင်းစပ်ပြီး ဒေါင်းလုဒ်ဆွဲပြီးပါပြီ။"
-          : "Video & AI voiceover merged and downloaded!"
+          : "Video & voiceover merged and downloaded!"
       )
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -240,7 +240,7 @@ export function VoiceoverStudioCard({
       try {
         await navigator.share({
           files: [file],
-          title: "Burmese AI Voiceover Video",
+          title: "Burmese Voiceover Video",
         })
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return

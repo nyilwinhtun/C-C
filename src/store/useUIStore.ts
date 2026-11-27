@@ -161,7 +161,6 @@ function normalizePageKey(key: string): string {
     case "generator":
       return "text"
     case "photo-studio":
-    case "autocut":
       return "studio"
     case "planner":
       return "vault"
@@ -349,9 +348,6 @@ export const useUIStore = create<UIState>()(
       },
       onRehydrateStorage: () => (state) => {
         applyThemeToDocument(state?.theme ?? "dark")
-        if (state && state.activePageKey === "autocut") {
-          state.setActivePageKey("studio")
-        }
         if (state && DEPRECATED_GEMINI_MODELS.has(state.models?.gemini ?? "")) {
           state.setProviderModel("gemini", DEFAULT_MODELS.gemini)
         }
