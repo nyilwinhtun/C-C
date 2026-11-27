@@ -1,7 +1,3 @@
-import * as THREE from "three"
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js"
-import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm"
-
 export interface LipSyncWeights {
   /** Low-mid vocal openness (300–1000 Hz) */
   aa: number
@@ -176,529 +172,15 @@ export type PresenterStudioSet =
   | "soft_bokeh"
   | "custom_photo"
 
-export interface AvatarController {
-  object: THREE.Object3D
-  kind: "vrm" | "glb"
-  update: (delta: number, elapsed: number, lip: LipSyncWeights) => void
-  setOrbitRotation?: (yaw: number, pitch?: number) => void
-  setAutoOrbit?: (enabled: boolean) => void
-  setDepthScale?: (scale: number) => void
-  dispose: () => void
-}
-
-interface BlinkState {
-  nextBlinkAt: number
-  blinkStartAt: number
-  isBlinking: boolean
-}
-
-function createBlinkState(initialElapsed = 0): BlinkState {
-  return {
-    nextBlinkAt: initialElapsed + 2.5 + Math.random() * 2.0,
-    blinkStartAt: 0,
-    isBlinking: false,
-  }
-}
-
-function sampleBlinkValue(blink: BlinkState, elapsed: number): number {
-  const BLINK_DURATION = 0.16
-  if (!blink.isBlinking && elapsed >= blink.nextBlinkAt) {
-    blink.isBlinking = true
-    blink.blinkStartAt = elapsed
-  }
-
-  if (!blink.isBlinking) return 0
-
-  const progress = (elapsed - blink.blinkStartAt) / BLINK_DURATION
-  if (progress >= 1) {
-    blink.isBlinking = false
-    blink.nextBlinkAt = elapsed + 3.0 + Math.random() * 2.0
-    return 0
-  }
-
-  // Smooth triangle/sine pulse peaking at 1.0 mid-blink
-  return Math.sin(progress * Math.PI)
-}
-
-/**
- * Wraps a loaded @pixiv/three-vrm VRM instance with procedural blinking,
- * head nod/sway on active vocal energy, idle chest breathing, lip-sync, and spring-bone physics.
- */
-export function createVrmAvatarController(vrm: VRM): AvatarController {
-  VRMUtils.removeUnnecessaryVertices(vrm.scene)
-  VRMUtils.combineSkeletons(vrm.scene)
-
-  // Rotate VRM 180 deg if VRM 0.x faces -Z; VRMUtils.rotateVRM0 handles both versions safely
-  VRMUtils.rotateVRM0(vrm)
-
-  vrm.scene.traverse((obj) => {
-    obj.frustumCulled = false
-  })
-
-  // Relax arms out of T-pose if humanoid bones exist
-  const leftUpperArm = vrm.humanoid?.getNormalizedBoneNode("leftUpperArm")
-  const rightUpperArm = vrm.humanoid?.getNormalizedBoneNode("rightUpperArm")
-  const leftLowerArm = vrm.humanoid?.getNormalizedBoneNode("leftLowerArm")
-  const rightLowerArm = vrm.humanoid?.getNormalizedBoneNode("rightLowerArm")
-
-  if (leftUpperArm) {
-    leftUpperArm.rotation.z = 1.18
-    leftUpperArm.rotation.x = 0.08
-  }
-  if (rightUpperArm) {
-    rightUpperArm.rotation.z = -1.18
-    rightUpperArm.rotation.x = 0.08
-  }
-  if (leftLowerArm) {
-    leftLowerArm.rotation.y = -0.25
-  }
-  if (rightLowerArm) {
-    rightLowerArm.rotation.y = 0.25
-  }
-
-  const headBone = vrm.humanoid?.getNormalizedBoneNode("head")
-  const neckBone = vrm.humanoid?.getNormalizedBoneNode("neck")
-  const chestBone =
-    vrm.humanoid?.getNormalizedBoneNode("upperChest") ??
-    vrm.humanoid?.getNormalizedBoneNode("chest") ??
-    vrm.humanoid?.getNormalizedBoneNode("spine")
-
-  const blink = createBlinkState(0)
-  let smoothPitch = 0
-  let smoothYaw = 0
-  let smoothRoll = 0
-
-  const update = (delta: number, elapsed: number, lip: LipSyncWeights) => {
-    const dt = Math.min(delta, 0.05)
-
-    // 1. Lip-sync expressions (aa, ih, ou, ee, oh)
-    const em = vrm.expressionManager
-    if (em) {
-      em.setValue("aa", lip.aa)
-      em.setValue("ih", lip.ih)
-      em.setValue("ou", lip.ou)
-      em.setValue("ee", lip.ee)
-      em.setValue("oh", lip.oh)
-
-      // 2. Automatic eye blinking every 3–5s
-      const blinkWeight = sampleBlinkValue(blink, elapsed)
-      em.setValue("blink", blinkWeight)
-    }
-
-    // 3. Subtle head nod/sway proportional to active vocal energy (aa > 0.15)
-    const isSpeaking = lip.aa > 0.15
-    const vocalBoost = isSpeaking ? (lip.aa - 0.15) * 0.14 : 0
-    const targetPitch = Math.sin(elapsed * 5.2) * vocalBoost + Math.sin(elapsed * 0.9) * 0.015
-    const targetYaw =
-      Math.sin(elapsed * 1.4) * (isSpeaking ? 0.055 : 0.025) +
-      Math.cos(elapsed * 2.3) * vocalBoost * 0.35
-    const targetRoll = Math.cos(elapsed * 1.1) * (isSpeaking ? 0.035 : 0.012)
-
-    const headAlpha = 1 - Math.exp(-8 * dt)
-    smoothPitch = lerp(smoothPitch, targetPitch, headAlpha)
-    smoothYaw = lerp(smoothYaw, targetYaw, headAlpha)
-    smoothRoll = lerp(smoothRoll, targetRoll, headAlpha)
-
-    if (headBone) {
-      headBone.rotation.x = smoothPitch
-      headBone.rotation.y = smoothYaw
-      headBone.rotation.z = smoothRoll
-    }
-    if (neckBone) {
-      neckBone.rotation.x = smoothPitch * 0.4
-      neckBone.rotation.y = smoothYaw * 0.35
-    }
-
-    // 4. Gentle idle chest breathing motion
-    if (chestBone) {
-      const breath = Math.sin(elapsed * 1.6)
-      chestBone.rotation.x = breath * 0.018
-      chestBone.position.y = breath * 0.0025
-    }
-
-    // 5. VRM spring-bone physics & expression updates
-    vrm.update(dt)
-  }
-
-  const dispose = () => {
-    VRMUtils.deepDispose(vrm.scene)
-  }
-
-  return {
-    object: vrm.scene,
-    kind: "vrm",
-    update,
-    dispose,
-  }
-}
-
-interface ReliefMouthRig {
-  geometry: THREE.BufferGeometry
-  basePositions: Float32Array
-  /** Indices of vertices in the lower-face / mouth zone with weight > 0.001 */
-  activeIndices: Uint32Array
-  /** Smooth Gaussian falloff weights matching activeIndices (0..1) */
-  activeWeights: Float32Array
-  /** Signed horizontal offset (-1..1) from mouth center for subtle spread */
-  activeRelX: Float32Array
-  /** Whether vertex is in lower jaw (below mouth center) */
-  activeLowerBias: Float32Array
-  depthScale: number
-  lastAppliedOpen: number
-  lastAppliedSpread: number
-  lastAppliedDepth: number
-}
-
-function buildReliefMouthRig(mesh: THREE.Mesh): ReliefMouthRig | null {
-  const geom = mesh.geometry
-  const pos = geom?.getAttribute("position")
-  const uv = geom?.getAttribute("uv")
-  if (!pos || !uv || pos.count < 16) return null
-
-  const basePositions = new Float32Array(pos.count * 3)
-  for (let i = 0; i < pos.count; i++) {
-    basePositions[i * 3] = pos.getX(i)
-    basePositions[i * 3 + 1] = pos.getY(i)
-    basePositions[i * 3 + 2] = pos.getZ(i)
-  }
-
-  // Read subject bounds saved in GLB userData (or fall back to centered portrait framing)
-  const rawBounds = (mesh.userData?.subjectBounds ?? null) as
-    | { cx?: number; cy?: number; rx?: number; ry?: number }
-    | null
-  const cx = typeof rawBounds?.cx === "number" ? rawBounds.cx : 0.5
-  const cy = typeof rawBounds?.cy === "number" ? rawBounds.cy : 0.48
-  const rx = typeof rawBounds?.rx === "number" ? Math.max(0.18, rawBounds.rx) : 0.36
-  const ry = typeof rawBounds?.ry === "number" ? Math.max(0.18, rawBounds.ry) : 0.38
-
-  // Localized lower-face / mouth zone (top-down UV coords: GLTF flipped uv.y is top-down)
-  const mouthCenterU = cx
-  const mouthCenterV = Math.min(0.84, cy + ry * 0.22)
-  const sigmaU = Math.max(0.055, rx * 0.24)
-  const sigmaV = Math.max(0.042, ry * 0.16)
-
-  const tmpIdx: number[] = []
-  const tmpW: number[] = []
-  const tmpRelX: number[] = []
-  const tmpLower: number[] = []
-
-  for (let i = 0; i < pos.count; i++) {
-    const z = basePositions[i * 3 + 2]
-    // Strictly skip flat background / border vertices so cutout edges NEVER tear or distort
-    if (z <= 0.004) continue
-
-    const u = uv.getX(i)
-    const v = uv.getY(i)
-    const du = (u - mouthCenterU) / sigmaU
-    const dv = (v - mouthCenterV) / sigmaV
-    const r2 = du * du + dv * dv
-    if (r2 > 5.5) continue
-
-    // Smooth Gaussian weight tapered by local elevation so edge pixels stay pinned
-    const elevMask = Math.min(1, Math.max(0, (z - 0.004) / 0.02))
-    const weight = Math.exp(-0.5 * r2) * elevMask
-    if (weight <= 0.002) continue
-
-    tmpIdx.push(i)
-    tmpW.push(weight)
-    tmpRelX.push(Math.max(-1, Math.min(1, du * 0.6)))
-    tmpLower.push(dv >= -0.15 ? Math.min(1, 0.55 + Math.max(0, dv) * 0.45) : 0.2)
-  }
-
-  return {
-    geometry: geom,
-    basePositions,
-    activeIndices: Uint32Array.from(tmpIdx),
-    activeWeights: Float32Array.from(tmpW),
-    activeRelX: Float32Array.from(tmpRelX),
-    activeLowerBias: Float32Array.from(tmpLower),
-    depthScale: 1,
-    lastAppliedOpen: 0,
-    lastAppliedSpread: 0,
-    lastAppliedDepth: 1,
-  }
-}
-
-/**
- * Wraps a generic .glb model (including 2D-to-3D relief .glb meshes) with optional
- * morph-target lip-sync (ARKit / ReadyPlayerMe / Viseme), clean localized lower-face
- * lip-sync for 2D-to-3D relief meshes, plus procedural breathing and vocal head nod.
- */
-export function createGlbAvatarController(root: THREE.Object3D): AvatarController {
-  // Normalize scale and ground/center the GLB model safely (guarding against empty bounds)
-  const box = new THREE.Box3().setFromObject(root)
-  const size = new THREE.Vector3()
-  const center = new THREE.Vector3()
-  if (!box.isEmpty()) {
-    box.getSize(size)
-    box.getCenter(center)
-
-    const maxDim = Math.max(size.y, size.x, size.z, 0.001)
-    const targetHeight = 1.65
-    const scale = targetHeight / maxDim
-    if (Number.isFinite(scale) && scale > 0) {
-      root.scale.multiplyScalar(scale)
-    }
-
-    // Recompute bounds after scaling so base sits cleanly at y = 0
-    const scaledBox = new THREE.Box3().setFromObject(root)
-    if (!scaledBox.isEmpty()) {
-      const scaledCenter = new THREE.Vector3()
-      scaledBox.getCenter(scaledCenter)
-      root.position.x -= scaledCenter.x
-      root.position.z -= scaledCenter.z
-      root.position.y -= scaledBox.min.y
-    }
-  }
-
-  const morphMeshes: THREE.Mesh[] = []
-  let reliefRig: ReliefMouthRig | null = null
-
-  root.traverse((obj) => {
-    if ((obj as THREE.Mesh).isMesh) {
-      const mesh = obj as THREE.Mesh
-      mesh.frustumCulled = false
-      if (mesh.morphTargetDictionary && mesh.morphTargetInfluences) {
-        morphMeshes.push(mesh)
-      }
-      if (
-        !reliefRig &&
-        (mesh.name === "Fast25dDepthRelief" || mesh.userData?.isRelief25d === true)
-      ) {
-        reliefRig = buildReliefMouthRig(mesh)
-      }
-    }
-  })
-
-  const baseY = root.position.y
-  const blink = createBlinkState(0)
-  let smoothPitch = 0
-  let smoothYaw = 0
-  let smoothMouthOpen = 0
-  let smoothMouthSpread = 0
-  let userOrbitYaw = 0
-  let userOrbitPitch = 0
-  let autoOrbitEnabled = false
-  let autoOrbitAngle = 0
-
-  const applyMorph = (names: string[], value: number) => {
-    for (const mesh of morphMeshes) {
-      const dict = mesh.morphTargetDictionary
-      const infl = mesh.morphTargetInfluences
-      if (!dict || !infl) continue
-      for (const name of names) {
-        if (name in dict) {
-          infl[dict[name]] = value
-        }
-      }
-    }
-  }
-
-  const applyReliefDeformation = (open: number, spread: number, forceAll = false) => {
-    const rig = reliefRig
-    if (!rig) return
-    const pos = rig.geometry.getAttribute("position") as THREE.BufferAttribute | undefined
-    if (!pos) return
-
-    const depthChanged = Math.abs(rig.depthScale - rig.lastAppliedDepth) > 0.002
-    const mouthChanged =
-      Math.abs(open - rig.lastAppliedOpen) > 0.004 ||
-      Math.abs(spread - rig.lastAppliedSpread) > 0.004
-
-    if (!forceAll && !depthChanged && !mouthChanged) return
-
-    const base = rig.basePositions
-    const dScale = rig.depthScale
-
-    // If depth slider changed, rescale all Z relief vertices cleanly first
-    if (forceAll || depthChanged) {
-      for (let i = 0; i < pos.count; i++) {
-        pos.setXYZ(i, base[i * 3], base[i * 3 + 1], base[i * 3 + 2] * dScale)
-      }
-      rig.lastAppliedDepth = dScale
-    }
-
-    // Subtle, tear-free lower-face / mouth-only articulation
-    const jawDropAmp = open * 0.011
-    const lipPulseZ = (open * 0.008 + spread * 0.003) * Math.max(0.6, dScale)
-    const spreadX = spread * 0.0045
-
-    const indices = rig.activeIndices
-    const weights = rig.activeWeights
-    const relX = rig.activeRelX
-    const lowerBias = rig.activeLowerBias
-
-    for (let k = 0; k < indices.length; k++) {
-      const i = indices[k]
-      const w = weights[k]
-      const bx = base[i * 3]
-      const by = base[i * 3 + 1]
-      const bz = base[i * 3 + 2] * dScale
-
-      pos.setXYZ(
-        i,
-        bx + relX[k] * spreadX * w,
-        by - jawDropAmp * lowerBias[k] * w,
-        bz + lipPulseZ * w
-      )
-    }
-
-    pos.needsUpdate = true
-    if (depthChanged || forceAll) {
-      rig.geometry.computeVertexNormals()
-    }
-    rig.lastAppliedOpen = open
-    rig.lastAppliedSpread = spread
-  }
-
-  const update = (delta: number, elapsed: number, lip: LipSyncWeights) => {
-    const dt = Math.min(delta, 0.05)
-    const blinkWeight = sampleBlinkValue(blink, elapsed)
-
-    applyMorph(["jawOpen", "mouthOpen", "viseme_aa", "aa", "Fcl_MTH_A"], lip.aa)
-    applyMorph(["viseme_O", "oh", "Fcl_MTH_O", "mouthFunnel"], lip.oh)
-    applyMorph(["viseme_U", "ou", "Fcl_MTH_U", "mouthPucker"], lip.ou)
-    applyMorph(["viseme_E", "ee", "mouthSmile", "Fcl_MTH_E"], lip.ee)
-    applyMorph(["viseme_I", "ih", "Fcl_MTH_I"], lip.ih)
-    applyMorph(["eyeBlinkLeft", "eyeBlinkRight", "blink", "Fcl_EYE_Close"], blinkWeight)
-
-    if (reliefRig) {
-      const mouthAlpha = 1 - Math.exp(-18 * dt)
-      const targetOpen = clamp01(lip.aa * 0.85 + lip.oh * 0.42 + lip.energy * 0.2)
-      const targetSpread = clamp01(lip.ee * 0.65 + lip.ih * 0.35)
-      smoothMouthOpen = lerp(smoothMouthOpen, targetOpen, mouthAlpha)
-      smoothMouthSpread = lerp(smoothMouthSpread, targetSpread, mouthAlpha)
-      applyReliefDeformation(smoothMouthOpen, smoothMouthSpread)
-    }
-
-    if (autoOrbitEnabled) {
-      autoOrbitAngle = (autoOrbitAngle + dt * 0.75) % (Math.PI * 2)
-    }
-
-    const isSpeaking = lip.aa > 0.15 || lip.energy > 0.15
-    const vocalBoost = isSpeaking ? Math.max(lip.aa, lip.energy) * 0.065 : 0
-    const targetPitch = Math.sin(elapsed * 4.6) * vocalBoost + userOrbitPitch
-    const targetYaw =
-      Math.sin(elapsed * 1.1) * (isSpeaking ? 0.1 : 0.05) + userOrbitYaw + autoOrbitAngle
-
-    const alpha = 1 - Math.exp(-8 * dt)
-    smoothPitch = lerp(smoothPitch, targetPitch, alpha)
-    smoothYaw = lerp(smoothYaw, targetYaw, alpha)
-
-    root.rotation.x = smoothPitch
-    root.rotation.y = smoothYaw
-    root.position.y =
-      baseY + Math.sin(elapsed * 1.6) * 0.01 + (isSpeaking ? lip.energy * 0.012 : 0)
-  }
-
-  const setOrbitRotation = (yaw: number, pitch = 0) => {
-    userOrbitYaw = yaw
-    userOrbitPitch = Math.max(-0.55, Math.min(0.55, pitch))
-  }
-
-  const setAutoOrbit = (enabled: boolean) => {
-    autoOrbitEnabled = enabled
-    if (!enabled) {
-      autoOrbitAngle = 0
-    }
-  }
-
-  const setDepthScale = (scale: number) => {
-    if (!reliefRig) return
-    const clamped = Math.max(0.45, Math.min(1.65, scale))
-    reliefRig.depthScale = clamped
-    applyReliefDeformation(smoothMouthOpen, smoothMouthSpread, true)
-  }
-
-  const dispose = () => {
-    reliefRig = null
-    disposeObject3D(root)
-  }
-
-  return {
-    object: root,
-    kind: "glb",
-    update,
-    setOrbitRotation,
-    setAutoOrbit,
-    setDepthScale,
-    dispose,
-  }
-}
-
-/**
- * Loads a .vrm or .glb 3D model from a local File or remote/public URL
- * and returns a unified AvatarController.
- */
-export async function loadAvatarController(source: File | string): Promise<AvatarController> {
-  const isFile = source instanceof File
-  const url = isFile ? URL.createObjectURL(source) : source
-  const loader = new GLTFLoader()
-  loader.register((parser) => new VRMLoaderPlugin(parser))
-
-  try {
-    const gltf = await loader.loadAsync(url)
-    const vrm = gltf.userData?.vrm as VRM | undefined
-    if (vrm) {
-      return createVrmAvatarController(vrm)
-    }
-    return createGlbAvatarController(gltf.scene)
-  } finally {
-    if (isFile) {
-      URL.revokeObjectURL(url)
-    }
-  }
-}
-
-/**
- * Recursively disposes geometries, materials, and textures of a Three.js Object3D.
- */
-export function disposeObject3D(root: THREE.Object3D): void {
-  const disposedGeometries = new Set<THREE.BufferGeometry>()
-  const disposedMaterials = new Set<THREE.Material>()
-  const disposedTextures = new Set<THREE.Texture>()
-
-  root.traverse((obj) => {
-    const mesh = obj as THREE.Mesh
-    if (mesh.geometry && !disposedGeometries.has(mesh.geometry)) {
-      disposedGeometries.add(mesh.geometry)
-      mesh.geometry.dispose()
-    }
-    if (mesh.material) {
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-      for (const mat of materials) {
-        if (!mat || disposedMaterials.has(mat)) continue
-        disposedMaterials.add(mat)
-        const record = mat as unknown as Record<string, unknown>
-        for (const value of Object.values(record)) {
-          if (value && typeof value === "object" && "isTexture" in value) {
-            const tex = value as THREE.Texture
-            if (disposedTextures.has(tex)) continue
-            disposedTextures.add(tex)
-            if (typeof HTMLCanvasElement !== "undefined" && tex.image instanceof HTMLCanvasElement) {
-              tex.image.width = 0
-              tex.image.height = 0
-            }
-            tex.dispose()
-          }
-        }
-        mat.dispose()
-      }
-    }
-  })
-}
-
 export type Presenter3dPopMotionPreset = "orbit_sway" | "slow_push" | "vocal_bounce"
 
-export interface Presenter3dPopOptions {
-  depth: number
-  motionPreset: Presenter3dPopMotionPreset
-  /** Disables heavy canvas shadowBlur and ctx.filter blur for smooth mobile rendering */
+export interface MascotCutoutFrameOptions {
+  framing?: "upper_body" | "close_up"
   lowPower?: boolean
 }
 
 /**
- * Draws the glowing reactive audio spectrum bar beneath the 2D Mascot / 2.5D 3D-Pop stage.
+ * Draws the glowing reactive audio spectrum bar beneath the 2D Mascot stage.
  */
 function drawAudioSpectrumBar(
   ctx: CanvasRenderingContext2D,
@@ -713,11 +195,11 @@ function drawAudioSpectrumBar(
   const barAreaX = canvasW * 0.12
   const barAreaW = canvasW * 0.76
   const baseY = canvasH * 0.80
-  const maxH = canvasH * 0.07
+  const maxH = canvasH * 0.06
   const step = barAreaW / bars
   ctx.save()
   if (!lowPower) {
-    ctx.shadowColor = "rgba(251,191,36,0.9)"
+    ctx.shadowColor = "rgba(251,191,36,0.85)"
     ctx.shadowBlur = 10 + energy * 14
   }
   for (let i = 0; i < bars; i++) {
@@ -726,7 +208,10 @@ function drawAudioSpectrumBar(
     const wave =
       0.5 + 0.5 * Math.sin(elapsed * 7 + i * 0.9) * Math.cos(elapsed * 3.1 + i * 0.37)
     const env = Math.sin(Math.PI * t) * 0.35 + 0.65
-    const h = Math.max(canvasH * 0.004, maxH * (0.06 + (energy * 0.55 + band * 0.45) * wave * env))
+    const h = Math.max(
+      canvasH * 0.0035,
+      maxH * (0.06 + (energy * 0.55 + band * 0.45) * wave * env)
+    )
     const grad = ctx.createLinearGradient(0, baseY - h, 0, baseY + h)
     grad.addColorStop(0, "#fde68a")
     grad.addColorStop(1, "#f59e0b")
@@ -739,202 +224,128 @@ function drawAudioSpectrumBar(
 }
 
 /**
- * "2D Mascot Motion Card" renderer: keeps the uploaded mascot photo 100% crisp
- * (zero mouth warping or synthetic overlays), animating smooth vocal-reactive
- * breathing bounce (scale & subtle float) driven by Web Audio energy.
+ * Draws a crisp transparent 2D Mascot Cutout directly onto the stage backdrop with:
+ * - Subtle idle breathing & floating motion
+ * - Gentle expressive tilt & bounce when speaking
+ * - Seamless audio-reactive lower-face / mouth-zone lip-sync articulation
+ * - Reactive audio equalizer bar beneath the mascot
  */
-export function drawPresenterCardFrame(
+export function drawMascotCutoutFrame(
   ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
-  canvasW: number,
-  canvasH: number,
-  lip: LipSyncWeights,
-  elapsed: number,
-  options?: { lowPower?: boolean }
-): void {
-  const lowPower = Boolean(options?.lowPower)
-  const energy = Math.min(1, Math.max(0, lip.energy))
-  const areaX = canvasW * 0.07
-  const areaY = canvasH * 0.08
-  const areaW = canvasW * 0.86
-  const areaH = canvasH * 0.62
-  const fit = Math.min(areaW / img.width, areaH / img.height)
-  const pw = img.width * fit
-  const ph = img.height * fit
-  const px = areaX + (areaW - pw) / 2
-  const breathe = Math.sin(elapsed * 1.6) * 0.5 + 0.5
-  const floatY = Math.sin(elapsed * 1.6) * (canvasH * 0.004) - energy * (canvasH * 0.008)
-  const py = areaY + (areaH - ph) / 2 + floatY
-  const bounce = 1 + energy * 0.022 + breathe * 0.005
-  const radius = Math.min(pw, ph) * 0.06
-
-  ctx.save()
-  ctx.translate(px + pw / 2, py + ph / 2)
-  ctx.scale(bounce, bounce)
-  ctx.translate(-(px + pw / 2), -(py + ph / 2))
-  if (!lowPower) {
-    ctx.shadowColor = `rgba(245,158,11,${0.18 + energy * 0.5})`
-    ctx.shadowBlur = 18 + energy * 34
-  }
-  ctx.fillStyle = "#fff"
-  ctx.beginPath()
-  ctx.roundRect(px, py, pw, ph, radius)
-  ctx.fill()
-  ctx.shadowBlur = 0
-  ctx.clip()
-  ctx.drawImage(img, px, py, pw, ph)
-  ctx.restore()
-
-  drawAudioSpectrumBar(ctx, canvasW, canvasH, lip, elapsed, lowPower)
-}
-
-/**
- * 0-Cost 2.5D 3D-Pop / Parallax Photo renderer:
- * - z = back: blurred & slightly overscaled original photo moving slowly opposite to camera sway
- * - z = front: crisp transparent subject cutout moving with greater parallax amplitude,
- *   3D drop shadow, soft rim highlight, gentle perspective tilt, and vocal-reactive bounce.
- */
-export function drawPresenter3dPopFrame(
-  ctx: CanvasRenderingContext2D,
-  originalImg: HTMLImageElement,
   cutoutImg: HTMLImageElement,
   canvasW: number,
   canvasH: number,
   lip: LipSyncWeights,
   elapsed: number,
-  options: Presenter3dPopOptions
+  options?: MascotCutoutFrameOptions
 ): void {
+  const lowPower = Boolean(options?.lowPower)
+  const isCloseUp = options?.framing === "close_up"
   const energy = clamp01(lip.energy)
-  const d = clamp01(options.depth / 100)
+  const mouthOpen = clamp01(lip.aa * 0.85 + lip.oh * 0.45)
+  const mouthSpread = clamp01(lip.ee * 0.75 + lip.ih * 0.35)
 
-  const areaX = canvasW * 0.07
-  const areaY = canvasH * 0.08
-  const areaW = canvasW * 0.86
-  const areaH = canvasH * 0.62
-  const fit = Math.min(areaW / originalImg.width, areaH / originalImg.height)
-  const pw = originalImg.width * fit
-  const ph = originalImg.height * fit
+  // Fit cutout directly on stage backdrop
+  const areaX = canvasW * 0.06
+  const areaY = canvasH * (isCloseUp ? 0.05 : 0.08)
+  const areaW = canvasW * 0.88
+  const areaH = canvasH * (isCloseUp ? 0.72 : 0.66)
+
+  const srcW = cutoutImg.naturalWidth || cutoutImg.width || 1
+  const srcH = cutoutImg.naturalHeight || cutoutImg.height || 1
+  const fit = Math.min(areaW / srcW, areaH / srcH) * (isCloseUp ? 1.14 : 1.0)
+  const pw = srcW * fit
+  const ph = srcH * fit
   const px = areaX + (areaW - pw) / 2
-  const py = areaY + (areaH - ph) / 2
-  const cx = px + pw / 2
-  const cy = py + ph / 2
-  const radius = Math.min(pw, ph) * 0.06
 
-  // Compute camera sway, zoom, tilt, and vocal bounce per motion preset
-  let camX = 0
-  let camY = 0
-  let backZoom = 1.08 + 0.06 * d
-  let frontScale = 1.015 + 0.035 * d
-  let tiltRad = 0
-  let vocalLiftY = 0
+  // Subtle breathing, floating motion & vocal bounce
+  const breathe = Math.sin(elapsed * 1.6)
+  const floatY = breathe * (canvasH * 0.0055) - energy * (canvasH * 0.0095)
+  const py = areaY + (areaH - ph) / 2 + floatY + (isCloseUp ? canvasH * 0.04 : 0)
 
-  if (options.motionPreset === "slow_push") {
-    const push = 0.5 - 0.5 * Math.cos(elapsed * 0.45)
-    camX = Math.sin(elapsed * 0.52) * 0.45
-    camY = Math.cos(elapsed * 0.38) * 0.25
-    backZoom += push * 0.03 * d
-    frontScale += push * 0.085 * d + energy * 0.018
-    tiltRad = Math.sin(elapsed * 0.52) * 0.014 * d
-    vocalLiftY = -energy * canvasH * 0.008
-  } else if (options.motionPreset === "vocal_bounce") {
-    camX = Math.sin(elapsed * 0.78) * 0.45
-    camY = Math.cos(elapsed * 0.58) * 0.3
-    const pop = energy * (0.04 + 0.045 * d)
-    backZoom += energy * 0.012 * d
-    frontScale += pop + Math.sin(elapsed * 1.6) * 0.004
-    tiltRad = Math.sin(elapsed * 3.1) * energy * 0.022 * d + Math.sin(elapsed * 0.78) * 0.008 * d
-    vocalLiftY = -energy * canvasH * (0.008 + 0.014 * d)
-  } else {
-    // orbit_sway (default)
-    camX = Math.sin(elapsed * 0.95)
-    camY = Math.cos(elapsed * 0.65) * 0.55
-    const breathe = Math.sin(elapsed * 0.85) * 0.015 * d
-    backZoom += breathe * 0.5
-    frontScale += breathe + energy * 0.022
-    tiltRad = Math.sin(elapsed * 0.95) * 0.022 * d
-    vocalLiftY = -energy * canvasH * 0.009
-  }
+  // Gentle tilt when speaking + subtle idle sway
+  const speakingTilt = Math.sin(elapsed * 3.4) * energy * 0.032
+  const idleSway = Math.sin(elapsed * 0.95) * 0.011
+  const tiltRad = speakingTilt + idleSway
 
-  const backShiftX = -camX * canvasW * 0.012 * d
-  const backShiftY = -camY * canvasH * 0.008 * d
-  const frontShiftX = camX * canvasW * 0.024 * d
-  const frontShiftY = camY * canvasH * 0.016 * d + vocalLiftY
+  const scaleX = 1 + breathe * 0.003 + energy * 0.014 + mouthSpread * 0.012
+  const scaleY = 1 + breathe * 0.005 + energy * 0.022
 
-  const lowPower = Boolean(options.lowPower)
-
-  // 1. Card Frame + Back Layer (z = back)
-  ctx.save()
-  if (!lowPower) {
-    ctx.shadowColor = `rgba(245,158,11,${0.18 + energy * 0.45})`
-    ctx.shadowBlur = 18 + energy * 28
-  }
-  ctx.fillStyle = "#18181b"
-  ctx.beginPath()
-  ctx.roundRect(px, py, pw, ph, radius)
-  ctx.fill()
-  ctx.shadowBlur = 0
-  ctx.clip()
+  const pivotX = px + pw / 2
+  const pivotY = py + ph * 0.78
 
   ctx.save()
-  ctx.translate(cx + backShiftX, cy + backShiftY)
-  ctx.scale(backZoom, backZoom)
-  ctx.translate(-cx, -cy)
-  if (!lowPower) {
-    const bgBlur = 2 + d * 7
-    ctx.filter = `blur(${bgBlur.toFixed(1)}px) brightness(0.9)`
-  }
-  ctx.drawImage(originalImg, px, py, pw, ph)
-  ctx.restore()
-
-  // Subtle depth vignette over back layer to accentuate subject separation
-  const vignette = ctx.createRadialGradient(
-    cx,
-    cy * 0.95,
-    Math.min(pw, ph) * 0.18,
-    cx,
-    cy,
-    Math.max(pw, ph) * 0.72
-  )
-  vignette.addColorStop(0, "rgba(0, 0, 0, 0)")
-  vignette.addColorStop(1, `rgba(0, 0, 0, ${(0.18 + 0.16 * d).toFixed(2)})`)
-  ctx.fillStyle = vignette
-  ctx.fillRect(px, py, pw, ph)
-
-  // Subtle inner card border highlight
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.22)"
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  ctx.roundRect(px, py, pw, ph, radius)
-  ctx.stroke()
-  ctx.restore()
-
-  // 2. Foreground Subject Cutout (z = front) — pops forward with 3D shadow + soft rim highlight
-  ctx.save()
-  ctx.translate(cx + frontShiftX, cy + frontShiftY)
+  ctx.translate(pivotX, pivotY)
   ctx.rotate(tiltRad)
-  // Gentle 2.5D perspective foreshortening along X/Y based on sway
-  const skewX = -camX * 0.012 * d
-  ctx.transform(1, 0, skewX, 1, 0, 0)
-  ctx.scale(frontScale, frontScale)
-  ctx.translate(-cx, -cy)
+  ctx.scale(scaleX, scaleY)
+  ctx.translate(-pivotX, -pivotY)
 
+  // Soft stage contact drop-shadow & subtle speaking rim glow
   if (!lowPower) {
-    // Soft warm rim highlight behind subject
     ctx.save()
-    ctx.shadowColor = `rgba(253, 230, 138, ${(0.35 + energy * 0.4).toFixed(2)})`
-    ctx.shadowBlur = 12 + energy * 16 + d * 8
+    ctx.shadowColor = `rgba(253, 230, 138, ${(0.22 + energy * 0.38).toFixed(2)})`
+    ctx.shadowBlur = 12 + energy * 18
     ctx.shadowOffsetX = 0
     ctx.shadowOffsetY = -2
     ctx.drawImage(cutoutImg, px, py, pw, ph)
     ctx.restore()
 
-    // Deep 3D drop shadow + crisp foreground subject
-    ctx.shadowColor = `rgba(0, 0, 0, ${(0.32 + 0.22 * d).toFixed(2)})`
-    ctx.shadowBlur = 16 + 24 * d
-    ctx.shadowOffsetX = -camX * 14 * d
-    ctx.shadowOffsetY = 10 + 12 * d
+    ctx.shadowColor = "rgba(0, 0, 0, 0.28)"
+    ctx.shadowBlur = 22
+    ctx.shadowOffsetX = 0
+    ctx.shadowOffsetY = 12
   }
-  ctx.drawImage(cutoutImg, px, py, pw, ph)
+
+  // Seamless 3-slice audio-reactive lip-sync articulation:
+  // When silent (mouthOpen <= 0.01), draw full crisp image in 1 pass.
+  // When speaking, subtly articulate the lower-face / mouth band without tearing.
+  if (mouthOpen <= 0.01 && mouthSpread <= 0.01) {
+    ctx.drawImage(cutoutImg, px, py, pw, ph)
+  } else {
+    const splitTop = 0.44
+    const splitBot = 0.60
+    const sTopH = srcH * splitTop
+    const sMidH = srcH * (splitBot - splitTop)
+    const sBotH = srcH - sTopH - sMidH
+
+    const dTopH = ph * splitTop
+    const jawDropPx = ph * 0.024 * mouthOpen
+    const dMidH = ph * (splitBot - splitTop) + jawDropPx
+    const dBotH = ph * (1 - splitBot)
+    const midSpreadPx = pw * 0.012 * mouthSpread
+
+    // 1. Upper head (crisp, anchored)
+    ctx.drawImage(cutoutImg, 0, 0, srcW, sTopH + 1, px, py, pw, dTopH + 1)
+
+    // 2. Mouth band (subtle vertical vocal openness + horizontal spread)
+    ctx.shadowBlur = 0
+    ctx.shadowOffsetY = 0
+    ctx.drawImage(
+      cutoutImg,
+      0,
+      sTopH,
+      srcW,
+      sMidH + 1,
+      px - midSpreadPx / 2,
+      py + dTopH,
+      pw + midSpreadPx,
+      dMidH + 1
+    )
+
+    // 3. Lower chin & body (follows jaw drop cleanly)
+    ctx.drawImage(
+      cutoutImg,
+      0,
+      sTopH + sMidH,
+      srcW,
+      sBotH,
+      px,
+      py + dTopH + dMidH,
+      pw,
+      dBotH
+    )
+  }
+
   ctx.restore()
 
   drawAudioSpectrumBar(ctx, canvasW, canvasH, lip, elapsed, lowPower)
@@ -1009,7 +420,6 @@ export function drawCaptionBar(
     ctx.scale(popScale, popScale)
     ctx.translate(-canvasW / 2, -centerY)
 
-    // Sleek dark pill backdrop with subtle gold rim
     if (!options?.lowPower) {
       ctx.shadowColor = "rgba(0, 0, 0, 0.42)"
       ctx.shadowBlur = 18
@@ -1065,548 +475,6 @@ export function drawCaptionBar(
     ctx.fillText(l, canvasW / 2, boxY + fontSize * 0.3 + lh * (i + 0.5), maxW)
   })
   ctx.restore()
-}
-
-export interface StudioBackdropOptions {
-  studioSet?: PresenterStudioSet
-  logoDataUrl?: string | null
-  shopName?: string
-}
-
-export interface StudioBackdropController {
-  object: THREE.Group
-  setStudioSet: (studioSet: PresenterStudioSet) => void
-  setLogoDataUrl: (dataUrl: string | null) => void
-  setShopName: (name: string) => void
-  update: (delta: number, elapsed: number, lip?: LipSyncWeights) => void
-  dispose: () => void
-}
-
-function createSoftGlowTexture(innerHex: string, outerHex = "rgba(0,0,0,0)"): THREE.CanvasTexture {
-  const canvas = document.createElement("canvas")
-  canvas.width = 128
-  canvas.height = 128
-  const ctx = canvas.getContext("2d")
-  if (ctx) {
-    const grad = ctx.createRadialGradient(64, 64, 4, 64, 64, 62)
-    grad.addColorStop(0, innerHex)
-    grad.addColorStop(0.45, innerHex)
-    grad.addColorStop(1, outerHex)
-    ctx.fillStyle = grad
-    ctx.fillRect(0, 0, 128, 128)
-  }
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.needsUpdate = true
-  return tex
-}
-
-function createGradientBackdropTexture(topHex: string, bottomHex: string): THREE.CanvasTexture {
-  const canvas = document.createElement("canvas")
-  canvas.width = 256
-  canvas.height = 512
-  const ctx = canvas.getContext("2d")
-  if (ctx) {
-    const grad = ctx.createLinearGradient(0, 0, 0, 512)
-    grad.addColorStop(0, topHex)
-    grad.addColorStop(1, bottomHex)
-    ctx.fillStyle = grad
-    ctx.fillRect(0, 0, 256, 512)
-  }
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.needsUpdate = true
-  return tex
-}
-
-function drawBackWallShopSignTexture(
-  logoImg: HTMLImageElement | null,
-  shopName: string
-): THREE.CanvasTexture {
-  const canvas = document.createElement("canvas")
-  canvas.width = 640
-  canvas.height = 176
-  const ctx = canvas.getContext("2d")
-  if (ctx) {
-    // Sleek dark-bronze illuminated sign plate
-    const bg = ctx.createLinearGradient(0, 0, 640, 176)
-    bg.addColorStop(0, "#1c1917")
-    bg.addColorStop(0.5, "#292524")
-    bg.addColorStop(1, "#18181b")
-    ctx.fillStyle = bg
-    ctx.beginPath()
-    ctx.roundRect(4, 4, 632, 168, 22)
-    ctx.fill()
-
-    // Warm gold inner border
-    ctx.strokeStyle = "rgba(251, 191, 36, 0.72)"
-    ctx.lineWidth = 3
-    ctx.beginPath()
-    ctx.roundRect(10, 10, 620, 156, 18)
-    ctx.stroke()
-
-    const cleanName = shopName.trim()
-    const displayLabel = cleanName || "CREATOR STUDIO"
-
-    if (logoImg) {
-      const logoSize = 96
-      const logoX = cleanName ? 36 : (640 - logoSize) / 2
-      const logoY = (176 - logoSize) / 2
-      ctx.save()
-      ctx.fillStyle = "#faf8f5"
-      ctx.beginPath()
-      ctx.arc(logoX + logoSize / 2, logoY + logoSize / 2, logoSize / 2 + 4, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.beginPath()
-      ctx.arc(logoX + logoSize / 2, logoY + logoSize / 2, logoSize / 2, 0, Math.PI * 2)
-      ctx.clip()
-      ctx.drawImage(logoImg, logoX, logoY, logoSize, logoSize)
-      ctx.restore()
-
-      if (cleanName) {
-        ctx.fillStyle = "#faf8f5"
-        ctx.font = '700 40px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif'
-        ctx.textAlign = "left"
-        ctx.textBaseline = "middle"
-        ctx.fillText(displayLabel, logoX + logoSize + 24, 88, 640 - (logoX + logoSize + 52))
-      }
-    } else {
-      // Default sleek emblem + shop name
-      const cx = 84
-      const cy = 88
-      ctx.fillStyle = "#18181b"
-      ctx.beginPath()
-      ctx.arc(cx, cy, 42, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.strokeStyle = "#d4af37"
-      ctx.lineWidth = 4
-      ctx.beginPath()
-      ctx.arc(cx, cy, 38, 0, Math.PI * 2)
-      ctx.stroke()
-      ctx.fillStyle = "#fde68a"
-      ctx.font = "700 38px Georgia, serif"
-      ctx.textAlign = "center"
-      ctx.textBaseline = "middle"
-      ctx.fillText("S", cx, cy + 2)
-
-      ctx.fillStyle = "#faf8f5"
-      ctx.font = '700 38px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif'
-      ctx.textAlign = "left"
-      ctx.textBaseline = "middle"
-      ctx.fillText(displayLabel, 148, 88, 460)
-    }
-  }
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.needsUpdate = true
-  return tex
-}
-
-/**
- * Builds a modular 3D studio backdrop positioned behind the presenter (z = -1.8 to -3.5)
- * supporting Mobile Showroom, Tech Podcast Studio, Soft Bokeh, and Custom Photo (hidden).
- */
-export function createStudioBackdropGroup(
-  options: StudioBackdropOptions = {}
-): StudioBackdropController {
-  const root = new THREE.Group()
-  root.name = "studio_backdrop_root"
-
-  const disposables: { dispose: () => void }[] = []
-  const track = <T extends { dispose: () => void }>(item: T): T => {
-    disposables.push(item)
-    return item
-  }
-
-  let currentSet: PresenterStudioSet = options.studioSet ?? "mobile_showroom"
-  let currentShopName = options.shopName ?? ""
-  let loadedLogoImg: HTMLImageElement | null = null
-  let signTexture: THREE.CanvasTexture | null = null
-
-  // --- 1. Mobile Showroom Set ---
-  const showroomGroup = new THREE.Group()
-  showroomGroup.name = "studio_mobile_showroom"
-  root.add(showroomGroup)
-
-  const showroomWallMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0xd8d1c6,
-      roughness: 0.94,
-      metalness: 0.02,
-    })
-  )
-  const showroomWall = new THREE.Mesh(track(new THREE.PlaneGeometry(7.2, 5.2)), showroomWallMat)
-  showroomWall.position.set(0, 1.35, -2.85)
-  showroomGroup.add(showroomWall)
-
-  const nicheBackMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0x262320,
-      roughness: 0.85,
-      metalness: 0.06,
-    })
-  )
-  const shelfWoodMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0x44403c,
-      roughness: 0.72,
-      metalness: 0.08,
-    })
-  )
-  const shelfLedMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0xfde68a,
-      emissive: 0xf59e0b,
-      emissiveIntensity: 1.45,
-      roughness: 0.3,
-    })
-  )
-  const phoneBodyMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0x18181b,
-      roughness: 0.35,
-      metalness: 0.7,
-    })
-  )
-  const phoneScreenMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      emissive: 0x0284c7,
-      emissiveIntensity: 0.85,
-      roughness: 0.2,
-    })
-  )
-
-  const nicheBackingGeo = track(new THREE.BoxGeometry(0.92, 1.42, 0.08))
-  const shelfPlankGeo = track(new THREE.BoxGeometry(0.84, 0.032, 0.14))
-  const ledStripGeo = track(new THREE.BoxGeometry(0.8, 0.012, 0.018))
-  const phoneBodyGeo = track(new THREE.BoxGeometry(0.082, 0.165, 0.014))
-  const phoneScreenGeo = track(new THREE.PlaneGeometry(0.072, 0.148))
-
-  for (const side of [-1, 1]) {
-    const nicheX = side * 1.15
-    const nicheBack = new THREE.Mesh(nicheBackingGeo, nicheBackMat)
-    nicheBack.position.set(nicheX, 1.32, -2.76)
-    showroomGroup.add(nicheBack)
-
-    for (const shelfY of [1.02, 1.48]) {
-      const plank = new THREE.Mesh(shelfPlankGeo, shelfWoodMat)
-      plank.position.set(nicheX, shelfY, -2.68)
-      showroomGroup.add(plank)
-
-      const led = new THREE.Mesh(ledStripGeo, shelfLedMat)
-      led.position.set(nicheX, shelfY + 0.32, -2.71)
-      showroomGroup.add(led)
-
-      // 3 stylized smartphone display silhouettes per shelf
-      for (let p = -1; p <= 1; p++) {
-        const phoneX = nicheX + p * 0.24
-        const phoneY = shelfY + 0.105
-        const phone = new THREE.Mesh(phoneBodyGeo, phoneBodyMat)
-        phone.position.set(phoneX, phoneY, -2.65)
-        phone.rotation.y = -side * 0.18
-        phone.rotation.x = -0.1
-        showroomGroup.add(phone)
-
-        const screen = new THREE.Mesh(phoneScreenGeo, phoneScreenMat)
-        screen.position.set(phoneX, phoneY, -2.641)
-        screen.rotation.y = -side * 0.18
-        screen.rotation.x = -0.1
-        showroomGroup.add(screen)
-      }
-    }
-  }
-
-  // Framed illuminated back-wall shop sign
-  const signFrameMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0xb48a3a,
-      roughness: 0.35,
-      metalness: 0.72,
-    })
-  )
-  const signFrame = new THREE.Mesh(track(new THREE.BoxGeometry(1.18, 0.35, 0.045)), signFrameMat)
-  signFrame.position.set(0, 1.78, -2.68)
-  showroomGroup.add(signFrame)
-
-  signTexture = drawBackWallShopSignTexture(null, currentShopName)
-  const signFaceMat = track(
-    new THREE.MeshBasicMaterial({
-      map: signTexture,
-    })
-  )
-  const signFace = new THREE.Mesh(track(new THREE.PlaneGeometry(1.12, 0.31)), signFaceMat)
-  signFace.position.set(0, 1.78, -2.654)
-  showroomGroup.add(signFace)
-
-  // --- 2. Tech Podcast Studio Set ---
-  const podcastGroup = new THREE.Group()
-  podcastGroup.name = "studio_tech_podcast"
-  root.add(podcastGroup)
-
-  const podcastWallMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0x141418,
-      roughness: 0.95,
-      metalness: 0.04,
-    })
-  )
-  const podcastWall = new THREE.Mesh(track(new THREE.PlaneGeometry(7.2, 5.2)), podcastWallMat)
-  podcastWall.position.set(0, 1.35, -2.85)
-  podcastGroup.add(podcastWall)
-
-  // Acoustic slats
-  const slatMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0x202026,
-      roughness: 0.88,
-      metalness: 0.05,
-    })
-  )
-  const slatGeo = track(new THREE.BoxGeometry(0.11, 3.8, 0.05))
-  for (let i = -9; i <= 9; i++) {
-    const slat = new THREE.Mesh(slatGeo, slatMat)
-    slat.position.set(i * 0.22, 1.4, -2.74)
-    podcastGroup.add(slat)
-  }
-
-  // Warm amber & cool cyan vertical LED bars
-  const amberLedMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0xfbbf24,
-      emissive: 0xf59e0b,
-      emissiveIntensity: 1.75,
-      roughness: 0.25,
-    })
-  )
-  const cyanLedMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0x67e8f9,
-      emissive: 0x06b6d4,
-      emissiveIntensity: 1.75,
-      roughness: 0.25,
-    })
-  )
-  const ledBarGeo = track(new THREE.BoxGeometry(0.036, 2.5, 0.03))
-
-  const leftAmberBar = new THREE.Mesh(ledBarGeo, amberLedMat)
-  leftAmberBar.position.set(-0.82, 1.35, -2.62)
-  podcastGroup.add(leftAmberBar)
-
-  const rightCyanBar = new THREE.Mesh(ledBarGeo, cyanLedMat)
-  rightCyanBar.position.set(0.82, 1.35, -2.62)
-  podcastGroup.add(rightCyanBar)
-
-  const outerLeftCyan = new THREE.Mesh(ledBarGeo, cyanLedMat)
-  outerLeftCyan.position.set(-1.55, 1.35, -2.66)
-  podcastGroup.add(outerLeftCyan)
-
-  const outerRightAmber = new THREE.Mesh(ledBarGeo, amberLedMat)
-  outerRightAmber.position.set(1.55, 1.35, -2.66)
-  podcastGroup.add(outerRightAmber)
-
-  // Soft ambient studio glow halo
-  const haloTex = track(createSoftGlowTexture("rgba(245, 158, 11, 0.28)"))
-  const haloMat = track(
-    new THREE.MeshBasicMaterial({
-      map: haloTex,
-      transparent: true,
-      depthWrite: false,
-    })
-  )
-  const haloPlane = new THREE.Mesh(track(new THREE.PlaneGeometry(2.8, 2.8)), haloMat)
-  haloPlane.position.set(0, 1.35, -2.76)
-  podcastGroup.add(haloPlane)
-
-  // Subtle desk edge & studio mic silhouette in lower corner
-  const deskMat = track(
-    new THREE.MeshStandardMaterial({
-      color: 0x1c1917,
-      roughness: 0.65,
-      metalness: 0.25,
-    })
-  )
-  const deskEdge = new THREE.Mesh(track(new THREE.BoxGeometry(3.2, 0.08, 0.55)), deskMat)
-  deskEdge.position.set(0, 0.68, -1.85)
-  podcastGroup.add(deskEdge)
-
-  const micGroup = new THREE.Group()
-  micGroup.position.set(0.56, 0.72, -1.78)
-  const micStand = new THREE.Mesh(track(new THREE.CylinderGeometry(0.012, 0.016, 0.28, 12)), deskMat)
-  micStand.position.set(0, 0.14, 0)
-  micGroup.add(micStand)
-  const micArm = new THREE.Mesh(track(new THREE.CylinderGeometry(0.01, 0.01, 0.22, 10)), deskMat)
-  micArm.position.set(-0.07, 0.31, 0.03)
-  micArm.rotation.z = 0.75
-  micGroup.add(micArm)
-  const micCapsule = new THREE.Mesh(track(new THREE.CapsuleGeometry(0.032, 0.065, 8, 14)), deskMat)
-  micCapsule.position.set(-0.14, 0.36, 0.06)
-  micCapsule.rotation.z = 0.55
-  micGroup.add(micCapsule)
-  podcastGroup.add(micGroup)
-
-  // --- 3. Soft Studio Bokeh Set ---
-  const bokehGroup = new THREE.Group()
-  bokehGroup.name = "studio_soft_bokeh"
-  root.add(bokehGroup)
-
-  const bokehBgTex = track(createGradientBackdropTexture("#27272a", "#18181b"))
-  const bokehBgMat = track(
-    new THREE.MeshBasicMaterial({
-      map: bokehBgTex,
-    })
-  )
-  const bokehBg = new THREE.Mesh(track(new THREE.PlaneGeometry(7.6, 5.6)), bokehBgMat)
-  bokehBg.position.set(0, 1.35, -3.35)
-  bokehGroup.add(bokehBg)
-
-  const bokehCount = 44
-  const bokehPositions = new Float32Array(bokehCount * 3)
-  const bokehColors = new Float32Array(bokehCount * 3)
-  const bokehSpeeds = new Float32Array(bokehCount)
-  const bokehPhases = new Float32Array(bokehCount)
-  const palette = [
-    new THREE.Color(0xfde68a),
-    new THREE.Color(0xf59e0b),
-    new THREE.Color(0xfaf8f5),
-    new THREE.Color(0x93c5fd),
-  ]
-
-  for (let i = 0; i < bokehCount; i++) {
-    bokehPositions[i * 3] = (Math.random() - 0.5) * 3.8
-    bokehPositions[i * 3 + 1] = 0.3 + Math.random() * 2.4
-    bokehPositions[i * 3 + 2] = -2.1 - Math.random() * 1.1
-    bokehSpeeds[i] = 0.04 + Math.random() * 0.07
-    bokehPhases[i] = Math.random() * Math.PI * 2
-    const c = palette[i % palette.length]
-    bokehColors[i * 3] = c.r
-    bokehColors[i * 3 + 1] = c.g
-    bokehColors[i * 3 + 2] = c.b
-  }
-
-  const bokehGeo = track(new THREE.BufferGeometry())
-  bokehGeo.setAttribute("position", new THREE.BufferAttribute(bokehPositions, 3))
-  bokehGeo.setAttribute("color", new THREE.BufferAttribute(bokehColors, 3))
-
-  const bokehOrbTex = track(createSoftGlowTexture("rgba(255, 255, 255, 0.88)"))
-  const bokehMat = track(
-    new THREE.PointsMaterial({
-      size: 0.44,
-      map: bokehOrbTex,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.52,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    })
-  )
-  const bokehPoints = new THREE.Points(bokehGeo, bokehMat)
-  bokehGroup.add(bokehPoints)
-
-  const releaseSignTexture = () => {
-    if (!signTexture) return
-    if (
-      typeof HTMLCanvasElement !== "undefined" &&
-      signTexture.image instanceof HTMLCanvasElement
-    ) {
-      signTexture.image.width = 0
-      signTexture.image.height = 0
-    }
-    signTexture.dispose()
-    signTexture = null
-  }
-
-  const refreshSignTexture = () => {
-    const nextTex = drawBackWallShopSignTexture(loadedLogoImg, currentShopName)
-    releaseSignTexture()
-    signTexture = nextTex
-    signFaceMat.map = nextTex
-    signFaceMat.needsUpdate = true
-  }
-
-  const applyStudioVisibility = (set: PresenterStudioSet) => {
-    currentSet = set
-    root.visible = set !== "custom_photo"
-    showroomGroup.visible = set === "mobile_showroom"
-    podcastGroup.visible = set === "tech_podcast"
-    bokehGroup.visible = set === "soft_bokeh"
-  }
-
-  const setLogoDataUrl = (dataUrl: string | null) => {
-    if (!dataUrl) {
-      loadedLogoImg = null
-      refreshSignTexture()
-      return
-    }
-    const img = new Image()
-    img.onload = () => {
-      loadedLogoImg = img
-      refreshSignTexture()
-    }
-    img.onerror = () => {
-      loadedLogoImg = null
-      refreshSignTexture()
-    }
-    img.src = dataUrl
-  }
-
-  const setShopName = (name: string) => {
-    if (name === currentShopName) return
-    currentShopName = name
-    refreshSignTexture()
-  }
-
-  applyStudioVisibility(currentSet)
-  if (options.logoDataUrl) {
-    setLogoDataUrl(options.logoDataUrl)
-  }
-
-  const update = (delta: number, elapsed: number, lip?: LipSyncWeights) => {
-    const energy = lip ? clamp01(lip.energy) : 0
-    if (currentSet === "tech_podcast") {
-      const pulse = 1.55 + Math.sin(elapsed * 2.1) * 0.2 + energy * 0.65
-      amberLedMat.emissiveIntensity = pulse
-      cyanLedMat.emissiveIntensity = 1.6 + Math.cos(elapsed * 1.7) * 0.2 + energy * 0.55
-    } else if (currentSet === "soft_bokeh") {
-      const posAttr = bokehGeo.getAttribute("position") as THREE.BufferAttribute
-      for (let i = 0; i < bokehCount; i++) {
-        let x = posAttr.getX(i) + Math.sin(elapsed * 0.55 + bokehPhases[i]) * delta * 0.06
-        let y = posAttr.getY(i) + bokehSpeeds[i] * delta
-        if (y > 2.8) y = 0.25
-        if (x > 2.0) x = -2.0
-        if (x < -2.0) x = 2.0
-        posAttr.setXY(i, x, y)
-      }
-      posAttr.needsUpdate = true
-    }
-  }
-
-  const dispose = () => {
-    releaseSignTexture()
-    for (const item of disposables) {
-      if (
-        item &&
-        typeof item === "object" &&
-        "isTexture" in item &&
-        typeof HTMLCanvasElement !== "undefined" &&
-        (item as unknown as THREE.Texture).image instanceof HTMLCanvasElement
-      ) {
-        const canvas = (item as unknown as THREE.Texture).image as HTMLCanvasElement
-        canvas.width = 0
-        canvas.height = 0
-      }
-      item.dispose()
-    }
-  }
-
-  return {
-    object: root,
-    setStudioSet: applyStudioVisibility,
-    setLogoDataUrl,
-    setShopName,
-    update,
-    dispose,
-  }
 }
 
 /**
@@ -1679,7 +547,6 @@ export function drawBroadcastLowerThird(
   const radius = Math.round(cardH * 0.24)
 
   ctx.save()
-  // Glassmorphic warm-charcoal card
   if (!options.lowPower) {
     ctx.shadowColor = "rgba(0, 0, 0, 0.32)"
     ctx.shadowBlur = 18
@@ -1705,7 +572,6 @@ export function drawBroadcastLowerThird(
 
   let textStartX = cardX + 24
 
-  // Mini shop logo thumbnail
   if (options.logoImg) {
     const thumbSize = Math.round(cardH * 0.66)
     const thumbX = textStartX
@@ -1751,7 +617,6 @@ export function drawBroadcastLowerThird(
     ctx.fill()
   }
 
-  // Presenter Name + Shop Name badge
   const maxTextW = Math.max(60, eqX - textStartX - 14)
   const titleFontSize = Math.round(cardH * 0.31)
   const subFontSize = Math.round(cardH * 0.24)
@@ -1848,7 +713,6 @@ export function drawPipPhoneOverlay(
   ctx.scale(vocalPop, vocalPop)
   ctx.translate(-cx, -cy)
 
-  // Dark-glass showcase card container
   if (!options.lowPower) {
     ctx.shadowColor = "rgba(0, 0, 0, 0.36)"
     ctx.shadowBlur = 20
@@ -1867,7 +731,6 @@ export function drawPipPhoneOverlay(
   ctx.roundRect(x, y, cardW, cardH, radius)
   ctx.stroke()
 
-  // Featured Phone Photo (contained cleanly inside card)
   if (options.phoneImg) {
     const imgPadX = cardW * 0.1
     const imgTop = cleanPromo ? cardH * 0.16 : cardH * 0.08
@@ -1890,7 +753,6 @@ export function drawPipPhoneOverlay(
     ctx.restore()
   }
 
-  // Promo / Installment / Trust Badge Pill (top)
   if (cleanPromo) {
     const promoFontSize = Math.max(11, Math.round(cardW * 0.072))
     ctx.font = `700 ${promoFontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`
@@ -1911,7 +773,6 @@ export function drawPipPhoneOverlay(
     ctx.fillText(cleanPromo, pillX + pillW / 2, pillY + pillH / 2 + 0.5, pillW - 10)
   }
 
-  // Price Pill (bottom)
   if (cleanPrice) {
     const priceFontSize = Math.max(12, Math.round(cardW * 0.084))
     ctx.font = `800 ${priceFontSize}px "Padauk", "Noto Sans Myanmar", system-ui, sans-serif`

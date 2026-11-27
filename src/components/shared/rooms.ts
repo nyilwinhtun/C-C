@@ -171,8 +171,8 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
       {
         key: "presenter3d",
         labelKey: "nav.presenter3d",
-        labelMy: "2D/3D တင်ဆက်သူ",
-        labelEn: "Presenter (2D/3D)",
+        labelMy: "2D ရုပ်ပုံ",
+        labelEn: "2D Mascot",
         icon: Sparkles,
       },
     ],
