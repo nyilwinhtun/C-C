@@ -425,7 +425,7 @@ export function TranscriberPage() {
                   variant={langHint === opt.id ? "default" : "outline"}
                   onClick={() => setLangHint(opt.id)}
                   disabled={isRecording || isTranscribing}
-                  className="text-xs"
+                  className="h-auto min-h-8 px-1.5 sm:px-3 py-1.5 text-[11px] sm:text-xs whitespace-normal text-center leading-tight"
                 >
                   {isMy ? opt.labelMy : opt.label}
                 </Button>
@@ -454,7 +454,7 @@ export function TranscriberPage() {
                   variant={topicHint === opt.id ? "default" : "outline"}
                   onClick={() => setTopicHint(opt.id)}
                   disabled={isRecording || isTranscribing}
-                  className="text-xs"
+                  className="h-auto min-h-8 px-2 py-1.5 text-[11px] sm:text-xs whitespace-normal text-center leading-tight"
                 >
                   {isMy ? opt.labelMy : opt.label}
                 </Button>

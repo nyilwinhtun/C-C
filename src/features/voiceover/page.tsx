@@ -1140,7 +1140,7 @@ export function VoiceoverPage() {
         {showTeleprompter ? (
           <div className="flex flex-col">
             {/* Teleprompter Controls Bar */}
-            <div className="flex items-center justify-between gap-2 border-b border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B]/60 px-4 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B]/60 px-4 py-2">
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[#E11D48] font-myanmar">
                   <span className="h-1.5 w-1.5 rounded-full bg-[#E11D48] animate-pulse" />
@@ -1254,7 +1254,7 @@ export function VoiceoverPage() {
                     >
                       {language === "my"
                         ? `စာလုံးရေ ${displayCount} / ၁,၅၀၀ (~${displaySec} စက္ကန့်)`
-                        : `စာလုံးရေ ${displayCount} / ၁,၅၀၀ (~${displaySec} စက္ကန့်)`}
+                        : `Chars ${displayCount} / 1,500 (~${displaySec}s)`}
                     </span>
                     {voiceScriptText.trim() && (
                       <button
@@ -1665,7 +1665,7 @@ export function VoiceoverPage() {
                           key={seg.id}
                           className="rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] p-2.5 space-y-2"
                         >
-                          <div className="flex items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="flex flex-wrap items-center gap-1.5">
                               <span className="inline-flex items-center rounded-md bg-[#F0EDE8] dark:bg-[#3F3F46] px-2 py-0.5 text-[11px] font-semibold tabular-nums text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
                                 {language === "my"

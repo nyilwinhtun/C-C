@@ -7,8 +7,47 @@ import {
 export type OriginalAudioVolume = 0 | 0.15 | 0.5
 export type VideoDurationSyncMode = "loop_video" | "fit_video"
 export type VideoAspectRatio = "original" | "9:16" | "1:1" | "16:9"
+export type VideoExportQualityPreset = "mobile_fast" | "studio_hd"
 export type BackgroundMusicPreset = "none" | "upbeat_promo" | "soft_vlog" | "calm_lofi" | "custom"
 export type SubtitleStylePreset = "dark_pill" | "yellow_box" | "bold_outline"
+
+export const VIDEO_BLOB_REVOKE_DELAY_MS = 60_000
+
+/**
+ * Delay URL.revokeObjectURL by at least 60s so iOS Safari and Android Chrome
+ * can finish background video/file downloads before the blob URL is released.
+ */
+export function revokeBlobUrlAfterDelay(
+  url: string | null | undefined,
+  delayMs = VIDEO_BLOB_REVOKE_DELAY_MS
+): void {
+  if (!url) return
+  const safeDelay = Math.max(VIDEO_BLOB_REVOKE_DELAY_MS, delayMs)
+  if (typeof window !== "undefined") {
+    window.setTimeout(() => {
+      try {
+        URL.revokeObjectURL(url)
+      } catch {
+        // Ignore already-revoked URLs
+      }
+    }, safeDelay)
+  } else {
+    URL.revokeObjectURL(url)
+  }
+}
+
+export function detectMobileVideoDevice(): boolean {
+  if (typeof window === "undefined") return false
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : ""
+  if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)) {
+    return true
+  }
+  if (window.innerWidth < 768) return true
+  if (window.matchMedia?.("(pointer: coarse)").matches) {
+    return true
+  }
+  return false
+}
 
 export interface SubtitleSegment {
   text: string
@@ -24,6 +63,7 @@ export interface MergeVideoAudioOptions {
   voiceoverVolume?: number
   durationSyncMode?: VideoDurationSyncMode
   aspectRatio?: VideoAspectRatio
+  qualityPreset?: VideoExportQualityPreset
   enableBlurredBackground?: boolean
   backgroundMusicPreset?: BackgroundMusicPreset
   backgroundMusicFile?: File | null
@@ -70,14 +110,20 @@ function pickSupportedVideoMimeType(): string {
   return ""
 }
 
-function createSafeVideoMediaRecorder(stream: MediaStream, mimeType: string): MediaRecorder {
+function createSafeVideoMediaRecorder(
+  stream: MediaStream,
+  mimeType: string,
+  qualityPreset: VideoExportQualityPreset
+): MediaRecorder {
+  const videoBitsPerSecond = qualityPreset === "mobile_fast" ? 2_500_000 : 4_000_000
+  const audioBitsPerSecond = qualityPreset === "mobile_fast" ? 96_000 : 128_000
   const attempts: MediaRecorderOptions[] = []
   if (mimeType) {
-    attempts.push({ mimeType, videoBitsPerSecond: 4_000_000, audioBitsPerSecond: 128_000 })
-    attempts.push({ mimeType, videoBitsPerSecond: 4_000_000 })
+    attempts.push({ mimeType, videoBitsPerSecond, audioBitsPerSecond })
+    attempts.push({ mimeType, videoBitsPerSecond })
     attempts.push({ mimeType })
   } else {
-    attempts.push({ videoBitsPerSecond: 4_000_000, audioBitsPerSecond: 128_000 })
+    attempts.push({ videoBitsPerSecond, audioBitsPerSecond })
   }
 
   for (const opts of attempts) {
@@ -108,8 +154,11 @@ function getEvenDimension(value: number): number {
   return rounded % 2 === 0 ? rounded : rounded - 1
 }
 
-function computeCanvasSize(videoWidth: number, videoHeight: number): { width: number; height: number } {
-  const maxDimension = 1920
+function computeCanvasSize(
+  videoWidth: number,
+  videoHeight: number,
+  maxDimension = 1920
+): { width: number; height: number } {
   const largest = Math.max(videoWidth, videoHeight)
   const scale = largest > maxDimension ? maxDimension / largest : 1
   return {
@@ -121,8 +170,23 @@ function computeCanvasSize(videoWidth: number, videoHeight: number): { width: nu
 function resolveCanvasDimensions(
   aspectRatio: VideoAspectRatio,
   sourceWidth: number,
-  sourceHeight: number
+  sourceHeight: number,
+  qualityPreset: VideoExportQualityPreset = "studio_hd"
 ): { width: number; height: number } {
+  if (qualityPreset === "mobile_fast") {
+    switch (aspectRatio) {
+      case "9:16":
+        return { width: 540, height: 960 }
+      case "1:1":
+        return { width: 540, height: 540 }
+      case "16:9":
+        return { width: 960, height: 540 }
+      case "original":
+      default:
+        return computeCanvasSize(sourceWidth, sourceHeight, 960)
+    }
+  }
+
   switch (aspectRatio) {
     case "9:16":
       return { width: 720, height: 1280 }
@@ -132,7 +196,7 @@ function resolveCanvasDimensions(
       return { width: 1280, height: 720 }
     case "original":
     default:
-      return computeCanvasSize(sourceWidth, sourceHeight)
+      return computeCanvasSize(sourceWidth, sourceHeight, 1920)
   }
 }
 
@@ -749,6 +813,7 @@ export async function mergeVideoWithVoiceover({
   voiceoverVolume = 1.0,
   durationSyncMode,
   aspectRatio,
+  qualityPreset,
   enableBlurredBackground = true,
   backgroundMusicPreset = "none",
   backgroundMusicFile = null,
@@ -907,12 +972,16 @@ export async function mergeVideoWithVoiceover({
       throw new DOMException("Merge cancelled.", "AbortError")
     }
 
+    const resolvedQuality: VideoExportQualityPreset =
+      qualityPreset ?? (detectMobileVideoDevice() ? "mobile_fast" : "studio_hd")
+    const targetFps = resolvedQuality === "mobile_fast" ? 24 : 30
     const resolvedAspect: VideoAspectRatio =
       aspectRatio ?? (isPhotoMode ? "9:16" : "original")
     const { width, height } = resolveCanvasDimensions(
       resolvedAspect,
       sourceWidth,
-      sourceHeight
+      sourceHeight,
+      resolvedQuality
     )
 
     const canvas = document.createElement("canvas")
@@ -1002,13 +1071,13 @@ export async function mergeVideoWithVoiceover({
       }
     }
 
-    const canvasStream = canvas.captureStream(30)
+    const canvasStream = canvas.captureStream(targetFps)
     combinedStream = new MediaStream([
       ...canvasStream.getVideoTracks(),
       ...streamDestination.stream.getAudioTracks(),
     ])
 
-    recorder = createSafeVideoMediaRecorder(combinedStream, mimeType)
+    recorder = createSafeVideoMediaRecorder(combinedStream, mimeType, resolvedQuality)
     const recordedChunks: BlobPart[] = []
 
     recorder.ondataavailable = (event) => {
@@ -1208,36 +1277,40 @@ export async function mergeVideoWithVoiceover({
         rafId = requestAnimationFrame(renderFrame)
       }
 
-      const timesliceMs = getRecorderTimesliceMs(mimeType)
-      if (timesliceMs !== undefined) {
-        recorder.start(timesliceMs)
-      } else {
-        recorder.start()
-      }
-      startPerfMs = performance.now()
-      const audioStartTime = audioCtx.currentTime
-      originalAudioSource?.start(audioStartTime)
-      voiceoverSource?.start(audioStartTime)
-      if (musicSource && musicGain) {
-        if (enableAutoDucking) {
-          scheduleAutoDucking(
-            musicGain,
-            voiceoverBuffer,
-            audioStartTime,
-            backgroundMusicVolume,
-            0.12
-          )
+      const startRecordingAndAudio = () => {
+        if (finished || signal?.aborted || !recorder) return
+        const timesliceMs = getRecorderTimesliceMs(mimeType)
+        if (timesliceMs !== undefined) {
+          recorder.start(timesliceMs)
+        } else {
+          recorder.start()
         }
-        musicSource.start(audioStartTime)
+        startPerfMs = performance.now()
+        const audioStartTime = audioCtx.currentTime
+        originalAudioSource?.start(audioStartTime)
+        voiceoverSource?.start(audioStartTime)
+        if (musicSource && musicGain) {
+          if (enableAutoDucking) {
+            scheduleAutoDucking(
+              musicGain,
+              voiceoverBuffer,
+              audioStartTime,
+              backgroundMusicVolume,
+              0.12
+            )
+          }
+          musicSource.start(audioStartTime)
+        }
+        rafId = requestAnimationFrame(renderFrame)
       }
 
       if (isPhotoMode) {
-        rafId = requestAnimationFrame(renderFrame)
+        startRecordingAndAudio()
       } else if (video) {
         video
           .play()
           .then(() => {
-            rafId = requestAnimationFrame(renderFrame)
+            startRecordingAndAudio()
           })
           .catch((playErr) => {
             reject(

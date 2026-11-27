@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
+  AlertCircle,
   Check,
   Copy,
   Lightbulb,
@@ -176,6 +177,77 @@ function replaceOpeningLine(text: string, newHook: string): string {
   return newHook.trim()
 }
 
+function hasConfiguredWriterApiKey(): boolean {
+  const { aiProvider, apiKeys } = useUIStore.getState()
+  const envGeminiKey =
+    (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ?? ""
+  const envOpenRouterKey =
+    (import.meta.env.VITE_OPENROUTER_API_KEY as string | undefined)?.trim() ?? ""
+  if (aiProvider === "gemini") {
+    const geminiPool = useContentStore.getState().getGeminiKeyPool()
+    return Boolean(geminiPool.length > 0 || apiKeys.gemini.trim() || envGeminiKey)
+  }
+  if (aiProvider === "openrouter") {
+    return Boolean(apiKeys.openrouter.trim() || envOpenRouterKey)
+  }
+  return Boolean(apiKeys.groq.trim())
+}
+
+function formatWriterApiError(
+  err: unknown,
+  language: "en" | "my",
+  fallbackKey: string
+): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "")
+  const lower = raw.toLowerCase()
+
+  if (
+    lower.includes("api key is required") ||
+    lower.includes("missing api key") ||
+    lower.includes("no api key") ||
+    raw.includes("API Key ထည့်သွင်းထားခြင်းမရှိ")
+  ) {
+    return t(language, "postWriter.error.missingKey")
+  }
+  if (
+    lower.includes("user location is not supported") ||
+    lower.includes("location is not supported") ||
+    lower.includes("not available in your country") ||
+    lower.includes("region")
+  ) {
+    return t(language, "postWriter.error.regionBlocked")
+  }
+  if (
+    lower.includes("invalid api key") ||
+    lower.includes("api key not valid") ||
+    lower.includes("invalid_api_key") ||
+    lower.includes("unauthorized") ||
+    lower.includes("(401)") ||
+    lower.includes("(403)")
+  ) {
+    return t(language, "postWriter.error.invalidKey")
+  }
+  if (
+    lower.includes("failed to fetch") ||
+    lower.includes("networkerror") ||
+    lower.includes("load failed") ||
+    lower.includes("network request failed") ||
+    lower.includes("err_internet_disconnected")
+  ) {
+    return t(language, "postWriter.error.networkError")
+  }
+  if (
+    lower.includes("quota") ||
+    lower.includes("rate limit") ||
+    lower.includes("resource_exhausted") ||
+    lower.includes("429")
+  ) {
+    return t(language, "postWriter.error.quotaExceeded")
+  }
+
+  return raw.trim() || t(language, fallbackKey)
+}
+
 export function GeneratorPage() {
   const { language, setActivePageKey } = useUIStore(
     useShallow((state) => ({
@@ -245,6 +317,7 @@ export function GeneratorPage() {
     text: string
   } | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [writerError, setWriterError] = useState<string | null>(null)
   const [polishingAction, setPolishingAction] = useState<
     "hooks" | "shorten" | "humanize" | null
   >(null)
@@ -473,6 +546,14 @@ export function GeneratorPage() {
       return
     }
 
+    if (!hasConfiguredWriterApiKey()) {
+      const msg = t(language, "postWriter.error.missingKey")
+      setWriterError(msg)
+      toast.error(msg, { duration: 6000 })
+      return
+    }
+
+    setWriterError(null)
     setIsGenerating(true)
     try {
       const dual = await generateEditorialDualAngles({
@@ -504,9 +585,9 @@ export function GeneratorPage() {
         content: dual.optionA,
       })
     } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : t(language, "postWriter.toast.polishError")
-      toast.error(msg)
+      const msg = formatWriterApiError(err, language, "postWriter.toast.polishError")
+      setWriterError(msg)
+      toast.error(msg, { duration: 6000 })
     } finally {
       setIsGenerating(false)
     }
@@ -551,6 +632,13 @@ export function GeneratorPage() {
 
   const handleGenerateHooks = async () => {
     if (!editorialResult || !activeText.trim()) return
+    if (!hasConfiguredWriterApiKey()) {
+      const msg = t(language, "postWriter.error.missingKey")
+      setWriterError(msg)
+      toast.error(msg, { duration: 6000 })
+      return
+    }
+    setWriterError(null)
     setPolishingAction("hooks")
     try {
       const hooks = await generateEditorialHooks({
@@ -564,9 +652,9 @@ export function GeneratorPage() {
       if (!latest) return
       setEditorialResult({ ...latest, hooks })
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : t(language, "postWriter.toast.hooksError")
-      )
+      const msg = formatWriterApiError(err, language, "postWriter.toast.hooksError")
+      setWriterError(msg)
+      toast.error(msg, { duration: 6000 })
     } finally {
       setPolishingAction(null)
     }
@@ -574,8 +662,15 @@ export function GeneratorPage() {
 
   const handlePolish = async (mode: "shorten" | "humanize") => {
     if (!editorialResult || !activeText.trim()) return
+    if (!hasConfiguredWriterApiKey()) {
+      const msg = t(language, "postWriter.error.missingKey")
+      setWriterError(msg)
+      toast.error(msg, { duration: 6000 })
+      return
+    }
     const targetOption = editorialResult.activeOption
     const previousText = activeText
+    setWriterError(null)
     setPolishingAction(mode)
     try {
       const refined = await polishEditorialDraft({
@@ -598,9 +693,9 @@ export function GeneratorPage() {
           : t(language, "postWriter.toast.humanized")
       )
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : t(language, "postWriter.toast.refineError")
-      )
+      const msg = formatWriterApiError(err, language, "postWriter.toast.refineError")
+      setWriterError(msg)
+      toast.error(msg, { duration: 6000 })
     } finally {
       setPolishingAction(null)
     }
@@ -777,8 +872,8 @@ export function GeneratorPage() {
         />
 
         {/* Integrated Input Footer Bar with Mic Button */}
-        <div className="flex items-center justify-between gap-2 border-t border-border/50 px-3.5 py-2.5 sm:px-4">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/50 px-3.5 py-2.5 sm:px-4">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0 flex-1">
             {isRecording ? (
               <div className="flex items-center gap-2 min-w-0">
                 <div className="flex h-4 w-16 shrink-0 items-center gap-0.5" aria-hidden="true">
@@ -810,12 +905,12 @@ export function GeneratorPage() {
                 </span>
               </div>
             ) : isTranscribing ? (
-              <span className="inline-flex items-center gap-1.5 text-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                {t(language, "postWriter.transcribing")}
+              <span className="inline-flex items-center gap-1.5 text-foreground truncate">
+                <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                <span className="truncate">{t(language, "postWriter.transcribing")}</span>
               </span>
             ) : (
-              <span>
+              <span className="truncate">
                 {rawNotes.trim().length > 0
                   ? `${rawNotes.trim().length} ${t(language, "generator.characters")}`
                   : t(language, "postWriter.micStart")}
@@ -823,7 +918,7 @@ export function GeneratorPage() {
             )}
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => {
@@ -868,6 +963,27 @@ export function GeneratorPage() {
           </div>
         </div>
       </div>
+
+      {/* Inline API Key / Network / Regional Block Guidance */}
+      {writerError && (
+        <div
+          role="alert"
+          className="mt-3 flex items-start justify-between gap-2.5 rounded-xl border border-red-500/40 bg-red-500/10 px-3.5 py-2.5 text-xs text-red-700 dark:text-red-300 font-myanmar"
+        >
+          <div className="flex items-start gap-2 min-w-0">
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-red-600 dark:text-red-400" aria-hidden="true" />
+            <p className="leading-relaxed break-words">{writerError}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setWriterError(null)}
+            className="shrink-0 rounded p-0.5 text-red-600/80 hover:text-red-700 dark:text-red-400/80 dark:hover:text-red-300 cursor-pointer"
+            aria-label="Dismiss error"
+          >
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      )}
 
       {/* Primary Action Row + Settings Trigger */}
       <div className="mt-3.5 flex items-center gap-2">
@@ -1051,7 +1167,7 @@ export function GeneratorPage() {
               <Button
                 type="button"
                 onClick={handleCopy}
-                className="h-10 flex-1 rounded-xl bg-neutral-900 text-sm font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+                className="h-10 min-w-[120px] flex-1 rounded-xl bg-neutral-900 text-sm font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
               >
                 {copied ? (
                   <>

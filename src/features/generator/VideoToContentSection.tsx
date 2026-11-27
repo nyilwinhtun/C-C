@@ -54,7 +54,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ReadAloudButton } from "@/components/shared/read-aloud-button"
 import { cleanVoiceoverText, estimateSpokenDurationSeconds } from "@/api/ttsService"
-import { generateSrtContent } from "@/lib/videoAudioMerger"
+import { generateSrtContent, revokeBlobUrlAfterDelay } from "@/lib/videoAudioMerger"
 import { VoiceoverStudioCard } from "./VoiceoverStudioCard"
 import {
   Card,
@@ -109,6 +109,56 @@ function mapVideoPlatformToVaultPlatform(platform: string): string {
   if (lower.includes("facebook")) return "facebook"
   if (lower.includes("youtube")) return "youtube"
   return "tiktok"
+}
+
+function formatVideoApiError(
+  err: unknown,
+  language: "en" | "my",
+  fallbackKey: string
+): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "")
+  const lower = raw.toLowerCase()
+  if (
+    lower.includes("api key is required") ||
+    lower.includes("missing api key") ||
+    lower.includes("no api key")
+  ) {
+    return t(language, "postWriter.error.missingKey")
+  }
+  if (
+    lower.includes("user location is not supported") ||
+    lower.includes("location is not supported") ||
+    lower.includes("not available in your country")
+  ) {
+    return t(language, "postWriter.error.regionBlocked")
+  }
+  if (
+    lower.includes("invalid api key") ||
+    lower.includes("api key not valid") ||
+    lower.includes("invalid_api_key") ||
+    lower.includes("unauthorized") ||
+    lower.includes("(401)") ||
+    lower.includes("(403)")
+  ) {
+    return t(language, "postWriter.error.invalidKey")
+  }
+  if (
+    lower.includes("failed to fetch") ||
+    lower.includes("networkerror") ||
+    lower.includes("load failed") ||
+    lower.includes("network request failed")
+  ) {
+    return t(language, "postWriter.error.networkError")
+  }
+  if (
+    lower.includes("quota") ||
+    lower.includes("rate limit") ||
+    lower.includes("resource_exhausted") ||
+    lower.includes("429")
+  ) {
+    return t(language, "postWriter.error.quotaExceeded")
+  }
+  return raw.trim() || t(language, fallbackKey)
 }
 
 export function VideoToContentSection() {
@@ -319,12 +369,9 @@ export function VideoToContentSection() {
           setMobileView("result")
         }
       } catch (err) {
-        const message =
-          err instanceof Error && err.message
-            ? err.message
-            : t(language, "generator.videoError")
+        const message = formatVideoApiError(err, language, "generator.videoError")
         setErrorMessage(message)
-        toast.error(message)
+        toast.error(message, { duration: 6000 })
       } finally {
         setProgressStage(null)
         setIsExpanding(false)
@@ -454,7 +501,7 @@ export function VideoToContentSection() {
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+    revokeBlobUrlAfterDelay(url)
   }, [result, videoDurationSeconds, videoFile])
 
   const handleSendToVoiceover = useCallback(() => {
@@ -811,9 +858,9 @@ export function VideoToContentSection() {
                       t(language, "video.toast.clipsReady")
                     )
                   } catch (err) {
-                    const msg =
-                      err instanceof Error ? err.message : "Failed to analyze clips & captions."
-                    toast.error(msg)
+                    const msg = formatVideoApiError(err, language, "generator.videoError")
+                    setErrorMessage(msg)
+                    toast.error(msg, { duration: 6000 })
                   } finally {
                     setIsAnalyzingClips(false)
                   }
@@ -1269,7 +1316,7 @@ export function VideoToContentSection() {
             )}
 
             <div className="sticky bottom-16 sm:bottom-20 z-20 lg:static flex flex-col gap-1.5 rounded-xl border border-border/60 bg-card/95 backdrop-blur-md p-2 shadow-lg lg:border-0 lg:bg-transparent lg:backdrop-blur-none lg:p-0 lg:shadow-none">
-              <div className="grid grid-cols-4 gap-1.5 w-full">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 w-full">
                 {(
                   [
                     {

@@ -41,8 +41,10 @@ import { useUIStore } from "@/store/useUIStore"
 import { formatAudioClockDuration } from "@/api/ttsService"
 import {
   getAudioContextConstructor,
+  getRecorderTimesliceMs,
   unlockIosAudio,
 } from "@/lib/iosAudio"
+import { revokeBlobUrlAfterDelay } from "@/lib/videoAudioMerger"
 import {
   convertImageToGlb,
   type ImageTo3dEngine,
@@ -459,11 +461,12 @@ export function Presenter3DPage() {
     return null
   }, [localAudioFile, generatedAudioBlob, generatedAudioUrl, generatedAudioTitle, language])
 
-  // Keep exported video URL clean
+  // Keep exported video URL alive for at least 60s after unmount/replace for mobile downloads
   useEffect(() => {
+    const urlToRevoke = exportedVideo?.url
     return () => {
-      if (exportedVideo?.url) {
-        URL.revokeObjectURL(exportedVideo.url)
+      if (urlToRevoke) {
+        revokeBlobUrlAfterDelay(urlToRevoke)
       }
     }
   }, [exportedVideo])
@@ -1691,14 +1694,30 @@ export function Presenter3DPage() {
         }
       }
 
-      recorder.onstop = () => {
+      recorder.onerror = () => {
         for (const track of combinedStream.getTracks()) {
           track.stop()
         }
         isRenderingRef.current = false
         setIsRenderingVideo(false)
-        setRenderProgress(100)
         stopAudioPlayback()
+        toast.error(t(language, "presenter3d.renderFailed"))
+      }
+
+      recorder.onstop = () => {
+        const wasCancelled = !isRenderingRef.current
+        for (const track of combinedStream.getTracks()) {
+          track.stop()
+        }
+        isRenderingRef.current = false
+        setIsRenderingVideo(false)
+        stopAudioPlayback()
+
+        if (wasCancelled) {
+          return
+        }
+
+        setRenderProgress(100)
 
         if (chunks.length === 0) {
           toast.error(t(language, "presenter3d.renderFailed"))
@@ -1714,15 +1733,12 @@ export function Presenter3DPage() {
           .replace(/\s+/g, "-")
           .toLowerCase() || "presenter-video"
 
-        setExportedVideo((prev) => {
-          if (prev?.url) URL.revokeObjectURL(prev.url)
-          return {
-            url,
-            blob,
-            mimeType: finalMime,
-            extension,
-            fileName: `${baseName}-${characterKind === "photo" ? "photo" : "3d"}.${extension}`,
-          }
+        setExportedVideo({
+          url,
+          blob,
+          mimeType: finalMime,
+          extension,
+          fileName: `${baseName}-${characterKind === "photo" ? "photo" : "3d"}.${extension}`,
         })
         toast.success(t(language, "presenter3d.renderSuccess"))
       }
@@ -1743,7 +1759,12 @@ export function Presenter3DPage() {
         }
       }
 
-      recorder.start(250)
+      const timesliceMs = getRecorderTimesliceMs(mimeType)
+      if (timesliceMs !== undefined) {
+        recorder.start(timesliceMs)
+      } else {
+        recorder.start()
+      }
       source.start(0)
     } catch (err) {
       console.error("3D video render failed:", err)
@@ -2350,7 +2371,7 @@ export function Presenter3DPage() {
                           value={mascotName}
                           onChange={(e) => setMascotName(e.target.value)}
                           placeholder={shopProfile.name.trim() || "Mascot / Presenter Name"}
-                          className="h-8 rounded-lg text-[11px] font-myanmar"
+                          className="h-8 min-w-0 flex-1 rounded-lg text-[11px] font-myanmar"
                         />
                         <button
                           type="button"
@@ -2734,7 +2755,7 @@ export function Presenter3DPage() {
               </div>
               {captionsOn && (
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
                       {t(language, "presenter3d.captionStyleLabel")}
                     </span>
@@ -2830,7 +2851,7 @@ export function Presenter3DPage() {
 
             {/* Render Quality Toggle: Mobile Fast (540p / 24fps) vs Studio HD (720p–1080p / 30fps) */}
             <div className="pt-2 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-2">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
                   {t(language, "presenter3d.qualityLabel")}
                 </span>

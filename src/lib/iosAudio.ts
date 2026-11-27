@@ -581,7 +581,9 @@ export function createWavAudioRecorder(
     } catch {
       // Ignore disconnect errors
     }
-    await ctx.close().catch(() => {})
+    if (ctx !== sharedUnlockCtx) {
+      await ctx.close().catch(() => {})
+    }
   }
 
   return {
@@ -606,6 +608,8 @@ export function createWavAudioRecorder(
         merged.set(chunk, offset)
         offset += chunk.length
       }
+      pcmChunks.length = 0
+      segmentChunks.length = 0
 
       const blob = await applyStudioVocalEqToFloat32(merged, sampleRate)
       const durationSeconds = merged.length / sampleRate
@@ -617,6 +621,8 @@ export function createWavAudioRecorder(
       }
     },
     cancel: () => {
+      pcmChunks.length = 0
+      segmentChunks.length = 0
       void cleanup()
     },
   }

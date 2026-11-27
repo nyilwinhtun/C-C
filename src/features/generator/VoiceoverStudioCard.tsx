@@ -23,6 +23,7 @@ import {
 } from "@/api/ttsService"
 import {
   mergeVideoWithVoiceover,
+  revokeBlobUrlAfterDelay,
   type MergeVideoAudioResult,
   type OriginalAudioVolume,
 } from "@/lib/videoAudioMerger"
@@ -96,7 +97,7 @@ export function VoiceoverStudioCard({
 
   const revokeMergedUrl = useCallback(() => {
     if (mergedUrlRef.current) {
-      URL.revokeObjectURL(mergedUrlRef.current)
+      revokeBlobUrlAfterDelay(mergedUrlRef.current)
       mergedUrlRef.current = null
     }
   }, [])
