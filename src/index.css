@@ -241,3 +241,161 @@
 .animate-ios-tab-pop {
   animation: ios-tab-pop 0.36s cubic-bezier(0.32, 0.72, 0, 1);
 }
+
+/* Live Creator Studio Login Animations (GPU-accelerated) */
+@keyframes studio-orb-drift-a {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(34px, -24px, 0) scale(1.06);
+  }
+  66% {
+    transform: translate3d(-22px, 18px, 0) scale(0.95);
+  }
+}
+
+@keyframes studio-orb-drift-b {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  40% {
+    transform: translate3d(-30px, 26px, 0) scale(1.08);
+  }
+  75% {
+    transform: translate3d(24px, -16px, 0) scale(0.94);
+  }
+}
+
+@keyframes studio-orb-drift-c {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(22px, 22px, 0) scale(1.05);
+  }
+}
+
+@keyframes studio-float-slow {
+  0%, 100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -10px, 0);
+  }
+}
+
+@keyframes studio-wave-bar {
+  0%, 100% {
+    transform: scaleY(0.28);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes studio-card-enter {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes studio-border-shimmer {
+  0% {
+    transform: translate3d(-100%, 0, 0) skewX(-20deg);
+  }
+  100% {
+    transform: translate3d(260%, 0, 0) skewX(-20deg);
+  }
+}
+
+@keyframes studio-glow-pulse {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.78;
+    transform: scale(1.04);
+  }
+}
+
+.studio-orb-a {
+  animation: studio-orb-drift-a 18s ease-in-out infinite;
+  will-change: transform;
+}
+
+.studio-orb-b {
+  animation: studio-orb-drift-b 22s ease-in-out infinite;
+  will-change: transform;
+}
+
+.studio-orb-c {
+  animation: studio-orb-drift-c 16s ease-in-out infinite;
+  will-change: transform;
+}
+
+.studio-float-1 {
+  animation: studio-float-slow 6.5s ease-in-out infinite;
+  will-change: transform;
+}
+
+.studio-float-2 {
+  animation: studio-float-slow 7.8s ease-in-out -2.2s infinite;
+  will-change: transform;
+}
+
+.studio-float-3 {
+  animation: studio-float-slow 7.1s ease-in-out -4.1s infinite;
+  will-change: transform;
+}
+
+.studio-wave-bar {
+  transform-origin: center bottom;
+  animation: studio-wave-bar 1.35s ease-in-out infinite;
+  will-change: transform;
+}
+
+.studio-card-enter {
+  animation: studio-card-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.studio-border-shimmer {
+  animation: studio-border-shimmer 5.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform;
+}
+
+.studio-glow-pulse {
+  animation: studio-glow-pulse 2.4s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.studio-grid-pattern {
+  background-image: radial-gradient(circle, rgba(28, 25, 23, 0.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.dark .studio-grid-pattern {
+  background-image: radial-gradient(circle, rgba(245, 245, 244, 0.07) 1px, transparent 1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-orb-a,
+  .studio-orb-b,
+  .studio-orb-c,
+  .studio-float-1,
+  .studio-float-2,
+  .studio-float-3,
+  .studio-wave-bar,
+  .studio-card-enter,
+  .studio-border-shimmer,
+  .studio-glow-pulse {
+    animation: none !important;
+    transition: none !important;
+  }
+}
