@@ -5,7 +5,9 @@ import {
   Download,
   ImagePlus,
   Link2,
+  Loader2,
   QrCode,
+  Share2,
   Sparkles,
   Trash2,
   Wand2,
@@ -18,6 +20,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { cn, triggerHaptic } from "@/lib/utils"
+import { canvasToPngBlob, shareMediaFile } from "@/lib/nativeShare"
 import { t } from "@/locales/translations"
 import { useUIStore } from "@/store/useUIStore"
 import { useContentStore } from "@/store/useContentStore"
@@ -95,6 +98,7 @@ export function SingleQrStudio() {
   const [rendering, setRendering] = useState(false)
   const [exportingCard, setExportingCard] = useState(false)
   const [exportingQrOnly, setExportingQrOnly] = useState(false)
+  const [sharingCard, setSharingCard] = useState(false)
   const [badgedLogoUrl, setBadgedLogoUrl] = useState<string | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -233,6 +237,52 @@ export function SingleQrStudio() {
       ),
     [detected.finalUrl, badgedLogoUrl]
   )
+
+  const handleShareCard = useCallback(async () => {
+    const canvas = canvasRef.current
+    if (!canvas || canvas.width < 1000 || sharingCard) {
+      if (!sharingCard) toast.error(t(language, "socialQr.exportFailed"))
+      return
+    }
+    setSharingCard(true)
+    try {
+      triggerHaptic(10)
+      const blob = await canvasToPngBlob(canvas)
+      if (!blob) {
+        toast.error(t(language, "nativeShare.exportError"))
+        return
+      }
+      const slug = detected.platform.id
+      const ratio = socialQrSettings.aspectRatio === "portrait" ? "1080x1350" : "1080x1080"
+      const captionText = [
+        effectiveHeadline,
+        effectiveCta,
+        detected.cleanUrl || detected.finalUrl,
+      ]
+        .filter(Boolean)
+        .join("\n")
+
+      await shareMediaFile({
+        blob,
+        filename: `qr-card-${slug}-${ratio}-${Date.now()}.png`,
+        title: effectiveHeadline,
+        captionText,
+        mimeType: "image/png",
+        language,
+      })
+    } finally {
+      setSharingCard(false)
+    }
+  }, [
+    detected.cleanUrl,
+    detected.finalUrl,
+    detected.platform.id,
+    effectiveCta,
+    effectiveHeadline,
+    language,
+    sharingCard,
+    socialQrSettings.aspectRatio,
+  ])
 
   const handleDownloadCard = useCallback(async () => {
     const canvas = canvasRef.current
@@ -610,9 +660,28 @@ export function SingleQrStudio() {
               )}
             </div>
 
+            <Button
+              type="button"
+              onClick={() => void handleShareCard()}
+              disabled={sharingCard || rendering}
+              className="gap-2 w-full h-10 font-semibold font-myanmar"
+            >
+              {sharingCard ? (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+              ) : (
+                <Share2 className="h-4 w-4 shrink-0" />
+              )}
+              <span>
+                {sharingCard
+                  ? t(language, "nativeShare.sharing")
+                  : t(language, "nativeShare.shareQrCard")}
+              </span>
+            </Button>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-2">
               <Button
                 type="button"
+                variant="outline"
                 onClick={handleDownloadCard}
                 disabled={exportingCard || rendering}
                 className="gap-2 w-full h-auto min-h-9 py-2 whitespace-normal text-center"

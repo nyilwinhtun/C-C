@@ -36,6 +36,7 @@ import {
   unlockIosAudio,
 } from "@/lib/iosAudio"
 import { revokeBlobUrlAfterDelay } from "@/lib/videoAudioMerger"
+import { shareMediaFile } from "@/lib/nativeShare"
 import {
   extractForegroundCutout,
   isMobileViewport,
@@ -167,6 +168,7 @@ export function Presenter3DPage() {
     generatedAudioBlob,
     generatedAudioTitle,
     generatedAudioDuration,
+    voiceScriptText,
     shopProfile,
     mascotPresets,
     saveMascotPreset,
@@ -189,6 +191,7 @@ export function Presenter3DPage() {
       generatedAudioBlob: state.generatedAudioBlob,
       generatedAudioTitle: state.generatedAudioTitle,
       generatedAudioDuration: state.generatedAudioDuration,
+      voiceScriptText: state.voiceScriptText,
       shopProfile: state.shopProfile,
       mascotPresets: state.mascotPresets,
       saveMascotPreset: state.saveMascotPreset,
@@ -264,6 +267,7 @@ export function Presenter3DPage() {
   const [isRenderingVideo, setIsRenderingVideo] = useState(false)
   const [renderProgress, setRenderProgress] = useState(0)
   const [exportedVideo, setExportedVideo] = useState<ExportedVideoState | null>(null)
+  const [isSharingVideo, setIsSharingVideo] = useState(false)
 
   // Refs for 2D Canvas compositing & images
   const displayCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -1456,25 +1460,26 @@ export function Presenter3DPage() {
   }
 
   const handleShareVideo = async () => {
-    if (!exportedVideo) return
-    const file = new File([exportedVideo.blob], exportedVideo.fileName, {
-      type: exportedVideo.mimeType,
-    })
+    if (!exportedVideo || isSharingVideo) return
+    setIsSharingVideo(true)
+    try {
+      triggerHaptic(10)
+      const scriptOrCaption = captionText.trim() || voiceScriptText.trim()
+      const shareCaption = [scriptOrCaption, badgeText.trim()]
+        .filter(Boolean)
+        .join("\n")
 
-    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
-      try {
-        if (!navigator.canShare || navigator.canShare({ files: [file] })) {
-          await navigator.share({
-            files: [file],
-            title: exportedVideo.fileName,
-          })
-          return
-        }
-      } catch (err) {
-        if ((err as Error)?.name === "AbortError") return
-      }
+      await shareMediaFile({
+        blob: exportedVideo.blob,
+        filename: exportedVideo.fileName,
+        title: activeAudioSource?.title || exportedVideo.fileName,
+        captionText: shareCaption,
+        mimeType: exportedVideo.mimeType,
+        language,
+      })
+    } finally {
+      setIsSharingVideo(false)
     }
-    handleDownloadVideo()
   }
 
   return (
@@ -1745,11 +1750,20 @@ export function Presenter3DPage() {
                   </Button>
                   <Button
                     type="button"
-                    onClick={handleShareVideo}
-                    className="h-10 rounded-xl bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B] text-xs font-semibold"
+                    onClick={() => void handleShareVideo()}
+                    disabled={isSharingVideo}
+                    className="h-10 rounded-xl bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B] text-xs font-semibold font-myanmar"
                   >
-                    <Share2 className="h-3.5 w-3.5 mr-1.5" />
-                    <span>{t(language, "presenter3d.shareBtn")}</span>
+                    {isSharingVideo ? (
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <Share2 className="h-3.5 w-3.5 mr-1.5" />
+                    )}
+                    <span>
+                      {isSharingVideo
+                        ? t(language, "nativeShare.sharing")
+                        : t(language, "nativeShare.shareVideo")}
+                    </span>
                   </Button>
                 </div>
               </div>

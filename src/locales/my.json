@@ -887,5 +887,15 @@
   "home.tool.text.title": "စာသားနှင့် ဇာတ်ညွှန်းရေးမည်",
   "home.tool.text.desc": "Facebook အရောင်းပို့စ်၊ TikTok Hook နှင့် ဗီဒီယိုဇာတ်ညွှန်းများ ရေးသားပါ။",
   "home.tool.vault.title": "မှတ်စုနှင့် အချိန်ဇယား",
-  "home.tool.vault.desc": "သိမ်းထားသော စိတ်ကူးများနှင့် တင်မည့်ရက်ဇယားကို တစ်နေရာတည်းတွင် စီစဉ်ပါ။"
+  "home.tool.vault.desc": "သိမ်းထားသော စိတ်ကူးများနှင့် တင်မည့်ရက်ဇယားကို တစ်နေရာတည်းတွင် စီစဉ်ပါ။",
+  "nativeShare.shareToApps": "Facebook / Viber သို့ ပို့မည်",
+  "nativeShare.shareVideo": "ဗီဒီယို ပို့မည်",
+  "nativeShare.shareQrCard": "QR ကတ် မျှဝေမည်",
+  "nativeShare.shareBioQr": "Bio QR နှင့် လင့်ခ် ပို့မည်",
+  "nativeShare.sharing": "မျှဝေနေသည်...",
+  "nativeShare.shared": "မျှဝေပြီးပါပြီ!",
+  "nativeShare.sharedWithCaption": "Caption ကူးယူပြီးပါပြီ — ပို့စ်တွင် Paste ချနိုင်ပါသည်",
+  "nativeShare.fallbackSaved": "ဖိုင်သိမ်းပြီးပါပြီ — Facebook / Viber တွင် မျှဝေနိုင်ပါသည်",
+  "nativeShare.fallbackSavedWithCaption": "ဖိုင်သိမ်းပြီး Caption ကူးယူပြီးပါပြီ — ပို့စ်တွင် Paste ချနိုင်ပါသည်",
+  "nativeShare.exportError": "မျှဝေရန် ဖိုင်ပြင်ဆင်၍ မရပါ။"
 }

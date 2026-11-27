@@ -887,5 +887,15 @@
   "home.tool.text.title": "Script & Caption Writer",
   "home.tool.text.desc": "Write Facebook sales posts, TikTok hooks, and video scripts in your brand voice.",
   "home.tool.vault.title": "Vault & Calendar",
-  "home.tool.vault.desc": "Organize saved ideas, drafts, and scheduled posting dates in one place."
+  "home.tool.vault.desc": "Organize saved ideas, drafts, and scheduled posting dates in one place.",
+  "nativeShare.shareToApps": "Share to Apps",
+  "nativeShare.shareVideo": "Share Video",
+  "nativeShare.shareQrCard": "Share QR Card",
+  "nativeShare.shareBioQr": "Share Bio QR & Link",
+  "nativeShare.sharing": "Sharing...",
+  "nativeShare.shared": "Shared successfully!",
+  "nativeShare.sharedWithCaption": "Caption copied — paste in your post",
+  "nativeShare.fallbackSaved": "File saved — ready to share to your apps",
+  "nativeShare.fallbackSavedWithCaption": "File saved & caption copied — paste in your post",
+  "nativeShare.exportError": "Could not prepare file for sharing."
 }

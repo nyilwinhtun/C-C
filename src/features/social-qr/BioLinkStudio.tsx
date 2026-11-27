@@ -10,8 +10,10 @@ import {
   EyeOff,
   ImagePlus,
   Link2,
+  Loader2,
   Plus,
   QrCode,
+  Share2,
   Smartphone,
   Sparkles,
   Trash2,
@@ -24,6 +26,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn, triggerHaptic } from "@/lib/utils"
+import { canvasToPngBlob, shareMediaFile } from "@/lib/nativeShare"
 import { t } from "@/locales/translations"
 import { useContentStore } from "@/store/useContentStore"
 import { useUIStore } from "@/store/useUIStore"
@@ -129,6 +132,7 @@ export function BioLinkStudio() {
   const [renderingQr, setRenderingQr] = useState(false)
   const [exportingCard, setExportingCard] = useState(false)
   const [exportingQrOnly, setExportingQrOnly] = useState(false)
+  const [sharingMasterCard, setSharingMasterCard] = useState(false)
   const [badgedLogoUrl, setBadgedLogoUrl] = useState<string | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -423,6 +427,50 @@ export function BioLinkStudio() {
     () => selectQrErrorCorrection(shareUrl.length, Boolean(badgedLogoUrl)),
     [shareUrl.length, badgedLogoUrl]
   )
+
+  const handleShareMasterCard = useCallback(async () => {
+    const canvas = canvasRef.current
+    if (!canvas || canvas.width < 1000 || sharingMasterCard) {
+      if (!sharingMasterCard) toast.error(t(language, "socialQr.exportFailed"))
+      return
+    }
+    setSharingMasterCard(true)
+    try {
+      triggerHaptic(10)
+      const blob = await canvasToPngBlob(canvas)
+      if (!blob) {
+        toast.error(t(language, "nativeShare.exportError"))
+        return
+      }
+      const ratio =
+        bioLinkSettings.aspectRatio === "portrait" ? "1080x1350" : "1080x1080"
+      const captionText = [
+        effectiveShopTitle,
+        bioLinkSettings.tagline.trim(),
+        shareUrl,
+      ]
+        .filter(Boolean)
+        .join("\n")
+
+      await shareMediaFile({
+        blob,
+        filename: `bio-master-qr-${ratio}-${Date.now()}.png`,
+        title: effectiveShopTitle,
+        captionText,
+        mimeType: "image/png",
+        language,
+      })
+    } finally {
+      setSharingMasterCard(false)
+    }
+  }, [
+    bioLinkSettings.aspectRatio,
+    bioLinkSettings.tagline,
+    effectiveShopTitle,
+    language,
+    shareUrl,
+    sharingMasterCard,
+  ])
 
   const handleDownloadMasterCard = useCallback(async () => {
     const canvas = canvasRef.current
@@ -956,6 +1004,25 @@ export function BioLinkStudio() {
               )}
             </div>
 
+            {/* 1-Tap Native Share Master QR + Bio Link */}
+            <Button
+              type="button"
+              onClick={() => void handleShareMasterCard()}
+              disabled={sharingMasterCard || renderingQr}
+              className="gap-2 w-full h-10 font-semibold font-myanmar"
+            >
+              {sharingMasterCard ? (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+              ) : (
+                <Share2 className="h-4 w-4 shrink-0" />
+              )}
+              <span>
+                {sharingMasterCard
+                  ? t(language, "nativeShare.sharing")
+                  : t(language, "nativeShare.shareBioQr")}
+              </span>
+            </Button>
+
             {/* Share & Preview Actions */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <Button
@@ -986,6 +1053,7 @@ export function BioLinkStudio() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-2">
               <Button
                 type="button"
+                variant="outline"
                 onClick={handleDownloadMasterCard}
                 disabled={exportingCard || renderingQr}
                 className="gap-2 w-full h-auto min-h-9 py-2 whitespace-normal text-center"

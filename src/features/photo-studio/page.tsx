@@ -35,6 +35,7 @@ import { generateProductScene, suggestFromPhoto } from "@/api/aiService"
 import { useContentStore } from "@/store/useContentStore"
 import { FileDropzone } from "@/components/shared/file-dropzone"
 import { useImagePaste } from "@/lib/use-image-paste"
+import { canvasToPngBlob, shareMediaFile } from "@/lib/nativeShare"
 import { useUIStore } from "@/store/useUIStore"
 import { isShoppingCategory } from "@/types"
 import { renderPosterCanvas } from "./posterRenderer"
@@ -355,6 +356,7 @@ export function PhotoStudioPage() {
   const [isGeneratingScene, setIsGeneratingScene] = useState(false)
   const [isSuggesting, setIsSuggesting] = useState(false)
   const [aiCaption, setAiCaption] = useState("")
+  const [isSharingPoster, setIsSharingPoster] = useState(false)
   const [secondaryDataUrl, setSecondaryDataUrl] = useState<string | null>(null)
   const [primaryImg, setPrimaryImg] = useState<HTMLImageElement | null>(null)
   const [secondaryImg, setSecondaryImg] = useState<HTMLImageElement | null>(null)
@@ -769,52 +771,40 @@ export function PhotoStudioPage() {
 
   const handleSharePoster = useCallback(async () => {
     const canvas = canvasRef.current
-    if (!canvas) return
+    if (!canvas || isSharingPoster) return
 
-    renderPosterCanvas(canvas, poster, primaryImg, secondaryImg, logoImg)
-    const filename = `poster-${poster.template}-${poster.aspectRatio.replace(":", "x")}-${Date.now()}.png`
-
-    const blob = await new Promise<Blob | null>((resolve) => {
-      if (typeof canvas.toBlob === "function") {
-        canvas.toBlob((b) => resolve(b), "image/png", 1.0)
-      } else {
-        resolve(null)
-      }
-    })
-
-    if (!blob) {
-      handleDownloadPng()
-      return
-    }
-
-    const file = new File([blob], filename, { type: "image/png" })
-    const shareData: ShareData = {
-      files: [file],
-      title: poster.title.trim() || "Online Shop Poster",
-      text: [poster.title.trim(), poster.priceTag.trim(), poster.shopFooterText.trim()]
-        .filter(Boolean)
-        .join(" • "),
-    }
-
-    const canNativeShare =
-      typeof navigator !== "undefined" &&
-      typeof navigator.share === "function" &&
-      (typeof navigator.canShare !== "function" || navigator.canShare({ files: [file] }))
-
-    if (!canNativeShare) {
-      handleDownloadPng()
-      return
-    }
-
+    setIsSharingPoster(true)
     try {
-      await navigator.share(shareData)
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
+      renderPosterCanvas(canvas, poster, primaryImg, secondaryImg, logoImg)
+      const filename = `poster-${poster.template}-${poster.aspectRatio.replace(":", "x")}-${Date.now()}.png`
+      const blob = await canvasToPngBlob(canvas)
+
+      if (!blob) {
+        toast.error(t(language, "nativeShare.exportError"))
         return
       }
-      handleDownloadPng()
+
+      const fallbackCaption = [
+        poster.title.trim(),
+        poster.subtitle.trim(),
+        poster.showPriceBadge ? poster.priceTag.trim() : "",
+        poster.showShopFooter ? poster.shopFooterText.trim() : "",
+      ]
+        .filter(Boolean)
+        .join("\n")
+
+      await shareMediaFile({
+        blob,
+        filename,
+        title: poster.title.trim() || "Poster",
+        captionText: aiCaption.trim() || fallbackCaption,
+        mimeType: "image/png",
+        language,
+      })
+    } finally {
+      setIsSharingPoster(false)
     }
-  }, [poster, primaryImg, secondaryImg, logoImg, handleDownloadPng])
+  }, [poster, primaryImg, secondaryImg, logoImg, aiCaption, language, isSharingPoster])
 
   const handleSyncBrandSignature = () => {
     const trimmed = savedFooterLine.trim()
@@ -866,20 +856,29 @@ export function PhotoStudioPage() {
         <div className="flex w-full items-center gap-1.5 sm:w-auto">
           <Button
             size="sm"
-            variant="outline"
-            onClick={handleSharePoster}
-            className="h-9 flex-1 gap-1.5 rounded-lg px-3 text-xs font-semibold border-border/70 sm:h-8 sm:flex-none"
+            onClick={() => void handleSharePoster()}
+            disabled={isSharingPoster}
+            className="h-9 flex-1 gap-1.5 rounded-lg px-3 text-xs font-semibold sm:h-8 sm:flex-none"
           >
-            <Share2 className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{isMy ? "1-Tap မျှဝေမည်" : "1-Tap Share"}</span>
+            {isSharingPoster ? (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+            ) : (
+              <Share2 className="h-3.5 w-3.5 shrink-0" />
+            )}
+            <span className="truncate">
+              {isSharingPoster
+                ? t(language, "nativeShare.sharing")
+                : t(language, "nativeShare.shareToApps")}
+            </span>
           </Button>
           <Button
             size="sm"
+            variant="outline"
             onClick={handleDownloadPng}
-            className="h-9 flex-1 gap-1.5 rounded-lg px-3 text-xs font-semibold sm:h-8 sm:flex-none"
+            className="h-9 flex-1 gap-1.5 rounded-lg px-3 text-xs font-semibold border-border/70 sm:h-8 sm:flex-none"
           >
             <Download className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{isMy ? "PNG ဒေါင်းလုဒ်" : "Download PNG"}</span>
+            <span className="truncate">{t(language, "photoStudio.downloadBtn")}</span>
           </Button>
         </div>
       </div>
