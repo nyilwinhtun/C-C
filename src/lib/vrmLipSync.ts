@@ -488,7 +488,12 @@ export function disposeObject3D(root: THREE.Object3D): void {
         const record = mat as unknown as Record<string, unknown>
         for (const value of Object.values(record)) {
           if (value && typeof value === "object" && "isTexture" in value) {
-            ;(value as THREE.Texture).dispose()
+            const tex = value as THREE.Texture
+            if (typeof HTMLCanvasElement !== "undefined" && tex.image instanceof HTMLCanvasElement) {
+              tex.image.width = 0
+              tex.image.height = 0
+            }
+            tex.dispose()
           }
         }
         mat.dispose()
@@ -1312,9 +1317,22 @@ export function createStudioBackdropGroup(
   const bokehPoints = new THREE.Points(bokehGeo, bokehMat)
   bokehGroup.add(bokehPoints)
 
+  const releaseSignTexture = () => {
+    if (!signTexture) return
+    if (
+      typeof HTMLCanvasElement !== "undefined" &&
+      signTexture.image instanceof HTMLCanvasElement
+    ) {
+      signTexture.image.width = 0
+      signTexture.image.height = 0
+    }
+    signTexture.dispose()
+    signTexture = null
+  }
+
   const refreshSignTexture = () => {
     const nextTex = drawBackWallShopSignTexture(loadedLogoImg, currentShopName)
-    if (signTexture) signTexture.dispose()
+    releaseSignTexture()
     signTexture = nextTex
     signFaceMat.map = nextTex
     signFaceMat.needsUpdate = true
@@ -1378,10 +1396,7 @@ export function createStudioBackdropGroup(
   }
 
   const dispose = () => {
-    if (signTexture) {
-      signTexture.dispose()
-      signTexture = null
-    }
+    releaseSignTexture()
     for (const item of disposables) {
       item.dispose()
     }

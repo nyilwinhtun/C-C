@@ -180,9 +180,17 @@ function findOpaqueBounds(
  */
 async function prepareImageFor3d(
   source: File | Blob | string,
-  removeBg: boolean
+  removeBg: boolean,
+  signal?: AbortSignal
 ): Promise<PreparedSubject> {
+  if (signal?.aborted) {
+    throw new DOMException("Conversion aborted", "AbortError")
+  }
   let workingBlob = await sourceToBlob(source)
+
+  if (signal?.aborted) {
+    throw new DOMException("Conversion aborted", "AbortError")
+  }
 
   if (removeBg) {
     try {
@@ -193,7 +201,14 @@ async function prepareImageFor3d(
     }
   }
 
+  if (signal?.aborted) {
+    throw new DOMException("Conversion aborted", "AbortError")
+  }
+
   const img = await loadImageElement(workingBlob)
+  if (signal?.aborted) {
+    throw new DOMException("Conversion aborted", "AbortError")
+  }
   const rawCanvas = document.createElement("canvas")
   const paddedCanvas = document.createElement("canvas")
   const cutoutCanvas = document.createElement("canvas")
@@ -791,26 +806,59 @@ function smoothDepthEdgeAware(
       let sum = center * 2.0
       let weightSum = 2.0
 
-      // 8-neighborhood with fast rational range kernel: 1 / (1 + diff^2 * k)
-      const neighbors = [
-        src[y0 * size + x0],
-        src[y0 * size + x],
-        src[y0 * size + x2],
-        src[y * size + x0],
-        src[y * size + x2],
-        src[y2 * size + x0],
-        src[y2 * size + x],
-        src[y2 * size + x2],
-      ]
+      // Unrolled 8-neighborhood with fast rational range kernel: 1 / (1 + diff^2 * k)
+      // Zero per-pixel array allocations for smooth mobile execution
+      const row0 = y0 * size
+      const row1 = y * size
+      const row2 = y2 * size
 
-      for (let i = 0; i < 8; i++) {
-        const val = neighbors[i]
-        const diff = val - center
-        const spatial = i === 1 || i === 3 || i === 4 || i === 6 ? 1.0 : 0.7
-        const w = spatial / (1 + diff * diff * edgeStrength)
-        sum += val * w
-        weightSum += w
-      }
+      let val = src[row0 + x0]
+      let diff = val - center
+      let w = 0.7 / (1 + diff * diff * edgeStrength)
+      sum += val * w
+      weightSum += w
+
+      val = src[row0 + x]
+      diff = val - center
+      w = 1.0 / (1 + diff * diff * edgeStrength)
+      sum += val * w
+      weightSum += w
+
+      val = src[row0 + x2]
+      diff = val - center
+      w = 0.7 / (1 + diff * diff * edgeStrength)
+      sum += val * w
+      weightSum += w
+
+      val = src[row1 + x0]
+      diff = val - center
+      w = 1.0 / (1 + diff * diff * edgeStrength)
+      sum += val * w
+      weightSum += w
+
+      val = src[row1 + x2]
+      diff = val - center
+      w = 1.0 / (1 + diff * diff * edgeStrength)
+      sum += val * w
+      weightSum += w
+
+      val = src[row2 + x0]
+      diff = val - center
+      w = 0.7 / (1 + diff * diff * edgeStrength)
+      sum += val * w
+      weightSum += w
+
+      val = src[row2 + x]
+      diff = val - center
+      w = 1.0 / (1 + diff * diff * edgeStrength)
+      sum += val * w
+      weightSum += w
+
+      val = src[row2 + x2]
+      diff = val - center
+      w = 0.7 / (1 + diff * diff * edgeStrength)
+      sum += val * w
+      weightSum += w
 
       dst[cIdx] = sum / weightSum
     }
@@ -1145,7 +1193,7 @@ export async function convertImageToGlb(
 
   const runFull3dPipeline = async (): Promise<ConvertImageTo3dResult> => {
     onProgress?.({ stage: "preparing", percent: 15 })
-    const prepared = await prepareImageFor3d(source, removeBg)
+    const prepared = await prepareImageFor3d(source, removeBg, full3dController.signal)
 
     try {
       if (full3dController.signal.aborted) {
@@ -1200,8 +1248,12 @@ export async function convertImageToGlb(
     }
   }
 
+  const full3dPromise = runFull3dPipeline()
+  // Prevent unhandled rejection if timeoutPromise wins the race while full3dPromise rejects later
+  full3dPromise.catch(() => {})
+
   try {
-    return await Promise.race([runFull3dPipeline(), timeoutPromise])
+    return await Promise.race([full3dPromise, timeoutPromise])
   } catch (err) {
     // Propagate explicit user cancellation
     if (signal?.aborted) {
@@ -1218,7 +1270,13 @@ export async function convertImageToGlb(
     const fastResult = await generateFast25dRelief(source, {
       reliefDepth,
       signal,
-      onProgress,
+      onProgress: onProgress
+        ? (p) =>
+            onProgress({
+              stage: p.stage === "ready" ? "ready" : "fallback_fast",
+              percent: p.stage === "ready" ? 100 : Math.min(98, 75 + Math.round(p.percent * 0.22)),
+            })
+        : undefined,
     })
 
     return {

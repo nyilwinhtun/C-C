@@ -876,6 +876,8 @@ export function Presenter3DPage() {
         URL.revokeObjectURL(characterPhotoUrlRef.current)
         characterPhotoUrlRef.current = null
       }
+      pipCutoutCacheRef.current.clear()
+      pop3dSourceCacheRef.current.clear()
       if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
         void audioCtxRef.current.close()
         audioCtxRef.current = null
@@ -1815,11 +1817,11 @@ export function Presenter3DPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         {/* Left: Live 3D Stage & Video Export */}
         <div className="lg:col-span-6 rounded-3xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] p-4 space-y-4">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
               {t(language, "presenter3d.stagePreview")}
             </span>
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => {
@@ -1827,16 +1829,16 @@ export function Presenter3DPage() {
                   setShowSafeZone((v) => !v)
                 }}
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold border transition-colors cursor-pointer font-myanmar",
+                  "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold border transition-colors cursor-pointer font-myanmar whitespace-nowrap",
                   showSafeZone
                     ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
                     : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white/80 dark:bg-[#27272A] text-[#57534E] dark:text-[#A1A1AA]"
                 )}
               >
-                <ShieldCheck className="h-3 w-3" />
+                <ShieldCheck className="h-3 w-3 shrink-0" />
                 <span>{t(language, "presenter3d.safeZoneBtn")}</span>
               </button>
-              <span className="rounded-full bg-[#EFEAE1] dark:bg-[#27272A] px-2.5 py-1 text-[11px] font-medium tabular-nums text-[#1C1917] dark:text-[#F5F5F4]">
+              <span className="rounded-full bg-[#EFEAE1] dark:bg-[#27272A] px-2.5 py-1 text-[11px] font-medium tabular-nums text-[#1C1917] dark:text-[#F5F5F4] whitespace-nowrap">
                 {aspectRatio} • {qualityPreset === "mobile_fast" ? "540p 24fps" : "HD 30fps"}
               </span>
             </div>
@@ -2517,7 +2519,7 @@ export function Presenter3DPage() {
                               setConvert3dMode(modeOpt.id)
                             }}
                             className={cn(
-                              "rounded-xl border py-1.5 px-2 text-[11px] font-semibold transition-all cursor-pointer font-myanmar disabled:opacity-50",
+                              "rounded-xl border py-1.5 px-2 text-[11px] font-semibold leading-snug text-center transition-all cursor-pointer font-myanmar disabled:opacity-50",
                               convert3dMode === modeOpt.id
                                 ? "border-amber-600 dark:border-amber-400 bg-amber-500/15 text-amber-800 dark:text-amber-200"
                                 : "border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
@@ -2553,9 +2555,9 @@ export function Presenter3DPage() {
                     </FileDropzone>
 
                     {(converterSourceUrl || photoDataUrl || presenterMascotDataUrl) && (
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         {converterSourceUrl ? (
-                          <div className="flex items-center gap-2 min-w-0">
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
                             <img
                               src={converterSourceUrl}
                               alt=""
@@ -2660,10 +2662,19 @@ export function Presenter3DPage() {
                       )}
                     </Button>
 
+                    {isConverting3d && convert3dProgress && (
+                      <div className="h-1.5 w-full rounded-full bg-[#EFEAE1] dark:bg-[#18181B] overflow-hidden">
+                        <div
+                          className="h-full bg-amber-600 dark:bg-amber-400 transition-all duration-200"
+                          style={{ width: `${Math.max(8, Math.min(100, convert3dProgress.percent))}%` }}
+                        />
+                      </div>
+                    )}
+
                     {/* Result Actions */}
                     {convertedGlbResult && !isConverting3d && (
                       <div className="space-y-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-2">
-                        <div className="flex items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="min-w-0">
                             <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 truncate font-myanmar">
                               ✓ {t(language, "presenter3d.img3dProgressReady")}
@@ -2780,7 +2791,7 @@ export function Presenter3DPage() {
                     setAspectRatio(ratio)
                   }}
                   className={cn(
-                    "rounded-2xl border py-2.5 px-3 text-xs font-semibold transition-all cursor-pointer",
+                    "rounded-2xl border py-2.5 px-2 sm:px-3 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer",
                     aspectRatio === ratio
                       ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
                       : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
@@ -2916,6 +2927,10 @@ export function Presenter3DPage() {
                       value={solidColor}
                       onChange={(e) => {
                         setSolidColor(e.target.value)
+                        if (backdropImageUrlRef.current) {
+                          URL.revokeObjectURL(backdropImageUrlRef.current)
+                          backdropImageUrlRef.current = null
+                        }
                         backdropImageRef.current = null
                       }}
                       className="h-4 w-4 rounded border-0 bg-transparent cursor-pointer"
