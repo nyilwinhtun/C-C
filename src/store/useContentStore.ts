@@ -34,7 +34,7 @@ import {
 import { playBlobUrlWithPrimedAudio, stopPrimedAudio } from "@/lib/iosAudio"
 import type { BackgroundMusicPreset } from "@/lib/videoAudioMerger"
 import type { Presenter3dPopMotionPreset } from "@/lib/vrmLipSync"
-import type { SocialQrSettings } from "@/features/social-qr/types"
+import type { BioLinkSettings, SocialQrSettings } from "@/features/social-qr/types"
 import { toast } from "@/components/ui/sonner"
 
 let activeTtsAbortController: AbortController | null = null
@@ -200,6 +200,8 @@ interface ContentState {
   posterDraft: PosterDraft | null
   socialQrSettings: SocialQrSettings
   updateSocialQrSettings: (patch: Partial<SocialQrSettings>) => void
+  bioLinkSettings: BioLinkSettings
+  updateBioLinkSettings: (patch: Partial<BioLinkSettings>) => void
   uploadedVideoFile: File | null
   videoPreviewUrl: string | null
   uploadedPhotos: UploadedPhotoItem[]
@@ -425,6 +427,17 @@ export const useContentStore = create<ContentState>()(
         handleText: "",
         ctaText: "",
         headerText: "",
+        useShopLogo: true,
+        customLogoDataUrl: null,
+        showCenterLogo: true,
+      },
+      bioLinkSettings: {
+        shopTitle: "",
+        tagline: "",
+        themeId: "midnight_gold",
+        links: [],
+        aspectRatio: "portrait",
+        ctaText: "",
         useShopLogo: true,
         customLogoDataUrl: null,
         showCenterLogo: true,
@@ -694,6 +707,13 @@ export const useContentStore = create<ContentState>()(
         set((state) => ({
           socialQrSettings: {
             ...state.socialQrSettings,
+            ...patch,
+          },
+        })),
+      updateBioLinkSettings: (patch) =>
+        set((state) => ({
+          bioLinkSettings: {
+            ...state.bioLinkSettings,
             ...patch,
           },
         })),
@@ -1324,6 +1344,7 @@ export const useContentStore = create<ContentState>()(
         activeGeminiKeyIndex: state.activeGeminiKeyIndex ?? 0,
         mascotPresets: state.mascotPresets ?? [],
         socialQrSettings: state.socialQrSettings,
+        bioLinkSettings: state.bioLinkSettings,
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState as Partial<ContentState> | undefined) ?? {}
@@ -1404,6 +1425,13 @@ export const useContentStore = create<ContentState>()(
           socialQrSettings: {
             ...currentState.socialQrSettings,
             ...(persisted.socialQrSettings ?? {}),
+          },
+          bioLinkSettings: {
+            ...currentState.bioLinkSettings,
+            ...(persisted.bioLinkSettings ?? {}),
+            links: Array.isArray(persisted.bioLinkSettings?.links)
+              ? persisted.bioLinkSettings.links
+              : currentState.bioLinkSettings.links,
           },
         }
       },

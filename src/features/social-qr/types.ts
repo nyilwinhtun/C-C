@@ -6,6 +6,7 @@ export type SocialPlatformId =
   | "viber"
   | "whatsapp"
   | "youtube"
+  | "phone"
   | "maps"
   | "website"
 
@@ -55,6 +56,26 @@ export interface SocialQrSettings {
   handleText: string
   ctaText: string
   headerText: string
+  useShopLogo: boolean
+  customLogoDataUrl: string | null
+  showCenterLogo: boolean
+}
+
+export interface BioLinkItem {
+  id: string
+  platform: SocialPlatformId
+  label: string
+  url: string
+  enabled: boolean
+}
+
+export interface BioLinkSettings {
+  shopTitle: string
+  tagline: string
+  themeId: QrCardThemeId
+  links: BioLinkItem[]
+  aspectRatio: QrCardAspectRatio
+  ctaText: string
   useShopLogo: boolean
   customLogoDataUrl: string | null
   showCenterLogo: boolean

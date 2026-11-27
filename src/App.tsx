@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode, useEffect, useState } from "react"
+import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useState } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Toaster } from "@/components/ui/sonner"
 import { Layout } from "@/components/shared/layout"
@@ -8,6 +8,11 @@ import { useContentStore } from "@/store/useContentStore"
 import { isSupabaseConfigured, supabase } from "@/lib/supabase"
 import { setIosAudioSessionPlayback } from "@/lib/iosAudio"
 import { useShallow } from "zustand/react/shallow"
+import {
+  decodeBioPayload,
+  extractBioTokenFromLocation,
+} from "@/features/social-qr/bioCodec"
+import { PublicBioPage } from "@/features/social-qr/PublicBioPage"
 
 class AppErrorBoundary extends Component<
   { children: ReactNode },
@@ -133,11 +138,39 @@ function AppContent() {
 }
 
 export default function App() {
+  const [bioDismissed, setBioDismissed] = useState(false)
+  const bioPayload = useMemo(() => {
+    if (bioDismissed) return null
+    const token = extractBioTokenFromLocation()
+    return token ? decodeBioPayload(token) : null
+  }, [bioDismissed])
+
+  const handleOpenStudioFromBio = () => {
+    try {
+      const url = new URL(window.location.href)
+      url.searchParams.delete("bio")
+      if (url.hash.startsWith("#bio=") || url.hash.includes("?bio=")) {
+        url.hash = ""
+      }
+      window.history.replaceState({}, "", url.toString())
+    } catch {
+      // Ignore history errors
+    }
+    setBioDismissed(true)
+  }
+
   return (
     <AppErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <Toaster position="bottom-right" richColors mobileOffset={{ bottom: "5rem" }} />
-        <AppContent />
+        {bioPayload ? (
+          <PublicBioPage
+            payload={bioPayload}
+            onOpenStudio={handleOpenStudioFromBio}
+          />
+        ) : (
+          <AppContent />
+        )}
       </QueryClientProvider>
     </AppErrorBoundary>
   )

@@ -110,6 +110,21 @@ export const PLATFORM_THEMES: Record<SocialPlatformId, PlatformBrandTheme> = {
     badgeBg: "#FEE2E2",
     badgeText: "#B91C1C",
   },
+  phone: {
+    id: "phone",
+    labelEn: "Phone Call",
+    labelMy: "ဖုန်းခေါ်ဆိုရန်",
+    headerTextEn: "Call our Shop Directly",
+    headerTextMy: "ဆိုင်သို့ တိုက်ရိုက်ဖုန်းဆက်ပါ",
+    ctaDefaultEn: "Scan to Call Now",
+    ctaDefaultMy: "ဖုန်းခေါ်ရန် Scan ဖတ်ပါ",
+    gradientStart: "#059669",
+    gradientEnd: "#047857",
+    accent: "#10B981",
+    qrColor: "#065F46",
+    badgeBg: "#D1FAE5",
+    badgeText: "#047857",
+  },
   maps: {
     id: "maps",
     labelEn: "Google Maps",
@@ -287,6 +302,23 @@ export function analyzeSocialUrl(
       strippedParamsCount: 0,
       extractedHandle: "",
       isValid: false,
+    }
+  }
+
+  // Handle tel: links and raw phone numbers (e.g. 09123456789 or +959123456789)
+  const phoneDigits = trimmed.replace(/[\s\-()]/g, "")
+  if (/^tel:/i.test(trimmed) || /^\+?\d{6,15}$/.test(phoneDigits)) {
+    const cleanedNum = phoneDigits.replace(/^tel:/i, "")
+    const telUrl = `tel:${cleanedNum}`
+    return {
+      platform: PLATFORM_THEMES.phone,
+      rawUrl: trimmed,
+      normalizedUrl: telUrl,
+      cleanUrl: telUrl,
+      finalUrl: telUrl,
+      strippedParamsCount: 0,
+      extractedHandle: cleanedNum,
+      isValid: cleanedNum.length >= 6,
     }
   }
 
