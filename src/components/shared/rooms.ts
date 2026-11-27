@@ -6,6 +6,7 @@ import {
   Lightbulb,
   Mic,
   PenLine,
+  QrCode,
   Scissors,
   Sparkles,
   Video,
@@ -97,6 +98,7 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
     tabs: [
       { key: "studio", labelKey: "nav.studio", labelMy: "ဓာတ်ပုံစတူဒီယို", labelEn: "Photo Studio", icon: Camera },
       { key: "presenter3d", labelKey: "nav.presenter3d", labelMy: "3D တင်ဆက်သူ", labelEn: "3D Presenter", icon: Sparkles },
+      { key: "socialQr", labelKey: "nav.socialQr", labelMy: "Social QR စတူဒီယို", labelEn: "Social Link & QR", icon: QrCode },
       { key: "autocut", labelKey: "nav.autocut", labelMy: "ဗီဒီယို အသံတိတ်ဖြတ်စက်", labelEn: "Highlight Cutter", icon: Scissors },
     ],
   },

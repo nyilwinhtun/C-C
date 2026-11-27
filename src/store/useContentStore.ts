@@ -34,6 +34,7 @@ import {
 import { playBlobUrlWithPrimedAudio, stopPrimedAudio } from "@/lib/iosAudio"
 import type { BackgroundMusicPreset } from "@/lib/videoAudioMerger"
 import type { Presenter3dPopMotionPreset } from "@/lib/vrmLipSync"
+import type { SocialQrSettings } from "@/features/social-qr/types"
 import { toast } from "@/components/ui/sonner"
 
 let activeTtsAbortController: AbortController | null = null
@@ -197,6 +198,8 @@ interface ContentState {
   presenterShowCornerLogo: boolean
   hfToken: string
   posterDraft: PosterDraft | null
+  socialQrSettings: SocialQrSettings
+  updateSocialQrSettings: (patch: Partial<SocialQrSettings>) => void
   uploadedVideoFile: File | null
   videoPreviewUrl: string | null
   uploadedPhotos: UploadedPhotoItem[]
@@ -413,6 +416,19 @@ export const useContentStore = create<ContentState>()(
       presenterShowCornerLogo: true,
       hfToken: "",
       posterDraft: null,
+      socialQrSettings: {
+        url: "https://www.tiktok.com/@theboysmobile",
+        cleanTrackingParams: true,
+        aspectRatio: "portrait",
+        themeId: "platform",
+        headline: "",
+        handleText: "",
+        ctaText: "",
+        headerText: "",
+        useShopLogo: true,
+        customLogoDataUrl: null,
+        showCenterLogo: true,
+      },
       uploadedVideoFile: null,
       videoPreviewUrl: null,
       uploadedPhotos: [],
@@ -674,6 +690,13 @@ export const useContentStore = create<ContentState>()(
       setPresenterShowCornerLogo: (presenterShowCornerLogo) => set({ presenterShowCornerLogo }),
       setHfToken: (hfToken) => set({ hfToken: hfToken.trim() }),
       setPosterDraft: (posterDraft) => set({ posterDraft }),
+      updateSocialQrSettings: (patch) =>
+        set((state) => ({
+          socialQrSettings: {
+            ...state.socialQrSettings,
+            ...patch,
+          },
+        })),
       setUploadedVideo: (file, previewUrl) =>
         set((state) => {
           if (state.videoPreviewUrl && state.videoPreviewUrl !== previewUrl) {
@@ -1300,6 +1323,7 @@ export const useContentStore = create<ContentState>()(
         geminiKeyPool: (state.geminiKeyPool ?? []).slice(0, 5),
         activeGeminiKeyIndex: state.activeGeminiKeyIndex ?? 0,
         mascotPresets: state.mascotPresets ?? [],
+        socialQrSettings: state.socialQrSettings,
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState as Partial<ContentState> | undefined) ?? {}
@@ -1377,6 +1401,10 @@ export const useContentStore = create<ContentState>()(
               ? persisted.presenter3dPopMotion
               : "orbit_sway",
           hfToken: typeof persisted.hfToken === "string" ? persisted.hfToken : "",
+          socialQrSettings: {
+            ...currentState.socialQrSettings,
+            ...(persisted.socialQrSettings ?? {}),
+          },
         }
       },
     }

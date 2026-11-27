@@ -9,6 +9,7 @@ import { AudiobookPage } from "@/features/audiobook/page"
 import { AutoCutPage } from "@/features/autocut/page"
 import { PhotoStudioPage } from "@/features/photo-studio/page"
 import { Presenter3DPage } from "@/features/presenter-3d/page"
+import { SocialQrPage } from "@/features/social-qr/page"
 import { VaultAndCalendarPage } from "@/features/vault/page"
 import { Header } from "@/components/shared/header"
 import { Sidebar } from "@/components/shared/sidebar"
@@ -30,6 +31,7 @@ const pages: Record<string, React.FC> = {
   autocut: AutoCutPage,
   studio: PhotoStudioPage,
   presenter3d: Presenter3DPage,
+  socialQr: SocialQrPage,
   vault: VaultAndCalendarPage,
 }
 

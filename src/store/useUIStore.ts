@@ -170,6 +170,7 @@ function normalizePageKey(key: string): string {
     case "autocut":
     case "studio":
     case "presenter3d":
+    case "socialQr":
     case "vault":
       return key
     default:

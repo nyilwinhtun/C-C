@@ -9,6 +9,7 @@ export type NavItemKey =
   | 'autocut'
   | 'studio'
   | 'presenter3d'
+  | 'socialQr'
   | 'vault'
 
 export interface NavItem {
