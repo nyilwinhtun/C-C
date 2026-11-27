@@ -176,11 +176,71 @@ export type PresenterStudioSet =
   | "soft_bokeh"
   | "custom_photo"
 
-export type BuiltinPresenterId = "female_nilar" | "male_kokhant"
+export type BuiltinPresenterId = "preset_1" | "preset_2" | "preset_3"
+
+export interface BuiltinPresenterMeta {
+  id: BuiltinPresenterId
+  index: 1 | 2 | 3
+  palette: {
+    bgFrom: string
+    bgTo: string
+    skin: string
+    hair: string
+    outfit: string
+    accent: string
+    eye: string
+    lip: string
+  }
+}
+
+export const BUILTIN_PRESENTER_PRESETS: readonly BuiltinPresenterMeta[] = [
+  {
+    id: "preset_1",
+    index: 1,
+    palette: {
+      bgFrom: "#FEF3C7",
+      bgTo: "#FDE68A",
+      skin: "#F4C7A8",
+      hair: "#2A1B14",
+      outfit: "#FAF5EE",
+      accent: "#D97706",
+      eye: "#3B2314",
+      lip: "#C96B6B",
+    },
+  },
+  {
+    id: "preset_2",
+    index: 2,
+    palette: {
+      bgFrom: "#DBEAFE",
+      bgTo: "#BFDBFE",
+      skin: "#DFA982",
+      hair: "#1C1917",
+      outfit: "#1E293B",
+      accent: "#38BDF8",
+      eye: "#1F2937",
+      lip: "#A9635B",
+    },
+  },
+  {
+    id: "preset_3",
+    index: 3,
+    palette: {
+      bgFrom: "#EDE9FE",
+      bgTo: "#DDD6FE",
+      skin: "#EFC2A4",
+      hair: "#4C3B6E",
+      outfit: "#27272A",
+      accent: "#F59E0B",
+      eye: "#312E81",
+      lip: "#B85D6E",
+    },
+  },
+] as const
 
 export interface AvatarController {
   object: THREE.Object3D
-  kind: "vrm" | "glb"
+  kind: "vrm" | "glb" | "procedural"
   update: (delta: number, elapsed: number, lip: LipSyncWeights) => void
   setOrbitRotation?: (yaw: number, pitch?: number) => void
   setAutoOrbit?: (enabled: boolean) => void
@@ -441,6 +501,550 @@ export function createGlbAvatarController(root: THREE.Object3D): AvatarControlle
   return {
     object: root,
     kind: "glb",
+    update,
+    setOrbitRotation,
+    setAutoOrbit,
+    dispose,
+  }
+}
+
+/**
+ * Builds one of three distinct, unnamed, instant-ready stylized 3D presenter busts
+ * with smooth mouth/jaw lip-sync morphs, blinking eyelids, vocal-reactive head nod,
+ * eyebrow expressiveness, idle chest breathing, and full Three.js disposal.
+ */
+export function createProceduralPresenterController(
+  presetId: BuiltinPresenterId = "preset_1"
+): AvatarController {
+  const root = new THREE.Group()
+  root.name = `ProceduralPresenter_${presetId}`
+
+  const meta =
+    BUILTIN_PRESENTER_PRESETS.find((p) => p.id === presetId) ?? BUILTIN_PRESENTER_PRESETS[0]
+  const pal = meta.palette
+
+  // Shared PBR materials
+  const skinMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(pal.skin),
+    roughness: 0.48,
+    metalness: 0.02,
+  })
+  const hairMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(pal.hair),
+    roughness: 0.36,
+    metalness: 0.14,
+  })
+  const outfitMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(pal.outfit),
+    roughness: 0.58,
+    metalness: 0.06,
+  })
+  const accentMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(pal.accent),
+    roughness: 0.25,
+    metalness: 0.72,
+  })
+  const innerShirtMat = new THREE.MeshStandardMaterial({
+    color: presetId === "preset_2" ? 0xf8fafc : presetId === "preset_1" ? 0x1c1917 : 0x18181b,
+    roughness: 0.65,
+    metalness: 0.02,
+  })
+  const scleraMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.15,
+    metalness: 0.02,
+  })
+  const irisMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(pal.eye),
+    roughness: 0.14,
+    metalness: 0.1,
+  })
+  const pupilMat = new THREE.MeshStandardMaterial({
+    color: 0x0b0b0d,
+    roughness: 0.1,
+    metalness: 0.05,
+  })
+  const highlightMat = new THREE.MeshBasicMaterial({ color: 0xffffff })
+  const lipMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(pal.lip),
+    roughness: 0.34,
+    metalness: 0.04,
+  })
+  const mouthCavityMat = new THREE.MeshStandardMaterial({
+    color: 0x3a1219,
+    roughness: 0.85,
+    metalness: 0.0,
+  })
+  const teethMat = new THREE.MeshStandardMaterial({
+    color: 0xfdfbf7,
+    roughness: 0.25,
+    metalness: 0.02,
+  })
+  const blushMat = new THREE.MeshStandardMaterial({
+    color: 0xe88b8b,
+    roughness: 0.7,
+    metalness: 0.0,
+    transparent: true,
+    opacity: presetId === "preset_2" ? 0.14 : 0.24,
+  })
+  const browMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(pal.hair).multiplyScalar(0.85),
+    roughness: 0.45,
+    metalness: 0.05,
+  })
+
+  // Torso / Shoulders Group (animated for idle breathing)
+  const torsoGroup = new THREE.Group()
+  torsoGroup.position.set(0, 1.02, 0)
+  root.add(torsoGroup)
+
+  // Sculpted upper torso & rounded shoulders
+  const torsoGeom = new THREE.CylinderGeometry(0.185, 0.23, 0.42, 32)
+  const torsoMesh = new THREE.Mesh(torsoGeom, outfitMat)
+  torsoMesh.position.set(0, -0.02, 0)
+  torsoMesh.scale.set(1.18, 1, 0.62)
+  torsoGroup.add(torsoMesh)
+
+  const shoulderGeom = new THREE.SphereGeometry(0.115, 24, 18)
+  const leftShoulder = new THREE.Mesh(shoulderGeom, outfitMat)
+  leftShoulder.position.set(-0.215, 0.13, -0.005)
+  leftShoulder.scale.set(1.08, 0.86, 0.78)
+  torsoGroup.add(leftShoulder)
+
+  const rightShoulder = new THREE.Mesh(shoulderGeom, outfitMat)
+  rightShoulder.position.set(0.215, 0.13, -0.005)
+  rightShoulder.scale.set(1.08, 0.86, 0.78)
+  torsoGroup.add(rightShoulder)
+
+  // Inner shirt / collar V-panel
+  const chestInset = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.088, 0.055, 0.24, 24),
+    innerShirtMat
+  )
+  chestInset.position.set(0, 0.09, 0.082)
+  chestInset.scale.set(1.0, 1.0, 0.42)
+  torsoGroup.add(chestInset)
+
+  // Tailored blazer lapels
+  const lapelGeom = new THREE.BoxGeometry(0.052, 0.21, 0.024)
+  const leftLapel = new THREE.Mesh(lapelGeom, outfitMat)
+  leftLapel.position.set(-0.078, 0.095, 0.105)
+  leftLapel.rotation.set(0.1, 0.22, -0.26)
+  torsoGroup.add(leftLapel)
+
+  const rightLapel = new THREE.Mesh(lapelGeom, outfitMat)
+  rightLapel.position.set(0.078, 0.095, 0.105)
+  rightLapel.rotation.set(0.1, -0.22, 0.26)
+  torsoGroup.add(rightLapel)
+
+  // Preset-specific torso accents
+  if (presetId === "preset_1") {
+    // Elegant gold lapel pin
+    const pin = new THREE.Mesh(new THREE.OctahedronGeometry(0.014, 0), accentMat)
+    pin.position.set(0.088, 0.115, 0.125)
+    torsoGroup.add(pin)
+  } else if (presetId === "preset_2") {
+    // Wireless studio lapel mic clip + LED dot
+    const micBody = new THREE.Mesh(
+      new THREE.BoxGeometry(0.024, 0.036, 0.016),
+      new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.3, metalness: 0.5 })
+    )
+    micBody.position.set(0.075, 0.095, 0.124)
+    torsoGroup.add(micBody)
+    const micLed = new THREE.Mesh(
+      new THREE.SphereGeometry(0.004, 10, 10),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+    )
+    micLed.position.set(0.075, 0.105, 0.134)
+    torsoGroup.add(micLed)
+  } else {
+    // Turtleneck collar + warm metallic trim ring
+    const collar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.068, 0.078, 0.065, 24),
+      innerShirtMat
+    )
+    collar.position.set(0, 0.21, 0.0)
+    torsoGroup.add(collar)
+    const trimRing = new THREE.Mesh(new THREE.TorusGeometry(0.072, 0.006, 12, 32), accentMat)
+    trimRing.rotation.x = Math.PI / 2
+    trimRing.position.set(0, 0.195, 0.004)
+    torsoGroup.add(trimRing)
+  }
+
+  // Neck Group
+  const neckGroup = new THREE.Group()
+  neckGroup.position.set(0, 0.20, 0)
+  torsoGroup.add(neckGroup)
+
+  const neckMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.06, 0.14, 24), skinMat)
+  neckMesh.position.set(0, 0.055, 0)
+  neckGroup.add(neckMesh)
+
+  // Head Group (pivots naturally at top of neck for nod & sway)
+  const headGroup = new THREE.Group()
+  headGroup.position.set(0, 0.21, 0.01)
+  neckGroup.add(headGroup)
+
+  // Main cranium + softer jaw contour
+  const headWidth = presetId === "preset_2" ? 0.99 : 0.94
+  const headMesh = new THREE.Mesh(new THREE.SphereGeometry(0.145, 36, 32), skinMat)
+  headMesh.scale.set(headWidth, 1.07, 0.96)
+  headGroup.add(headMesh)
+
+  // Subtle sculpted chin
+  const chinMesh = new THREE.Mesh(new THREE.SphereGeometry(0.068, 24, 20), skinMat)
+  chinMesh.position.set(0, -0.095, 0.048)
+  chinMesh.scale.set(presetId === "preset_2" ? 1.05 : 0.88, 0.78, 0.85)
+  headGroup.add(chinMesh)
+
+  // Ears
+  const earGeom = new THREE.SphereGeometry(0.028, 16, 14)
+  const leftEar = new THREE.Mesh(earGeom, skinMat)
+  leftEar.position.set(-0.138 * headWidth, -0.005, -0.01)
+  leftEar.scale.set(0.5, 1.15, 0.75)
+  headGroup.add(leftEar)
+
+  const rightEar = new THREE.Mesh(earGeom, skinMat)
+  rightEar.position.set(0.138 * headWidth, -0.005, -0.01)
+  rightEar.scale.set(0.5, 1.15, 0.75)
+  headGroup.add(rightEar)
+
+  // Nose (refined stylized bridge + tip)
+  const noseMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.012, 0.024, 8, 14), skinMat)
+  noseMesh.position.set(0, -0.012, 0.136)
+  noseMesh.rotation.x = -0.18
+  headGroup.add(noseMesh)
+
+  // Soft cheek blush
+  const blushGeom = new THREE.CircleGeometry(0.028, 20)
+  const leftBlush = new THREE.Mesh(blushGeom, blushMat)
+  leftBlush.position.set(-0.072, -0.032, 0.123)
+  leftBlush.rotation.y = -0.45
+  headGroup.add(leftBlush)
+
+  const rightBlush = new THREE.Mesh(blushGeom, blushMat)
+  rightBlush.position.set(0.072, -0.032, 0.123)
+  rightBlush.rotation.y = 0.45
+  headGroup.add(rightBlush)
+
+  // Eyes + Eyelids (rigged for smooth blinking)
+  const buildEye = (side: -1 | 1) => {
+    const eyeGroup = new THREE.Group()
+    eyeGroup.position.set(side * 0.052, 0.022, 0.118)
+    eyeGroup.rotation.y = side * 0.16
+
+    const sclera = new THREE.Mesh(new THREE.SphereGeometry(0.024, 20, 18), scleraMat)
+    sclera.scale.set(1.05, 0.92, 0.65)
+    eyeGroup.add(sclera)
+
+    const iris = new THREE.Mesh(new THREE.SphereGeometry(0.0155, 18, 16), irisMat)
+    iris.position.set(0, 0, 0.011)
+    iris.scale.set(1.0, 1.0, 0.45)
+    eyeGroup.add(iris)
+
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.0085, 14, 12), pupilMat)
+    pupil.position.set(0, 0, 0.0155)
+    pupil.scale.set(1.0, 1.0, 0.35)
+    eyeGroup.add(pupil)
+
+    // Specular catchlight
+    const glint = new THREE.Mesh(new THREE.SphereGeometry(0.004, 10, 10), highlightMat)
+    glint.position.set(0.0055, 0.0055, 0.0185)
+    eyeGroup.add(glint)
+
+    // Upper eyelid cover (scales smoothly down during blink)
+    const upperLid = new THREE.Mesh(
+      new THREE.SphereGeometry(0.0265, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.56),
+      skinMat
+    )
+    upperLid.scale.set(1.08, 0.95, 0.72)
+    upperLid.rotation.x = -0.68
+    eyeGroup.add(upperLid)
+
+    // Eyelash rim line
+    const lash = new THREE.Mesh(
+      new THREE.TorusGeometry(0.023, 0.0024, 8, 18, Math.PI),
+      browMat
+    )
+    lash.position.set(0, 0.004, 0.014)
+    lash.rotation.z = 0
+    eyeGroup.add(lash)
+
+    headGroup.add(eyeGroup)
+    return { eyeGroup, upperLid }
+  }
+
+  const leftEye = buildEye(-1)
+  const rightEye = buildEye(1)
+
+  // Eyebrows (expressive vertical lift on vocal energy)
+  const browGeom = new THREE.CapsuleGeometry(0.0048, 0.032, 6, 12)
+  const leftBrow = new THREE.Mesh(browGeom, browMat)
+  leftBrow.position.set(-0.052, 0.058, 0.125)
+  leftBrow.rotation.set(0, -0.18, Math.PI / 2 - 0.1)
+  headGroup.add(leftBrow)
+
+  const rightBrow = new THREE.Mesh(browGeom, browMat)
+  rightBrow.position.set(0.052, 0.058, 0.125)
+  rightBrow.rotation.set(0, 0.18, Math.PI / 2 + 0.1)
+  headGroup.add(rightBrow)
+
+  // Mouth / Jaw Lip-Sync Rig
+  const mouthGroup = new THREE.Group()
+  mouthGroup.position.set(0, -0.062, 0.124)
+  headGroup.add(mouthGroup)
+
+  const mouthCavity = new THREE.Mesh(new THREE.SphereGeometry(0.024, 18, 14), mouthCavityMat)
+  mouthCavity.scale.set(1.15, 0.12, 0.42)
+  mouthCavity.position.set(0, 0, -0.002)
+  mouthGroup.add(mouthCavity)
+
+  const upperTeeth = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.009, 0.008), teethMat)
+  upperTeeth.position.set(0, 0.007, 0.004)
+  upperTeeth.visible = false
+  mouthGroup.add(upperTeeth)
+
+  const upperLip = new THREE.Mesh(new THREE.CapsuleGeometry(0.0055, 0.036, 8, 14), lipMat)
+  upperLip.rotation.z = Math.PI / 2
+  upperLip.position.set(0, 0.005, 0.007)
+  mouthGroup.add(upperLip)
+
+  const lowerLip = new THREE.Mesh(new THREE.CapsuleGeometry(0.006, 0.032, 8, 14), lipMat)
+  lowerLip.rotation.z = Math.PI / 2
+  lowerLip.position.set(0, -0.005, 0.006)
+  mouthGroup.add(lowerLip)
+
+  // Distinct Stylized Hair & Accessories per Preset
+  if (presetId === "preset_1") {
+    // Sleek side-parted studio bob with soft bangs & framing side strands
+    const crown = new THREE.Mesh(new THREE.SphereGeometry(0.158, 32, 24), hairMat)
+    crown.position.set(0, 0.034, -0.016)
+    crown.scale.set(1.03, 1.02, 1.04)
+    headGroup.add(crown)
+
+    const backBob = new THREE.Mesh(new THREE.SphereGeometry(0.152, 28, 22), hairMat)
+    backBob.position.set(0, -0.06, -0.055)
+    backBob.scale.set(1.06, 1.18, 0.85)
+    headGroup.add(backBob)
+
+    const sideLeft = new THREE.Mesh(new THREE.CapsuleGeometry(0.044, 0.16, 10, 16), hairMat)
+    sideLeft.position.set(-0.128, -0.045, 0.022)
+    sideLeft.rotation.z = 0.12
+    headGroup.add(sideLeft)
+
+    const sideRight = new THREE.Mesh(new THREE.CapsuleGeometry(0.044, 0.16, 10, 16), hairMat)
+    sideRight.position.set(0.128, -0.045, 0.022)
+    sideRight.rotation.z = -0.12
+    headGroup.add(sideRight)
+
+    const bangSweep = new THREE.Mesh(new THREE.SphereGeometry(0.095, 22, 16), hairMat)
+    bangSweep.position.set(0.032, 0.105, 0.086)
+    bangSweep.scale.set(1.38, 0.56, 0.72)
+    bangSweep.rotation.z = -0.22
+    headGroup.add(bangSweep)
+
+    // Subtle pearl/gold earrings
+    const earringGeom = new THREE.SphereGeometry(0.011, 14, 12)
+    const leftEarring = new THREE.Mesh(earringGeom, accentMat)
+    leftEarring.position.set(-0.135, -0.036, 0.002)
+    headGroup.add(leftEarring)
+    const rightEarring = new THREE.Mesh(earringGeom, accentMat)
+    rightEarring.position.set(0.135, -0.036, 0.002)
+    headGroup.add(rightEarring)
+  } else if (presetId === "preset_2") {
+    // Crisp modern short-fade + textured swept quiff
+    const baseCap = new THREE.Mesh(
+      new THREE.SphereGeometry(0.154, 30, 22, 0, Math.PI * 2, 0, Math.PI * 0.58),
+      hairMat
+    )
+    baseCap.position.set(0, 0.026, -0.012)
+    baseCap.scale.set(1.03, 1.0, 1.02)
+    headGroup.add(baseCap)
+
+    const quiff = new THREE.Mesh(new THREE.SphereGeometry(0.092, 24, 18), hairMat)
+    quiff.position.set(0.015, 0.136, 0.042)
+    quiff.scale.set(1.32, 0.68, 1.12)
+    quiff.rotation.set(-0.18, 0, -0.14)
+    headGroup.add(quiff)
+
+    const sideWave = new THREE.Mesh(new THREE.CapsuleGeometry(0.034, 0.075, 8, 14), hairMat)
+    sideWave.position.set(-0.08, 0.115, 0.05)
+    sideWave.rotation.set(0.15, 0, 1.25)
+    headGroup.add(sideWave)
+
+    // Stylish thin-frame round studio glasses
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: 0x1e293b,
+      roughness: 0.25,
+      metalness: 0.75,
+    })
+    const ringGeom = new THREE.TorusGeometry(0.036, 0.0032, 10, 28)
+    const leftRim = new THREE.Mesh(ringGeom, frameMat)
+    leftRim.position.set(-0.052, 0.022, 0.144)
+    leftRim.rotation.y = -0.1
+    headGroup.add(leftRim)
+
+    const rightRim = new THREE.Mesh(ringGeom, frameMat)
+    rightRim.position.set(0.052, 0.022, 0.144)
+    rightRim.rotation.y = 0.1
+    headGroup.add(rightRim)
+
+    const bridge = new THREE.Mesh(new THREE.CylinderGeometry(0.0026, 0.0026, 0.034, 10), frameMat)
+    bridge.rotation.z = Math.PI / 2
+    bridge.position.set(0, 0.026, 0.146)
+    headGroup.add(bridge)
+  } else {
+    // Chic asymmetrical layered studio hair + sleek broadcast earpiece
+    const crown = new THREE.Mesh(new THREE.SphereGeometry(0.158, 32, 24), hairMat)
+    crown.position.set(0, 0.035, -0.014)
+    crown.scale.set(1.04, 1.04, 1.04)
+    headGroup.add(crown)
+
+    const sweep = new THREE.Mesh(new THREE.CapsuleGeometry(0.048, 0.13, 10, 16), hairMat)
+    sweep.position.set(-0.065, 0.095, 0.088)
+    sweep.rotation.set(0.22, -0.15, 0.92)
+    headGroup.add(sweep)
+
+    const sideAccent = new THREE.Mesh(new THREE.CapsuleGeometry(0.042, 0.14, 10, 16), hairMat)
+    sideAccent.position.set(-0.125, -0.025, 0.02)
+    sideAccent.rotation.z = 0.15
+    headGroup.add(sideAccent)
+
+    const backLayer = new THREE.Mesh(new THREE.SphereGeometry(0.142, 26, 20), hairMat)
+    backLayer.position.set(0, -0.03, -0.058)
+    backLayer.scale.set(1.02, 1.06, 0.84)
+    headGroup.add(backLayer)
+
+    // Sleek broadcast headset earpiece + boom mic
+    const earPod = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.024, 0.024, 0.016, 20),
+      new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.25, metalness: 0.7 })
+    )
+    earPod.rotation.z = Math.PI / 2
+    earPod.position.set(0.146, -0.005, 0.002)
+    headGroup.add(earPod)
+
+    const earRing = new THREE.Mesh(new THREE.TorusGeometry(0.017, 0.003, 10, 22), accentMat)
+    earRing.rotation.y = Math.PI / 2
+    earRing.position.set(0.155, -0.005, 0.002)
+    headGroup.add(earRing)
+
+    const micBoom = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.003, 0.095, 6, 10),
+      new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.3, metalness: 0.7 })
+    )
+    micBoom.position.set(0.118, -0.048, 0.072)
+    micBoom.rotation.set(1.1, 0.25, 0.65)
+    headGroup.add(micBoom)
+  }
+
+  // Animation state
+  const blink = createBlinkState(0)
+  let smoothPitch = 0
+  let smoothYaw = 0
+  let smoothRoll = 0
+  let smoothOpen = 0
+  let smoothRound = 0
+  let smoothWide = 0
+  let userOrbitYaw = 0
+  let userOrbitPitch = 0
+  let autoOrbitEnabled = false
+  let autoOrbitAngle = 0
+
+  const baseTorsoY = torsoGroup.position.y
+
+  const update = (delta: number, elapsed: number, lip: LipSyncWeights) => {
+    const dt = Math.min(delta, 0.05)
+
+    // 1. Blinking eyelids (every 3–5 seconds)
+    const blinkWeight = sampleBlinkValue(blink, elapsed)
+    const lidRotX = lerp(-0.68, 0.24, blinkWeight)
+    leftEye.upperLid.rotation.x = lidRotX
+    rightEye.upperLid.rotation.x = lidRotX
+
+    // 2. Smooth mouth/jaw lip-sync morphs
+    const mouthAlpha = 1 - Math.exp(-24 * dt)
+    const targetOpen = clamp01(lip.aa * 1.1 + lip.oh * 0.35 + lip.energy * 0.25)
+    const targetRound = clamp01(lip.oh * 0.85 + lip.ou * 0.95)
+    const targetWide = clamp01(lip.ee * 0.9 + lip.ih * 0.6)
+
+    smoothOpen = lerp(smoothOpen, targetOpen, mouthAlpha)
+    smoothRound = lerp(smoothRound, targetRound, mouthAlpha)
+    smoothWide = lerp(smoothWide, targetWide, mouthAlpha)
+
+    const openPx = smoothOpen * 0.022
+    upperLip.position.y = 0.005 + openPx * 0.22
+    lowerLip.position.y = -0.005 - openPx * 0.92
+    const lipWidthScale = 1 + smoothWide * 0.24 - smoothRound * 0.26
+    upperLip.scale.set(1, lipWidthScale, 1)
+    lowerLip.scale.set(1, lipWidthScale * 0.96, 1)
+
+    mouthCavity.scale.set(
+      1.05 * lipWidthScale,
+      Math.max(0.08, 0.1 + smoothOpen * 0.85),
+      0.42
+    )
+    mouthCavity.position.y = -openPx * 0.32
+    upperTeeth.visible = smoothOpen > 0.16
+    upperTeeth.position.y = 0.003 - openPx * 0.08
+
+    // Subtle eyebrow lift during speech
+    const browLift = smoothOpen * 0.006 + lip.energy * 0.004
+    leftBrow.position.y = 0.058 + browLift
+    rightBrow.position.y = 0.058 + browLift
+
+    // 3. Subtle head nod & natural idle sway
+    const isSpeaking = lip.aa > 0.14 || lip.energy > 0.14
+    const vocalBoost = isSpeaking ? Math.max(lip.aa, lip.energy) * 0.12 : 0
+    const targetPitch = Math.sin(elapsed * 5.0) * vocalBoost + Math.sin(elapsed * 0.9) * 0.018
+    const targetYaw =
+      Math.sin(elapsed * 1.25) * (isSpeaking ? 0.07 : 0.032) +
+      Math.cos(elapsed * 2.1) * vocalBoost * 0.35
+    const targetRoll = Math.cos(elapsed * 1.05) * (isSpeaking ? 0.035 : 0.015)
+
+    const headAlpha = 1 - Math.exp(-8 * dt)
+    smoothPitch = lerp(smoothPitch, targetPitch, headAlpha)
+    smoothYaw = lerp(smoothYaw, targetYaw, headAlpha)
+    smoothRoll = lerp(smoothRoll, targetRoll, headAlpha)
+
+    headGroup.rotation.x = smoothPitch
+    headGroup.rotation.y = smoothYaw
+    headGroup.rotation.z = smoothRoll
+    neckGroup.rotation.x = smoothPitch * 0.35
+    neckGroup.rotation.y = smoothYaw * 0.3
+
+    // 4. Gentle idle breathing motion
+    const breath = Math.sin(elapsed * 1.6)
+    torsoGroup.position.y = baseTorsoY + breath * 0.006 + (isSpeaking ? lip.energy * 0.005 : 0)
+    torsoGroup.scale.set(1 + breath * 0.007, 1 + breath * 0.005, 1 + breath * 0.008)
+
+    // 5. Optional drag-orbit & 360° auto-orbit
+    if (autoOrbitEnabled) {
+      autoOrbitAngle = (autoOrbitAngle + dt * 0.75) % (Math.PI * 2)
+    }
+    root.rotation.y = lerp(root.rotation.y, userOrbitYaw + autoOrbitAngle, headAlpha)
+    root.rotation.x = lerp(root.rotation.x, userOrbitPitch, headAlpha)
+  }
+
+  const setOrbitRotation = (yaw: number, pitch = 0) => {
+    userOrbitYaw = yaw
+    userOrbitPitch = Math.max(-0.45, Math.min(0.45, pitch))
+  }
+
+  const setAutoOrbit = (enabled: boolean) => {
+    autoOrbitEnabled = enabled
+    if (!enabled) {
+      autoOrbitAngle = 0
+    }
+  }
+
+  const dispose = () => {
+    disposeObject3D(root)
+  }
+
+  return {
+    object: root,
+    kind: "procedural",
     update,
     setOrbitRotation,
     setAutoOrbit,

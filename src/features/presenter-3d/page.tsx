@@ -55,7 +55,9 @@ import {
   type ImageTo3dProgress,
 } from "@/lib/imageTo3d"
 import {
+  BUILTIN_PRESENTER_PRESETS,
   createLipSyncAnalyzer,
+  createProceduralPresenterController,
   createStudioBackdropGroup,
   drawBroadcastLowerThird,
   drawCaptionBar,
@@ -66,6 +68,7 @@ import {
   loadAvatarController,
   type AvatarController,
   type BuiltinPresenterId,
+  type BuiltinPresenterMeta,
   type CaptionStyle,
   type LipSyncAnalyzer,
   type PipCorner,
@@ -116,13 +119,81 @@ const CANVAS_DIMENSIONS_BY_QUALITY: Record<
   },
 }
 
-const NORMALIZED_BASE_URL = import.meta.env.BASE_URL.endsWith("/")
-  ? import.meta.env.BASE_URL
-  : `${import.meta.env.BASE_URL}/`
-
-const PRESET_VRM_PATHS: Record<BuiltinPresenterId, string> = {
-  female_nilar: `${NORMALIZED_BASE_URL}models/nilar.vrm`,
-  male_kokhant: `${NORMALIZED_BASE_URL}models/kokhant.vrm`,
+function PresetPortraitThumb({ meta }: { meta: BuiltinPresenterMeta }) {
+  const { bgFrom, bgTo, skin, hair, outfit, accent, eye, lip } = meta.palette
+  const gradId = `preset-bg-${meta.id}`
+  return (
+    <svg
+      viewBox="0 0 80 80"
+      className="h-14 w-14 rounded-xl shrink-0 shadow-xs border border-black/10 dark:border-white/10"
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor={bgFrom} />
+          <stop offset="100%" stopColor={bgTo} />
+        </linearGradient>
+      </defs>
+      <rect width="80" height="80" rx="14" fill={`url(#${gradId})`} />
+      {/* Shoulders & outfit */}
+      <path d="M12 80 C14 60 26 55 40 55 C54 55 66 60 68 80 Z" fill={outfit} />
+      <path d="M33 56 L40 67 L47 56 Z" fill={meta.id === "preset_2" ? "#F8FAFC" : "#18181B"} />
+      {/* Accent detail */}
+      {meta.id === "preset_1" && <circle cx="51" cy="64" r="2.6" fill={accent} />}
+      {meta.id === "preset_2" && (
+        <>
+          <rect x="48" y="61" width="5" height="7" rx="1.5" fill="#111827" />
+          <circle cx="50.5" cy="63" r="1.1" fill={accent} />
+        </>
+      )}
+      {meta.id === "preset_3" && (
+        <ellipse cx="40" cy="56" rx="9" ry="2.2" fill="none" stroke={accent} strokeWidth="2" />
+      )}
+      {/* Back hair volume */}
+      {meta.id === "preset_1" && <ellipse cx="40" cy="39" rx="20" ry="21" fill={hair} />}
+      {meta.id === "preset_3" && <ellipse cx="39" cy="37" rx="19" ry="20" fill={hair} />}
+      {/* Neck & Face */}
+      <rect x="35" y="47" width="10" height="10" rx="4" fill={skin} />
+      <ellipse cx="40" cy="35" rx="14.5" ry="16.5" fill={skin} />
+      {/* Front hair */}
+      {meta.id === "preset_1" && (
+        <path d="M24 33 C25 18 38 15 50 20 C56 23 56 32 54 36 C49 27 36 25 24 33 Z" fill={hair} />
+      )}
+      {meta.id === "preset_2" && (
+        <path d="M25 31 C25 18 35 14 47 17 C54 19 56 26 55 31 C50 24 33 23 25 31 Z" fill={hair} />
+      )}
+      {meta.id === "preset_3" && (
+        <path d="M24 34 C24 18 36 14 49 18 C55 21 56 29 55 34 C46 24 33 26 24 34 Z" fill={hair} />
+      )}
+      {/* Eyes */}
+      <circle cx="34.5" cy="36" r="2.2" fill={eye} />
+      <circle cx="45.5" cy="36" r="2.2" fill={eye} />
+      <circle cx="35.3" cy="35.2" r="0.8" fill="#FFFFFF" />
+      <circle cx="46.3" cy="35.2" r="0.8" fill="#FFFFFF" />
+      {/* Glasses for Preset 2 / Broadcast earpiece for Preset 3 */}
+      {meta.id === "preset_2" && (
+        <g fill="none" stroke="#1E293B" strokeWidth="1.4">
+          <circle cx="34.5" cy="36" r="4.8" />
+          <circle cx="45.5" cy="36" r="4.8" />
+          <line x1="39.3" y1="36" x2="40.7" y2="36" />
+        </g>
+      )}
+      {meta.id === "preset_3" && (
+        <>
+          <circle cx="55.5" cy="37" r="3" fill="#18181B" stroke={accent} strokeWidth="1.2" />
+          <path d="M55 39 Q52 45 45 45" fill="none" stroke="#27272A" strokeWidth="1.3" />
+        </>
+      )}
+      {/* Warm smile */}
+      <path
+        d="M35.5 44 Q40 47.5 44.5 44"
+        fill="none"
+        stroke={lip}
+        strokeWidth="2.1"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
 }
 
 function encodeCanvasForStorage(canvas: HTMLCanvasElement): string {
@@ -205,7 +276,6 @@ export function Presenter3DPage() {
     generatedAudioBlob,
     generatedAudioTitle,
     generatedAudioDuration,
-    selectedVoice,
     shopProfile,
     mascotPresets,
     saveMascotPreset,
@@ -236,7 +306,6 @@ export function Presenter3DPage() {
       generatedAudioBlob: state.generatedAudioBlob,
       generatedAudioTitle: state.generatedAudioTitle,
       generatedAudioDuration: state.generatedAudioDuration,
-      selectedVoice: state.selectedVoice,
       shopProfile: state.shopProfile,
       mascotPresets: state.mascotPresets,
       saveMascotPreset: state.saveMascotPreset,
@@ -264,16 +333,10 @@ export function Presenter3DPage() {
     }))
   )
 
-  const defaultPreset: BuiltinPresenterId = useMemo(() => {
-    const voice = String(selectedVoice || "").toLowerCase()
-    if (voice.includes("khant") || voice.includes("thiha") || voice.includes("male")) {
-      return "male_kokhant"
-    }
-    return "female_nilar"
-  }, [selectedVoice])
+  const defaultPreset: BuiltinPresenterId = "preset_1"
 
-  // Character & Scene state (2D Mascot Motion Card is the default)
-  const [characterKind, setCharacterKind] = useState<CharacterKind>("photo")
+  // Character & Scene state (3D Presenter Preset 1 is ready immediately on initial load)
+  const [characterKind, setCharacterKind] = useState<CharacterKind>("model")
   const [photoDims, setPhotoDims] = useState<{ w: number; h: number } | null>(null)
   const [photoName, setPhotoName] = useState("")
   const [photoDataUrl, setPhotoDataUrl] = useState("")
@@ -622,6 +685,12 @@ export function Presenter3DPage() {
     scene.add(studioBackdrop.object)
     studioBackdropRef.current = studioBackdrop
 
+    // Load Preset 1 immediately on initial mount so the 3D stage is ready with zero wait
+    const initialAvatar = createProceduralPresenterController("preset_1")
+    scene.add(initialAvatar.object)
+    avatarRef.current = initialAvatar
+    setHasLoaded3dAvatar(true)
+
     const clock = new THREE.Clock()
     let rafId = 0
     let lastRenderMs = 0
@@ -781,12 +850,12 @@ export function Presenter3DPage() {
 
       // 4. TV-Style Lower-Third Nameplate
       if (settings.presenterShowLowerThird) {
+        const presetNum =
+          settings.presetId === "preset_3" ? 3 : settings.presetId === "preset_2" ? 2 : 1
         const presenterName =
           settings.characterKind === "model"
             ? settings.avatarMode === "preset"
-              ? settings.presetId === "male_kokhant"
-                ? "ကိုခန့်"
-                : "နီလာ"
+              ? settings.badgeText.trim() || `Preset ${presetNum}`
               : settings.customAvatarName.replace(/\.(vrm|glb)$/i, "") || "3D Presenter"
             : settings.mascotName.trim() ||
               settings.photoName.replace(/\.[^.]+$/, "") ||
@@ -1073,31 +1142,26 @@ export function Presenter3DPage() {
     studioBackdropRef.current?.setShopName(badgeText)
   }, [badgeText])
 
-  const loadPresetVrm = useCallback(
-    async (id: BuiltinPresenterId, silentMissing = false) => {
+  const loadBuiltinPreset = useCallback(
+    (id: BuiltinPresenterId) => {
       setPresetId(id)
       setAvatarMode("preset")
       setCustomAvatarName("")
-      setIsLoadingAvatar(true)
-      try {
-        const url = PRESET_VRM_PATHS[id]
-        const controller = await loadAvatarController(url)
-        swapAvatarController(controller)
-      } catch {
-        swapAvatarController(null)
-        if (!silentMissing) {
-          toast.info(t(language, "presenter3d.presetNotPlaced"))
-        }
-      } finally {
-        setIsLoadingAvatar(false)
-      }
+      setCharacterKind("model")
+      const controller = createProceduralPresenterController(id)
+      orbitDragRef.current.currentYaw = 0
+      orbitDragRef.current.currentPitch = 0
+      controller.setOrbitRotation?.(0, 0)
+      controller.setAutoOrbit?.(false)
+      setAutoOrbit3d(false)
+      swapAvatarController(controller)
     },
-    [language, swapAvatarController]
+    [swapAvatarController]
   )
 
   const handleSelectPreset = (id: BuiltinPresenterId) => {
     triggerHaptic(8)
-    void loadPresetVrm(id, false)
+    loadBuiltinPreset(id)
   }
 
   const handleUploadUniformLogo = (e: React.ChangeEvent<HTMLInputElement> | File) => {
@@ -1305,6 +1369,17 @@ export function Presenter3DPage() {
     setConverterSourceName(photoName || t(language, "presenter3d.savedMascotLabel"))
   }
 
+  const handleCancelConvert3d = () => {
+    if (!isConverting3d) return
+    triggerHaptic(6)
+    convert3dAbortRef.current?.abort()
+    convert3dAbortRef.current = null
+    setIsConverting3d(false)
+    setIsLoadingAvatar(false)
+    setConvert3dProgress(null)
+    toast.info(t(language, "presenter3d.img3dCancelled"))
+  }
+
   const handleConvertImageTo3d = async () => {
     if (isRenderingRef.current || isPlayingRef.current) return
     const source = converterSourceFile || converterSourceUrl || photoDataUrl || presenterMascotDataUrl
@@ -1329,7 +1404,7 @@ export function Presenter3DPage() {
       const mobile = detectMobileDevice()
       const result = await convertImageToGlb(source, {
         mode: convert3dMode,
-        timeoutMs: 12_000,
+        timeoutMs: convert3dMode === "full_3d" ? 45_000 : 12_000,
         hfToken,
         removeBg: true,
         cutoutMode: foregroundCutoutMode,
@@ -2184,8 +2259,8 @@ export function Presenter3DPage() {
             >
               {(
                 [
-                  { id: "photo", labelKey: "presenter3d.modePhoto" },
                   { id: "model", labelKey: "presenter3d.mode3d" },
+                  { id: "photo", labelKey: "presenter3d.modePhoto" },
                 ] as const
               ).map((opt) => (
                 <button
@@ -2198,7 +2273,7 @@ export function Presenter3DPage() {
                     if (isRenderingVideo) return
                     setCharacterKind(opt.id)
                     if (opt.id === "model" && !hasLoaded3dAvatar && !isLoadingAvatar) {
-                      void loadPresetVrm(presetId, true)
+                      loadBuiltinPreset(presetId)
                     }
                   }}
                   className={cn(
@@ -2492,60 +2567,32 @@ export function Presenter3DPage() {
 
             {characterKind === "model" && (
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => handleSelectPreset("female_nilar")}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-2xl border p-3 text-left transition-all cursor-pointer",
-                    avatarMode === "preset" && presetId === "female_nilar"
-                      ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
-                      : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
-                  )}
-                >
-                  <User className="h-4 w-4 shrink-0" />
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold truncate font-myanmar">
-                      {t(language, "presenter3d.presetNilar")}
-                    </div>
-                    <div className="text-[10px] opacity-75 truncate">/models/nilar.vrm</div>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSelectPreset("male_kokhant")}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-2xl border p-3 text-left transition-all cursor-pointer",
-                    avatarMode === "preset" && presetId === "male_kokhant"
-                      ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B]"
-                      : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4]"
-                  )}
-                >
-                  <User className="h-4 w-4 shrink-0" />
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold truncate font-myanmar">
-                      {t(language, "presenter3d.presetKoKhant")}
-                    </div>
-                    <div className="text-[10px] opacity-75 truncate">/models/kokhant.vrm</div>
-                  </div>
-                </button>
+              {/* 1. Three Unnamed Instant-Ready 3D Presenter Presets */}
+              <div className="grid grid-cols-3 gap-2">
+                {BUILTIN_PRESENTER_PRESETS.map((meta) => {
+                  const isActive = avatarMode === "preset" && presetId === meta.id
+                  return (
+                    <button
+                      key={meta.id}
+                      type="button"
+                      onClick={() => handleSelectPreset(meta.id)}
+                      className={cn(
+                        "flex flex-col items-center gap-1.5 rounded-2xl border p-2 text-center transition-all cursor-pointer",
+                        isActive
+                          ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B] shadow-xs"
+                          : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4] hover:border-amber-500/60"
+                      )}
+                    >
+                      <PresetPortraitThumb meta={meta} />
+                      <div className="text-[11px] font-semibold leading-tight font-myanmar">
+                        {t(language, "presenter3d.presetLabel", { n: String(meta.index) })}
+                      </div>
+                    </button>
+                  )
+                })}
               </div>
 
-              <FileDropzone accept={[".vrm", ".glb"]} onFiles={(f) => void handleUploadAvatarFile(f[0])}>
-                <label className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-white/70 dark:bg-[#27272A]/70 py-2.5 px-3 text-xs font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
-                  <Upload className="h-3.5 w-3.5" />
-                  <span>{t(language, "presenter3d.uploadCustomAvatar")}</span>
-                  <input
-                    type="file"
-                    accept=".vrm,.glb"
-                    onChange={handleUploadAvatarFile}
-                    className="hidden"
-                  />
-                </label>
-              </FileDropzone>
-
-              {/* Step 2: Collapsible 2D Photo -> 3D .glb Converter */}
+              {/* 2. Custom 2D-to-3D Photo Upload & Conversion Underneath */}
               <div className="rounded-2xl border border-amber-500/30 bg-white dark:bg-[#27272A] overflow-hidden">
                 <button
                   type="button"
@@ -2770,11 +2817,26 @@ export function Presenter3DPage() {
                     </Button>
 
                     {isConverting3d && convert3dProgress && (
-                      <div className="h-1.5 w-full rounded-full bg-[#EFEAE1] dark:bg-[#18181B] overflow-hidden">
-                        <div
-                          className="h-full bg-amber-600 dark:bg-amber-400 transition-all duration-200"
-                          style={{ width: `${Math.max(8, Math.min(100, convert3dProgress.percent))}%` }}
-                        />
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2 text-[10px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                          <span className="tabular-nums font-semibold">
+                            {Math.max(8, Math.min(100, convert3dProgress.percent))}%
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleCancelConvert3d}
+                            className="inline-flex items-center gap-1 rounded-md border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[10px] font-semibold text-rose-700 dark:text-rose-300 hover:bg-rose-500/20 cursor-pointer transition-colors"
+                          >
+                            <X className="h-3 w-3" />
+                            <span>{t(language, "presenter3d.img3dCancelBtn")}</span>
+                          </button>
+                        </div>
+                        <div className="h-1.5 w-full rounded-full bg-[#EFEAE1] dark:bg-[#18181B] overflow-hidden">
+                          <div
+                            className="h-full bg-amber-600 dark:bg-amber-400 transition-all duration-200"
+                            style={{ width: `${Math.max(8, Math.min(100, convert3dProgress.percent))}%` }}
+                          />
+                        </div>
                       </div>
                     )}
 
@@ -2817,6 +2879,20 @@ export function Presenter3DPage() {
                   </div>
                 )}
               </div>
+
+              {/* Optional direct .vrm / .glb file upload */}
+              <FileDropzone accept={[".vrm", ".glb"]} onFiles={(f) => void handleUploadAvatarFile(f[0])}>
+                <label className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-white/70 dark:bg-[#27272A]/70 py-2 px-3 text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] hover:text-[#1C1917] dark:hover:text-[#F5F5F4] hover:bg-white dark:hover:bg-[#27272A] cursor-pointer transition-colors font-myanmar">
+                  <Upload className="h-3.5 w-3.5" />
+                  <span>{t(language, "presenter3d.uploadCustomAvatar")}</span>
+                  <input
+                    type="file"
+                    accept=".vrm,.glb"
+                    onChange={handleUploadAvatarFile}
+                    className="hidden"
+                  />
+                </label>
+              </FileDropzone>
             </div>
             )}
 
