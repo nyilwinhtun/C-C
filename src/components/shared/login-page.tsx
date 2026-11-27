@@ -11,7 +11,7 @@ import { useShallow } from "zustand/react/shallow"
 import { toast } from "@/components/ui/sonner"
 import { t } from "@/locales/translations"
 import { ThemeToggle } from "@/components/shared/theme-toggle"
-import { StudioEmblem } from "@/components/shared/cc-logo"
+import { AnimatedBrandEmblem } from "@/components/shared/BrandLogo"
 import {
   LiveStudioBackdrop,
   MINI_VOICE_BARS,
@@ -369,7 +369,7 @@ export function LoginPage() {
 
           <div className="relative rounded-[23px] bg-white/72 dark:bg-[#222227]/70 sm:bg-white/78 sm:dark:bg-[#222227]/76 backdrop-blur-2xl p-4 sm:p-7 border border-white/55 dark:border-white/10">
             <div className="flex flex-col items-center text-center mb-3.5 sm:mb-5">
-              <StudioEmblem
+              <AnimatedBrandEmblem
                 size={52}
                 focusedField={focusedField}
                 className="mb-2.5 sm:mb-3"
@@ -379,9 +379,9 @@ export function LoginPage() {
               </h1>
               <p className="mt-1 flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-medium tracking-[0.02em] text-muted-foreground leading-snug">
                 <span>AI Voice</span>
-                <span className="text-amber-500/80 dark:text-amber-400/80" aria-hidden="true">•</span>
+                <span className="text-cyan-500/85 dark:text-cyan-400/85" aria-hidden="true">•</span>
                 <span>Mascot</span>
-                <span className="text-rose-500/80 dark:text-rose-400/80" aria-hidden="true">•</span>
+                <span className="text-violet-500/85 dark:text-violet-400/85" aria-hidden="true">•</span>
                 <span>Social QR</span>
               </p>
               {isSignUp && (
