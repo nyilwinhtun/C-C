@@ -14,6 +14,8 @@ import { ThemeToggle } from "@/components/shared/theme-toggle"
 import { CCLogo } from "@/components/shared/cc-logo"
 import {
   LiveStudioBackdrop,
+  MINI_VOICE_BARS,
+  WAVE_BARS,
   type FocusedAuthField,
 } from "@/components/shared/live-studio-backdrop"
 
@@ -204,7 +206,7 @@ export function LoginPage() {
   const isFocused = focusedField !== null
 
   return (
-    <div className="min-h-screen bg-[#FAF8F5] dark:bg-[#141418] flex flex-col items-center justify-center px-4 py-16 sm:p-6 relative overflow-hidden">
+    <div className="min-h-screen bg-[#FAF8F5] dark:bg-[#141418] flex flex-col items-center justify-center px-4 pt-16 pb-6 sm:p-6 relative overflow-hidden">
       {/* Zero-latency Live Interactive Studio Backdrop (with optional video fallback) */}
       <LiveStudioBackdrop focusedField={focusedField} language={language} />
 
@@ -234,7 +236,7 @@ export function LoginPage() {
       {/* Central Glassmorphism Sign-In Card */}
       <div className="w-full max-w-md relative z-10 studio-card-enter">
         {/* Live Studio Status Pill */}
-        <div className="flex justify-center mb-3.5">
+        <div className="flex justify-center mb-2.5 sm:mb-3.5">
           <div
             className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1 text-[11px] font-medium backdrop-blur-xl transition-all duration-300 ${
               isFocused
@@ -280,6 +282,71 @@ export function LoginPage() {
           </div>
         </div>
 
+        {/* Mobile / Tablet Top Floating Studio Deck (above card, never overlaps inputs) */}
+        <div
+          aria-hidden="true"
+          className="mb-3 grid grid-cols-2 gap-2.5 lg:hidden"
+        >
+          {/* Floating Micro-Card 1: AI Voice */}
+          <div
+            className={`studio-float-mobile-1 flex items-center gap-2 rounded-2xl border px-2.5 py-2 backdrop-blur-xl transition-all duration-500 min-w-0 ${
+              focusedField === "email"
+                ? "border-amber-400/55 dark:border-amber-400/45 bg-white/80 dark:bg-[#27272A]/80 shadow-md shadow-amber-500/12 scale-[1.02]"
+                : "border-white/65 dark:border-white/12 bg-white/62 dark:bg-[#27272A]/55 shadow-xs"
+            }`}
+          >
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-700 dark:text-amber-300">
+              <Mic className="h-3.5 w-3.5" strokeWidth={2} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] truncate">
+                  {t(language, "auth.studioVoiceTitle")}
+                </span>
+                <span className="flex items-end gap-[1.5px] h-3 shrink-0">
+                  {MINI_VOICE_BARS.map((bar, i) => (
+                    <span
+                      key={i}
+                      className="studio-wave-bar w-[2px] rounded-full bg-amber-500/85 dark:bg-amber-400/85"
+                      style={{
+                        height: `${Math.max(6, Math.round(bar.height * 0.72))}px`,
+                        animationDelay: bar.delay,
+                      }}
+                    />
+                  ))}
+                </span>
+              </div>
+              <p className="text-[10px] text-[#57534E] dark:text-[#A1A1AA] truncate font-myanmar leading-tight mt-0.5">
+                {t(language, "auth.studioVoiceSub")}
+              </p>
+            </div>
+          </div>
+
+          {/* Floating Micro-Card 2: Mascot Studio */}
+          <div
+            className={`studio-float-mobile-2 flex items-center gap-2 rounded-2xl border px-2.5 py-2 backdrop-blur-xl transition-all duration-500 min-w-0 ${
+              focusedField === "password"
+                ? "border-indigo-400/55 dark:border-indigo-400/45 bg-white/80 dark:bg-[#27272A]/80 shadow-md shadow-indigo-500/12 scale-[1.02]"
+                : "border-white/65 dark:border-white/12 bg-white/62 dark:bg-[#27272A]/55 shadow-xs"
+            }`}
+          >
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-700 dark:text-violet-300">
+              <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] truncate">
+                  {t(language, "auth.studioMascotTitle")}
+                </span>
+                <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500/85" />
+              </div>
+              <p className="text-[10px] text-[#57534E] dark:text-[#A1A1AA] truncate font-myanmar leading-tight mt-0.5">
+                {t(language, "auth.studioMascotSub")}
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Frosted-Glass Card with Subtle Border Shimmer */}
         <div
           className={`relative rounded-[24px] p-[1px] overflow-hidden transition-all duration-500 ${
@@ -300,8 +367,8 @@ export function LoginPage() {
             className="pointer-events-none absolute inset-y-0 left-0 w-1/3 studio-border-shimmer bg-gradient-to-r from-transparent via-white/90 dark:via-white/30 to-transparent opacity-70"
           />
 
-          <div className="relative rounded-[23px] bg-white/78 dark:bg-[#222227]/76 backdrop-blur-2xl p-6 sm:p-8 border border-white/50 dark:border-white/8">
-            <div className="flex flex-col items-center text-center mb-6">
+          <div className="relative rounded-[23px] bg-white/72 dark:bg-[#222227]/70 sm:bg-white/78 sm:dark:bg-[#222227]/76 backdrop-blur-2xl p-5 sm:p-8 border border-white/55 dark:border-white/10">
+            <div className="flex flex-col items-center text-center mb-5 sm:mb-6">
               <div
                 className={`relative mb-3 rounded-[18px] p-1 transition-all duration-500 ${
                   isFocused
@@ -406,40 +473,59 @@ export function LoginPage() {
           </div>
         </div>
 
-        {/* Compact Mobile / Tablet Studio Feature Strip (hidden on lg where floating cards appear) */}
+        {/* Mobile / Tablet Bottom Floating Studio Deck: Social QR + Live Audio Equalizer Waveform */}
         <div
           aria-hidden="true"
-          className="mt-4 flex lg:hidden flex-wrap items-center justify-center gap-2"
+          className="mt-3 grid grid-cols-[1fr_auto] items-stretch gap-2.5 lg:hidden"
         >
+          {/* Floating Micro-Card 3: Social QR */}
           <div
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium backdrop-blur-xl transition-all duration-300 ${
-              focusedField === "email"
-                ? "border-amber-400/50 bg-white/80 dark:bg-[#27272A]/80 text-[#1C1917] dark:text-[#F5F5F4] scale-[1.03]"
-                : "border-white/60 dark:border-white/10 bg-white/55 dark:bg-[#27272A]/50 text-[#57534E] dark:text-[#A1A1AA]"
-            }`}
-          >
-            <Mic className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" strokeWidth={2} />
-            <span>{t(language, "auth.studioVoiceTitle")}</span>
-          </div>
-          <div
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium backdrop-blur-xl transition-all duration-300 ${
-              focusedField === "password"
-                ? "border-indigo-400/50 bg-white/80 dark:bg-[#27272A]/80 text-[#1C1917] dark:text-[#F5F5F4] scale-[1.03]"
-                : "border-white/60 dark:border-white/10 bg-white/55 dark:bg-[#27272A]/50 text-[#57534E] dark:text-[#A1A1AA]"
-            }`}
-          >
-            <Sparkles className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" strokeWidth={2} />
-            <span>{t(language, "auth.studioMascotTitle")}</span>
-          </div>
-          <div
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium backdrop-blur-xl transition-all duration-300 ${
+            className={`studio-float-mobile-3 flex items-center gap-2 rounded-2xl border px-2.5 py-2 backdrop-blur-xl transition-all duration-500 min-w-0 ${
               isFocused
-                ? "border-emerald-400/45 bg-white/80 dark:bg-[#27272A]/80 text-[#1C1917] dark:text-[#F5F5F4] scale-[1.03]"
-                : "border-white/60 dark:border-white/10 bg-white/55 dark:bg-[#27272A]/50 text-[#57534E] dark:text-[#A1A1AA]"
+                ? "border-emerald-400/50 dark:border-emerald-400/40 bg-white/80 dark:bg-[#27272A]/80 shadow-md shadow-emerald-500/10 scale-[1.02]"
+                : "border-white/65 dark:border-white/12 bg-white/62 dark:bg-[#27272A]/55 shadow-xs"
             }`}
           >
-            <QrCode className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" strokeWidth={2} />
-            <span>{t(language, "auth.studioQrTitle")}</span>
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+              <QrCode className="h-3.5 w-3.5" strokeWidth={2} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="text-[11px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] block truncate">
+                {t(language, "auth.studioQrTitle")}
+              </span>
+              <p className="text-[10px] text-[#57534E] dark:text-[#A1A1AA] truncate font-myanmar leading-tight mt-0.5">
+                {t(language, "auth.studioQrSub")}
+              </p>
+            </div>
+          </div>
+
+          {/* Floating Live Audio Equalizer Waveform Card */}
+          <div
+            className={`studio-float-mobile-4 flex items-center justify-center rounded-2xl border px-3 py-2 backdrop-blur-xl transition-all duration-500 ${
+              isFocused
+                ? "border-stone-400/50 dark:border-white/22 bg-white/78 dark:bg-[#27272A]/78 shadow-md scale-[1.02]"
+                : "border-white/65 dark:border-white/12 bg-white/60 dark:bg-[#27272A]/52 shadow-xs"
+            }`}
+          >
+            <div className="flex items-end gap-[2.5px] h-7">
+              {WAVE_BARS.map((bar, index) => (
+                <span
+                  key={index}
+                  className={`studio-wave-bar w-[2.5px] rounded-full transition-colors duration-500 ${
+                    focusedField === "email"
+                      ? "bg-amber-600/85 dark:bg-amber-400/85"
+                      : focusedField === "password"
+                      ? "bg-indigo-600/85 dark:bg-indigo-400/85"
+                      : "bg-gradient-to-t from-amber-500/75 via-rose-500/70 to-violet-500/75 dark:from-amber-400/80 dark:via-rose-400/75 dark:to-violet-400/80"
+                  }`}
+                  style={{
+                    height: `${Math.max(8, Math.round(bar.height * 0.72))}px`,
+                    animationDelay: bar.delay,
+                    animationDuration: bar.duration,
+                  }}
+                />
+              ))}
+            </div>
           </div>
         </div>
       </div>

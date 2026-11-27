@@ -11,7 +11,7 @@ interface LiveStudioBackdropProps {
   language: Locale
 }
 
-const WAVE_BARS = [
+export const WAVE_BARS = [
   { height: 14, delay: "0s", duration: "1.2s" },
   { height: 26, delay: "0.14s", duration: "1.05s" },
   { height: 18, delay: "0.28s", duration: "1.3s" },
@@ -26,7 +26,7 @@ const WAVE_BARS = [
   { height: 15, delay: "0.38s", duration: "1.3s" },
 ]
 
-const MINI_VOICE_BARS = [
+export const MINI_VOICE_BARS = [
   { height: 8, delay: "0s" },
   { height: 14, delay: "0.15s" },
   { height: 10, delay: "0.3s" },
@@ -87,44 +87,44 @@ export function LiveStudioBackdrop({
       {/* Subtle studio dot grid with soft radial vignette */}
       <div className="absolute inset-0 studio-grid-pattern [mask-image:radial-gradient(ellipse_70%_65%_at_50%_50%,black_30%,transparent_100%)] opacity-80" />
 
-      {/* GPU-accelerated drifting ambient gradient orbs */}
+      {/* GPU-accelerated drifting ambient gradient orbs (vivid behind translucent card on mobile & desktop) */}
       <div
-        className={`studio-orb-a absolute -top-28 -left-24 h-[26rem] w-[26rem] sm:h-[34rem] sm:w-[34rem] rounded-full blur-3xl transition-all duration-700 ${
+        className={`studio-orb-a absolute -top-14 -left-14 md:-top-28 md:-left-24 h-[22rem] w-[22rem] sm:h-[28rem] sm:w-[28rem] md:h-[34rem] md:w-[34rem] rounded-full blur-3xl transition-colors duration-700 ${
           focusedField === "email"
-            ? "bg-amber-400/30 dark:bg-amber-500/22 opacity-95"
+            ? "bg-amber-400/42 dark:bg-amber-500/30 md:bg-amber-400/32 md:dark:bg-amber-500/22"
             : focusedField === "password"
-            ? "bg-indigo-400/28 dark:bg-indigo-500/24 opacity-95"
-            : "bg-amber-300/26 dark:bg-amber-500/14 opacity-80"
+            ? "bg-indigo-400/38 dark:bg-indigo-500/32 md:bg-indigo-400/28 md:dark:bg-indigo-500/24"
+            : "bg-amber-400/38 dark:bg-amber-500/26 md:bg-amber-300/26 md:dark:bg-amber-500/14"
         }`}
       />
       <div
-        className={`studio-orb-b absolute -bottom-32 -right-24 h-[28rem] w-[28rem] sm:h-[36rem] sm:w-[36rem] rounded-full blur-3xl transition-all duration-700 ${
+        className={`studio-orb-b absolute -bottom-16 -right-14 md:-bottom-32 md:-right-24 h-[23rem] w-[23rem] sm:h-[30rem] sm:w-[30rem] md:h-[36rem] md:w-[36rem] rounded-full blur-3xl transition-colors duration-700 ${
           focusedField === "password"
-            ? "bg-emerald-400/28 dark:bg-emerald-500/22 opacity-95"
+            ? "bg-emerald-400/38 dark:bg-emerald-500/30 md:bg-emerald-400/28 md:dark:bg-emerald-500/22"
             : focusedField === "email"
-            ? "bg-rose-400/26 dark:bg-rose-500/20 opacity-95"
-            : "bg-rose-300/24 dark:bg-violet-500/16 opacity-80"
+            ? "bg-rose-400/38 dark:bg-rose-500/28 md:bg-rose-400/26 md:dark:bg-rose-500/20"
+            : "bg-rose-400/34 dark:bg-violet-500/28 md:bg-rose-300/24 md:dark:bg-violet-500/16"
         }`}
       />
       <div
-        className={`studio-orb-c absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[22rem] w-[22rem] sm:h-[30rem] sm:w-[30rem] rounded-full blur-3xl transition-all duration-700 ${
+        className={`studio-orb-c absolute inset-0 m-auto h-[19rem] w-[19rem] sm:h-[25rem] sm:w-[25rem] md:h-[30rem] md:w-[30rem] rounded-full blur-3xl transition-colors duration-700 ${
           isFocused
-            ? "bg-violet-400/20 dark:bg-sky-500/18 opacity-90"
-            : "bg-stone-300/25 dark:bg-indigo-500/10 opacity-65"
+            ? "bg-violet-400/30 dark:bg-sky-500/26 md:bg-violet-400/20 md:dark:bg-sky-500/18"
+            : "bg-violet-300/30 dark:bg-indigo-500/22 md:bg-stone-300/25 md:dark:bg-indigo-500/10"
         }`}
       />
 
       {/* Interactive center studio glow pulse when focusing inputs */}
       <div
-        className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[26rem] w-[26rem] sm:h-[32rem] sm:w-[32rem] rounded-full blur-3xl transition-opacity duration-500 ${
+        className={`absolute inset-0 m-auto h-[22rem] w-[22rem] sm:h-[28rem] sm:w-[28rem] md:h-[32rem] md:w-[32rem] rounded-full blur-3xl transition-opacity duration-500 ${
           isFocused ? "opacity-100" : "opacity-0"
         }`}
       >
         <div
           className={`h-full w-full rounded-full studio-glow-pulse ${
             focusedField === "password"
-              ? "bg-gradient-to-tr from-indigo-400/25 via-emerald-400/20 to-sky-400/25 dark:from-indigo-500/25 dark:via-emerald-500/20 dark:to-sky-500/20"
-              : "bg-gradient-to-tr from-amber-400/25 via-rose-400/20 to-violet-400/25 dark:from-amber-500/22 dark:via-rose-500/18 dark:to-violet-500/22"
+              ? "bg-gradient-to-tr from-indigo-400/32 via-emerald-400/24 to-sky-400/32 dark:from-indigo-500/30 dark:via-emerald-500/22 dark:to-sky-500/24"
+              : "bg-gradient-to-tr from-amber-400/32 via-rose-400/24 to-violet-400/32 dark:from-amber-500/26 dark:via-rose-500/22 dark:to-violet-500/26"
           }`}
         />
       </div>
@@ -209,9 +209,9 @@ export function LiveStudioBackdrop({
         </div>
       </div>
 
-      {/* Subtle Animated Audio Waveform Bar (Desktop Bottom Right & Subtle Bottom Accent) */}
+      {/* Subtle Animated Audio Waveform Bar (Desktop Bottom Right) */}
       <div
-        className={`hidden md:flex absolute bottom-[16%] right-[7%] xl:right-[11%] items-center gap-3 rounded-2xl border px-4 py-2.5 backdrop-blur-xl transition-all duration-500 ${
+        className={`hidden lg:flex absolute bottom-[16%] right-[7%] xl:right-[11%] items-center gap-3 rounded-2xl border px-4 py-2.5 backdrop-blur-xl transition-all duration-500 ${
           isFocused
             ? "border-stone-400/45 dark:border-white/20 bg-white/72 dark:bg-[#27272A]/72 shadow-md scale-[1.03]"
             : "border-white/55 dark:border-white/10 bg-white/48 dark:bg-[#27272A]/45"

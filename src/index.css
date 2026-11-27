@@ -246,33 +246,41 @@
 @keyframes studio-orb-drift-a {
   0%, 100% {
     transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.88;
   }
   33% {
-    transform: translate3d(34px, -24px, 0) scale(1.06);
+    transform: translate3d(34px, -24px, 0) scale(1.08);
+    opacity: 1;
   }
   66% {
-    transform: translate3d(-22px, 18px, 0) scale(0.95);
+    transform: translate3d(-22px, 22px, 0) scale(0.95);
+    opacity: 0.82;
   }
 }
 
 @keyframes studio-orb-drift-b {
   0%, 100% {
     transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.86;
   }
   40% {
-    transform: translate3d(-30px, 26px, 0) scale(1.08);
+    transform: translate3d(-30px, 26px, 0) scale(1.09);
+    opacity: 1;
   }
   75% {
-    transform: translate3d(24px, -16px, 0) scale(0.94);
+    transform: translate3d(24px, -20px, 0) scale(0.94);
+    opacity: 0.8;
   }
 }
 
 @keyframes studio-orb-drift-c {
   0%, 100% {
     transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.78;
   }
   50% {
-    transform: translate3d(22px, 22px, 0) scale(1.05);
+    transform: translate3d(20px, -18px, 0) scale(1.08);
+    opacity: 0.98;
   }
 }
 
@@ -285,12 +293,25 @@
   }
 }
 
+@keyframes studio-float-mobile {
+  0%, 100% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.94;
+  }
+  50% {
+    transform: translate3d(0, -5px, 0);
+    opacity: 1;
+  }
+}
+
 @keyframes studio-wave-bar {
   0%, 100% {
     transform: scaleY(0.28);
+    opacity: 0.5;
   }
   50% {
     transform: scaleY(1);
+    opacity: 1;
   }
 }
 
@@ -326,18 +347,18 @@
 }
 
 .studio-orb-a {
-  animation: studio-orb-drift-a 18s ease-in-out infinite;
-  will-change: transform;
+  animation: studio-orb-drift-a 16s ease-in-out infinite;
+  will-change: transform, opacity;
 }
 
 .studio-orb-b {
-  animation: studio-orb-drift-b 22s ease-in-out infinite;
-  will-change: transform;
+  animation: studio-orb-drift-b 20s ease-in-out infinite;
+  will-change: transform, opacity;
 }
 
 .studio-orb-c {
-  animation: studio-orb-drift-c 16s ease-in-out infinite;
-  will-change: transform;
+  animation: studio-orb-drift-c 14s ease-in-out infinite;
+  will-change: transform, opacity;
 }
 
 .studio-float-1 {
@@ -355,10 +376,30 @@
   will-change: transform;
 }
 
+.studio-float-mobile-1 {
+  animation: studio-float-mobile 5.4s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.studio-float-mobile-2 {
+  animation: studio-float-mobile 6.2s ease-in-out -1.8s infinite;
+  will-change: transform, opacity;
+}
+
+.studio-float-mobile-3 {
+  animation: studio-float-mobile 5.8s ease-in-out -3.1s infinite;
+  will-change: transform, opacity;
+}
+
+.studio-float-mobile-4 {
+  animation: studio-float-mobile 6.4s ease-in-out -0.9s infinite;
+  will-change: transform, opacity;
+}
+
 .studio-wave-bar {
   transform-origin: center bottom;
   animation: studio-wave-bar 1.35s ease-in-out infinite;
-  will-change: transform;
+  will-change: transform, opacity;
 }
 
 .studio-card-enter {
@@ -391,6 +432,10 @@
   .studio-float-1,
   .studio-float-2,
   .studio-float-3,
+  .studio-float-mobile-1,
+  .studio-float-mobile-2,
+  .studio-float-mobile-3,
+  .studio-float-mobile-4,
   .studio-wave-bar,
   .studio-card-enter,
   .studio-border-shimmer,
