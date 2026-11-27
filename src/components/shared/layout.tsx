@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { HomePage } from "@/features/home/page"
 import { GeneratorPage } from "@/features/generator/page"
 import { VideoToContentSection } from "@/features/generator/VideoToContentSection"
 import { TranscriberPage } from "@/features/transcriber/page"
@@ -24,7 +23,6 @@ import { useShallow } from "zustand/react/shallow"
 import { cn, triggerHaptic } from "@/lib/utils"
 
 const pages: Record<string, React.FC> = {
-  home: HomePage,
   text: GeneratorPage,
   video: VideoToContentSection,
   transcriber: TranscriberPage,
@@ -89,8 +87,12 @@ export function Layout() {
   }
 
   const activeRoom = getRoomForPageKey(activePageKey)
+  const activeRoomIndex = Math.max(
+    0,
+    WORKSPACE_ROOMS.findIndex((room) => room.id === activeRoom.id)
+  )
   const roomTitle = getRoomTitle(activeRoom, language)
-  const Page = pages[activePageKey] ?? HomePage
+  const Page = pages[activePageKey] ?? GeneratorPage
 
   return (
     <div className="flex h-[100dvh] bg-background text-foreground">
@@ -153,7 +155,7 @@ export function Layout() {
         </main>
       </div>
 
-      {/* Mobile iOS Frosted Glass Bottom Tab Bar (5 Clean Primary Tabs) */}
+      {/* Mobile iOS Frosted Glass Bottom Tab Bar (4 Clean Primary Tabs) */}
       <nav
         aria-label="Primary sections"
         className={cn(
@@ -163,7 +165,22 @@ export function Layout() {
             : "translate-y-full opacity-0 pointer-events-none"
         )}
       >
-        <div className="grid grid-cols-5 h-[58px] px-1">
+        <div className="relative grid grid-cols-4 h-[58px] px-1.5">
+          {/* GPU-Accelerated Sliding Active Pill Indicator */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 left-1.5 right-1.5"
+          >
+            <div
+              className="nav-active-slider h-full w-1/4 flex items-start justify-center pt-[6px]"
+              style={{
+                transform: `translate3d(${activeRoomIndex * 100}%, 0, 0)`,
+              }}
+            >
+              <span className="nav-pill-glow h-[28px] w-[46px] rounded-full bg-[#1C1917]/10 dark:bg-[#F5F5F4]/14 ring-1 ring-[#1C1917]/8 dark:ring-[#F5F5F4]/15 shadow-[0_2px_10px_rgba(28,25,23,0.08)] dark:shadow-[0_2px_12px_rgba(245,245,244,0.09)]" />
+            </div>
+          </div>
+
           {WORKSPACE_ROOMS.map((room) => {
             const Icon = room.icon
             const isActive = activeRoom.id === room.id
@@ -178,7 +195,7 @@ export function Layout() {
                 }}
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
-                  "flex flex-col items-center justify-center gap-0.5 transition-all duration-200 active:scale-95 cursor-pointer min-w-0",
+                  "nav-tab-press relative z-10 flex flex-col items-center justify-center gap-0.5 cursor-pointer min-w-0 select-none",
                   isActive
                     ? room.activeColorClass
                     : "text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300"
@@ -187,28 +204,31 @@ export function Layout() {
                 <span
                   key={`${room.id}-${isActive ? "active" : "idle"}`}
                   className={cn(
-                    "relative inline-flex items-center justify-center px-2.5 py-1 rounded-full transition-transform duration-300 ease-out",
+                    "relative inline-flex h-[28px] w-[46px] items-center justify-center rounded-full",
                     isActive
-                      ? cn(room.activePillClass, "animate-ios-tab-pop scale-105 -translate-y-0.5")
-                      : "bg-transparent scale-100 translate-y-0"
+                      ? "animate-nav-tab-spring"
+                      : "transition-transform duration-200 ease-out"
                   )}
                 >
                   <Icon
-                    className="h-[19px] w-[19px]"
+                    className={cn(
+                      "h-[19px] w-[19px]",
+                      isActive && "nav-icon-float"
+                    )}
                     strokeWidth={isActive ? 2.2 : 1.75}
                     aria-hidden="true"
                   />
                   {room.id === "audio" && isBgTtsActive && (
                     <span
-                      className="absolute top-0.5 right-1 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-[#FAF8F5] dark:ring-[#18181B] animate-pulse"
+                      className="absolute top-0.5 right-2 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-[#FAF8F5] dark:ring-[#18181B] animate-pulse"
                       aria-label="Voiceover generating in background"
                     />
                   )}
                 </span>
                 <span
                   className={cn(
-                    "text-[10px] leading-none font-myanmar truncate max-w-[64px]",
-                    isActive ? "font-bold" : "font-medium"
+                    "text-[10px] leading-none font-myanmar whitespace-nowrap truncate max-w-[72px] transition-opacity duration-200",
+                    isActive ? "font-bold opacity-100" : "font-medium opacity-80"
                   )}
                 >
                   {getRoomShort(room, language)}

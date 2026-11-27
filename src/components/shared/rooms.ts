@@ -3,7 +3,6 @@ import {
   Camera,
   FileText,
   FolderKanban,
-  Home,
   Mic,
   PenLine,
   QrCode,
@@ -27,7 +26,7 @@ export interface RoomTab {
 }
 
 export interface WorkspaceRoom {
-  id: "home" | "media" | "audio" | "write" | "vault"
+  id: "write" | "media" | "audio" | "vault"
   emoji: string
   titleKey: string
   shortKey: string
@@ -44,7 +43,7 @@ export interface WorkspaceRoom {
 }
 
 export interface StudioToolItem {
-  id: "socialQr" | "studio" | "voiceover" | "presenter3d" | "text"
+  id: "text" | "socialQr" | "studio" | "presenter3d" | "voiceover"
   pageKey: string
   matchPageKeys: string[]
   titleKey: string
@@ -56,10 +55,20 @@ export interface StudioToolItem {
 }
 
 /**
- * Primary studio tools ordered to prioritize instant, zero-API browser-native tools first.
- * Shared by the Dashboard/Home cards and Desktop Sidebar navigation.
+ * Primary studio tools ordered to mirror the 4-room flow: Write -> Studio -> Voice -> Vault.
+ * Shared by the Desktop Sidebar navigation.
  */
 export const STUDIO_TOOLS: StudioToolItem[] = [
+  {
+    id: "text",
+    pageKey: "text",
+    matchPageKeys: ["text", "video"],
+    titleKey: "home.tool.text.title",
+    shortTitleKey: "nav.text",
+    descKey: "home.tool.text.desc",
+    icon: PenLine,
+    tone: "slate",
+  },
   {
     id: "socialQr",
     pageKey: "socialQr",
@@ -83,16 +92,6 @@ export const STUDIO_TOOLS: StudioToolItem[] = [
     badges: ["noApi"],
   },
   {
-    id: "voiceover",
-    pageKey: "voiceover",
-    matchPageKeys: ["voiceover", "transcriber", "audiobook"],
-    titleKey: "home.tool.voiceover.title",
-    shortTitleKey: "nav.voiceover",
-    descKey: "home.tool.voiceover.desc",
-    icon: Mic,
-    tone: "slate",
-  },
-  {
     id: "presenter3d",
     pageKey: "presenter3d",
     matchPageKeys: ["presenter3d"],
@@ -103,37 +102,40 @@ export const STUDIO_TOOLS: StudioToolItem[] = [
     tone: "slate",
   },
   {
-    id: "text",
-    pageKey: "text",
-    matchPageKeys: ["text", "video"],
-    titleKey: "home.tool.text.title",
-    shortTitleKey: "nav.text",
-    descKey: "home.tool.text.desc",
-    icon: PenLine,
+    id: "voiceover",
+    pageKey: "voiceover",
+    matchPageKeys: ["voiceover", "transcriber", "audiobook"],
+    titleKey: "home.tool.voiceover.title",
+    shortTitleKey: "nav.voiceover",
+    descKey: "home.tool.voiceover.desc",
+    icon: Mic,
     tone: "slate",
   },
 ]
 
 /**
- * 5 uncluttered primary rooms for mobile bottom tab navigation and room header/segmented control.
- * Instant zero-API tools (Studio: Social Link & QR, Photo & Poster) come immediately after Home.
+ * 4 uncluttered primary rooms for mobile bottom tab navigation and room header/segmented control:
+ * Write -> Studio -> Voice -> Vault
  */
 export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
   {
-    id: "home",
-    emoji: "🏠",
-    titleKey: "rooms.home.title",
-    shortKey: "rooms.home.short",
-    titleMy: "ပင်မ စတူဒီယို",
-    titleEn: "Creator Home",
-    shortMy: "ပင်မ",
-    shortEn: "Home",
-    defaultPageKey: "home",
-    icon: Home,
+    id: "write",
+    emoji: "✍️",
+    titleKey: "rooms.write.title",
+    shortKey: "rooms.write.short",
+    titleMy: "စာသားနှင့် ဇာတ်ညွှန်းရေးမည်",
+    titleEn: "Script & Caption Writer",
+    shortMy: "စာရေး",
+    shortEn: "Write",
+    defaultPageKey: "text",
+    icon: PenLine,
     tone: "slate",
     activeColorClass: "text-[#1C1917] dark:text-[#F5F5F4]",
     activePillClass: "bg-[#1C1917]/10 dark:bg-[#F5F5F4]/12",
-    tabs: [{ key: "home", labelKey: "nav.home", labelMy: "ပင်မ", labelEn: "Home", icon: Home }],
+    tabs: [
+      { key: "text", labelKey: "nav.text", labelMy: "ပို့စ်ရေးရန်", labelEn: "Post Writer", icon: PenLine },
+      { key: "video", labelKey: "nav.video", labelMy: "ဗီဒီယို ဇာတ်ညွှန်း", labelEn: "Video Script", icon: Video },
+    ],
   },
   {
     id: "media",
@@ -183,7 +185,7 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
     titleMy: "အသံသွင်းခန်းနှင့် မှတ်စု",
     titleEn: "Voiceover & Booth",
     shortMy: "အသံ",
-    shortEn: "Booth",
+    shortEn: "Voice",
     defaultPageKey: "voiceover",
     icon: Mic,
     tone: "slate",
@@ -193,25 +195,6 @@ export const WORKSPACE_ROOMS: WorkspaceRoom[] = [
       { key: "voiceover", labelKey: "nav.voiceover", labelMy: "အသံသွင်းခန်း", labelEn: "Recording Booth", icon: Mic },
       { key: "transcriber", labelKey: "nav.transcriber", labelMy: "အသံမှတ်စု", labelEn: "Voice Notes", icon: FileText },
       { key: "audiobook", labelKey: "nav.audiobook", labelMy: "စာအုပ်ဖတ်ပြစက်", labelEn: "Storyteller", icon: BookOpen },
-    ],
-  },
-  {
-    id: "write",
-    emoji: "✍️",
-    titleKey: "rooms.write.title",
-    shortKey: "rooms.write.short",
-    titleMy: "စာသားနှင့် ဇာတ်ညွှန်းရေးမည်",
-    titleEn: "Script & Caption Writer",
-    shortMy: "စာရေး",
-    shortEn: "Write",
-    defaultPageKey: "text",
-    icon: PenLine,
-    tone: "slate",
-    activeColorClass: "text-[#1C1917] dark:text-[#F5F5F4]",
-    activePillClass: "bg-[#1C1917]/10 dark:bg-[#F5F5F4]/12",
-    tabs: [
-      { key: "text", labelKey: "nav.text", labelMy: "ပို့စ်ရေးရန်", labelEn: "Post Writer", icon: PenLine },
-      { key: "video", labelKey: "nav.video", labelMy: "ဗီဒီယို ဇာတ်ညွှန်း", labelEn: "Video Script", icon: Video },
     ],
   },
   {

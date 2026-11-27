@@ -5,7 +5,6 @@ import {
   ChevronRight,
   FolderKanban,
   Globe,
-  Home,
   LogOut,
   Moon,
   Plus,
@@ -57,9 +56,9 @@ function SidebarNavItem({
         onSelect()
       }}
       className={cn(
-        "relative flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-sm font-medium transition-all duration-150 active:scale-[0.98] leading-relaxed font-myanmar cursor-pointer",
+        "nav-sidebar-item relative flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-sm font-medium leading-relaxed font-myanmar cursor-pointer",
         active
-          ? "bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B]"
+          ? "bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B] shadow-xs"
           : "text-foreground/80 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
       )}
       aria-pressed={active}
@@ -179,7 +178,7 @@ export function Sidebar() {
             type="button"
             onClick={() => {
               triggerHaptic(8)
-              setActivePageKey("home")
+              setActivePageKey("text")
             }}
             className="flex items-center gap-2.5 min-w-0 cursor-pointer"
           >
@@ -211,20 +210,7 @@ export function Sidebar() {
 
         <ScrollArea className="flex-1">
           <nav className="flex flex-col gap-1 px-2.5 pt-3 pb-4">
-            {/* Home / Dashboard */}
-            <SidebarNavItem
-              icon={Home}
-              tone="slate"
-              label={t(language, "rooms.home.title")}
-              active={activePageKey === "home"}
-              onSelect={() => setActivePageKey("home")}
-              collapsed={collapsed}
-              language={language}
-            />
-
-            <div className="my-1.5 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80" />
-
-            {/* Prioritized 5 Studio Tools — Instant Zero-API Tools First */}
+            {/* Primary Tools: Write -> Studio -> Voice */}
             {STUDIO_TOOLS.map((tool) => (
               <SidebarNavItem
                 key={tool.id}

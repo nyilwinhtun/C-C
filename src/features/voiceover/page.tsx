@@ -976,9 +976,6 @@ export function VoiceoverPage() {
           <h1 className="text-base sm:text-xl font-semibold tracking-tight text-[#1C1917] dark:text-[#F5F5F4] font-myanmar truncate">
             {t(language, "nav.voiceover")}
           </h1>
-          <p className="text-[11px] sm:text-xs text-[#57534E] dark:text-[#A1A1AA] font-myanmar truncate">
-            {t(language, "booth.scriptPlaceholder")}
-          </p>
         </div>
 
         <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
