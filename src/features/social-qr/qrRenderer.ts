@@ -103,7 +103,9 @@ export function getCardThemePalette(
 export function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image()
-    img.crossOrigin = "anonymous"
+    if (!src.startsWith("data:") && !src.startsWith("blob:")) {
+      img.crossOrigin = "anonymous"
+    }
     img.onload = () => resolve(img)
     img.onerror = (err) => reject(err)
     img.src = src
@@ -158,6 +160,28 @@ export async function createBadgedLogoDataUrl(logoSrc: string): Promise<string |
   }
 }
 
+export type QrEccLevel = "L" | "M" | "Q" | "H"
+
+export function selectQrErrorCorrection(
+  dataLength: number,
+  hasLogo: boolean
+): { level: QrEccLevel; allowLogo: boolean; imageSize: number } {
+  if (dataLength > 2150) {
+    return { level: "L", allowLogo: false, imageSize: 0 }
+  }
+  if (dataLength > 1150) {
+    return { level: "M", allowLogo: false, imageSize: 0 }
+  }
+  if (dataLength > 650) {
+    return hasLogo
+      ? { level: "Q", allowLogo: true, imageSize: 0.26 }
+      : { level: "M", allowLogo: false, imageSize: 0 }
+  }
+  return hasLogo
+    ? { level: "H", allowLogo: true, imageSize: 0.34 }
+    : { level: "M", allowLogo: false, imageSize: 0 }
+}
+
 export function buildQrStylingOptions(params: {
   url: string
   size: number
@@ -165,19 +189,21 @@ export function buildQrStylingOptions(params: {
   badgedLogoDataUrl?: string | null
 }): QrOptions {
   const { url, size, qrColor, badgedLogoDataUrl } = params
+  const data = url || "https://example.com"
+  const ecc = selectQrErrorCorrection(data.length, Boolean(badgedLogoDataUrl))
   return {
     type: "canvas",
     width: size,
     height: size,
     margin: Math.round(size * 0.03),
-    data: url || "https://example.com",
-    image: badgedLogoDataUrl || undefined,
+    data,
+    image: ecc.allowLogo && badgedLogoDataUrl ? badgedLogoDataUrl : undefined,
     qrOptions: {
-      errorCorrectionLevel: "H",
+      errorCorrectionLevel: ecc.level,
     },
     imageOptions: {
       hideBackgroundDots: true,
-      imageSize: 0.34,
+      imageSize: ecc.imageSize || 0.34,
       margin: 6,
       crossOrigin: "anonymous",
     },
@@ -282,16 +308,9 @@ function drawPlatformGlyphOnCanvas(
     ctx.fill(p)
   } else if (platform === "youtube") {
     const p = new Path2D(
-      "M21.58 7.19a2.75 2.75 0 0 0-1.94-1.95C17.93 4.78 12 4.78 12 4.78s-5.93 0-7.64.46a2.75 2.75 0 0 0-1.94 1.95A28.8 28.8 0 0 0 2 12a28.8 28.8 0 0 0 .42 4.81 2.75 2.75 0 0 0 1.94 1.95c1.71.46 7.64.46 7.64.46s5.93 0 7.64-.46a2.75 2.75 0 0 0 1.94-1.95A28.8 28.8 0 0 0 22 12a28.8 28.8 0 0 0-.42-4.81z"
+      "M21.58 7.19a2.75 2.75 0 0 0-1.94-1.95C17.93 4.78 12 4.78 12 4.78s-5.93 0-7.64.46a2.75 2.75 0 0 0-1.94 1.95A28.8 28.8 0 0 0 2 12a28.8 28.8 0 0 0 .42 4.81 2.75 2.75 0 0 0 1.94 1.95c1.71.46 7.64.46 7.64.46s5.93 0 7.64-.46a2.75 2.75 0 0 0 1.94-1.95A28.8 28.8 0 0 0 22 12a28.8 28.8 0 0 0-.42-4.81zM10 15.11V8.89L15.4 12 10 15.11z"
     )
-    ctx.fill(p)
-    ctx.fillStyle = "#FFFFFF"
-    ctx.beginPath()
-    ctx.moveTo(10, 8.89)
-    ctx.lineTo(15.4, 12)
-    ctx.lineTo(10, 15.11)
-    ctx.closePath()
-    ctx.fill()
+    ctx.fill(p, "evenodd")
   } else if (platform === "maps") {
     ctx.lineWidth = 2.2
     ctx.beginPath()
@@ -340,6 +359,17 @@ export async function renderQrCardCanvas(
   canvas: HTMLCanvasElement,
   params: RenderQrCardParams
 ): Promise<void> {
+  // Pre-decode QR image before clearing/drawing canvas so the canvas is never half-drawn
+  let preloadedQrImg: HTMLImageElement | null = null
+  if (params.qrBlob) {
+    const objUrl = URL.createObjectURL(params.qrBlob)
+    try {
+      preloadedQrImg = await loadImage(objUrl)
+    } finally {
+      URL.revokeObjectURL(objUrl)
+    }
+  }
+
   const width = 1080
   const height = params.aspectRatio === "portrait" ? 1350 : 1080
   if (canvas.width !== width || canvas.height !== height) {
@@ -455,21 +485,15 @@ export async function renderQrCardCanvas(
   ctx.restore()
 
   // Draw QR image inside container
-  if (params.qrBlob) {
-    const objUrl = URL.createObjectURL(params.qrBlob)
-    try {
-      const qrImg = await loadImage(objUrl)
-      const innerPad = isPortrait ? 38 : 32
-      ctx.drawImage(
-        qrImg,
-        qrBoxX + innerPad,
-        qrBoxY + innerPad,
-        qrBoxSize - innerPad * 2,
-        qrBoxSize - innerPad * 2
-      )
-    } finally {
-      URL.revokeObjectURL(objUrl)
-    }
+  if (preloadedQrImg) {
+    const innerPad = isPortrait ? 38 : 32
+    ctx.drawImage(
+      preloadedQrImg,
+      qrBoxX + innerPad,
+      qrBoxY + innerPad,
+      qrBoxSize - innerPad * 2,
+      qrBoxSize - innerPad * 2
+    )
   }
 
   // 5. Call-to-Action Footer Pill
@@ -522,7 +546,7 @@ export function triggerBlobDownload(blob: Blob, filename: string): void {
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
-  window.setTimeout(() => URL.revokeObjectURL(url), 2500)
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
 export async function downloadCardCanvasPng(

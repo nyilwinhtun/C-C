@@ -29,6 +29,7 @@ import {
   generateQrImageBlob,
   getCardThemePalette,
   renderQrCardCanvas,
+  selectQrErrorCorrection,
   triggerBlobDownload,
 } from "./qrRenderer"
 import type { QrCardAspectRatio, QrCardThemeId } from "./types"
@@ -224,9 +225,21 @@ export function SingleQrStudio() {
     [language, updateSocialQrSettings]
   )
 
+  const eccInfo = useMemo(
+    () =>
+      selectQrErrorCorrection(
+        (detected.finalUrl || "https://example.com").length,
+        Boolean(badgedLogoUrl)
+      ),
+    [detected.finalUrl, badgedLogoUrl]
+  )
+
   const handleDownloadCard = useCallback(async () => {
     const canvas = canvasRef.current
-    if (!canvas) return
+    if (!canvas || canvas.width < 1000) {
+      toast.error(t(language, "socialQr.exportFailed"))
+      return
+    }
     setExportingCard(true)
     try {
       triggerHaptic(10)
@@ -234,6 +247,8 @@ export function SingleQrStudio() {
       const ratio = socialQrSettings.aspectRatio === "portrait" ? "1080x1350" : "1080x1080"
       await downloadCardCanvasPng(canvas, `qr-card-${slug}-${ratio}-${Date.now()}.png`)
       toast.success(t(language, "socialQr.cardDownloaded"))
+    } catch {
+      toast.error(t(language, "socialQr.exportFailed"))
     } finally {
       setExportingCard(false)
     }
@@ -255,6 +270,8 @@ export function SingleQrStudio() {
       }
       triggerBlobDownload(qrBlob, `qr-only-${detected.platform.id}-${Date.now()}.png`)
       toast.success(t(language, "socialQr.qrOnlyDownloaded"))
+    } catch {
+      toast.error(t(language, "socialQr.exportFailed"))
     } finally {
       setExportingQrOnly(false)
     }
@@ -269,7 +286,7 @@ export function SingleQrStudio() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
       {/* Left Column: Controls */}
-      <div className="lg:col-span-7 space-y-4">
+      <div className="lg:col-span-7 min-w-0 space-y-4">
         {/* 1. Smart URL & Link Cleaner */}
         <Card className="border-border/70">
           <CardHeader className="pb-3">
@@ -570,14 +587,14 @@ export function SingleQrStudio() {
       </div>
 
       {/* Right Column: Live High-Res Preview & Export */}
-      <div className="lg:col-span-5 lg:sticky lg:top-4 space-y-3">
+      <div className="lg:col-span-5 min-w-0 lg:sticky lg:top-4 space-y-3">
         <Card className="border-border/70 overflow-hidden">
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+          <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2 flex-wrap">
             <CardTitle className="text-sm font-semibold">
               {t(language, "socialQr.previewTitle")}
             </CardTitle>
             <Badge variant="outline" className="text-[10px] font-mono">
-              {socialQrSettings.aspectRatio === "portrait" ? "1080×1350" : "1080×1080"} · ECC-H
+              {socialQrSettings.aspectRatio === "portrait" ? "1080×1350" : "1080×1080"} · ECC-{eccInfo.level}
             </Badge>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -593,25 +610,25 @@ export function SingleQrStudio() {
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-2">
               <Button
                 type="button"
                 onClick={handleDownloadCard}
-                disabled={exportingCard}
-                className="gap-2 w-full"
+                disabled={exportingCard || rendering}
+                className="gap-2 w-full h-auto min-h-9 py-2 whitespace-normal text-center"
               >
-                <Download className="h-4 w-4" />
-                {t(language, "socialQr.downloadCardPng")}
+                <Download className="h-4 w-4 shrink-0" />
+                <span>{t(language, "socialQr.downloadCardPng")}</span>
               </Button>
               <Button
                 type="button"
                 variant="outline"
                 onClick={handleDownloadTransparentQr}
                 disabled={exportingQrOnly}
-                className="gap-2 w-full"
+                className="gap-2 w-full h-auto min-h-9 py-2 whitespace-normal text-center"
               >
-                <QrCode className="h-4 w-4" />
-                {t(language, "socialQr.downloadQrOnlyPng")}
+                <QrCode className="h-4 w-4 shrink-0" />
+                <span>{t(language, "socialQr.downloadQrOnlyPng")}</span>
               </Button>
             </div>
           </CardContent>

@@ -40,6 +40,7 @@ import {
   generateQrImageBlob,
   getCardThemePalette,
   renderQrCardCanvas,
+  selectQrErrorCorrection,
   triggerBlobDownload,
 } from "./qrRenderer"
 import type {
@@ -418,9 +419,17 @@ export function BioLinkStudio() {
     [language, updateBioLinkSettings]
   )
 
+  const eccInfo = useMemo(
+    () => selectQrErrorCorrection(shareUrl.length, Boolean(badgedLogoUrl)),
+    [shareUrl.length, badgedLogoUrl]
+  )
+
   const handleDownloadMasterCard = useCallback(async () => {
     const canvas = canvasRef.current
-    if (!canvas) return
+    if (!canvas || canvas.width < 1000) {
+      toast.error(t(language, "socialQr.exportFailed"))
+      return
+    }
     setExportingCard(true)
     try {
       triggerHaptic(10)
@@ -431,6 +440,8 @@ export function BioLinkStudio() {
         `bio-master-qr-${ratio}-${Date.now()}.png`
       )
       toast.success(t(language, "socialQr.cardDownloaded"))
+    } catch {
+      toast.error(t(language, "socialQr.exportFailed"))
     } finally {
       setExportingCard(false)
     }
@@ -452,6 +463,8 @@ export function BioLinkStudio() {
       }
       triggerBlobDownload(qrBlob, `bio-master-qr-only-${Date.now()}.png`)
       toast.success(t(language, "socialQr.qrOnlyDownloaded"))
+    } catch {
+      toast.error(t(language, "socialQr.exportFailed"))
     } finally {
       setExportingQrOnly(false)
     }
@@ -460,7 +473,7 @@ export function BioLinkStudio() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
       {/* Left Column: Builder Controls */}
-      <div className="lg:col-span-7 space-y-4">
+      <div className="lg:col-span-7 min-w-0 space-y-4">
         {/* 1. Shop Bio Header & Theme */}
         <Card className="border-border/70">
           <CardHeader className="pb-3">
@@ -554,7 +567,7 @@ export function BioLinkStudio() {
                   }
                 }}
                 placeholder={t(language, "socialQr.bioAddUrlPlaceholder")}
-                className="font-mono text-xs sm:text-sm"
+                className="min-w-0 flex-1 font-mono text-xs sm:text-sm"
               />
               <Button
                 type="button"
@@ -853,44 +866,59 @@ export function BioLinkStudio() {
       </div>
 
       {/* Right Column: Live Mobile Preview + Master QR Card + Actions */}
-      <div className="lg:col-span-5 lg:sticky lg:top-4 space-y-3">
+      <div className="lg:col-span-5 min-w-0 lg:sticky lg:top-4 space-y-3">
         <Card className="border-border/70 overflow-hidden">
           <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2 flex-wrap">
-            <div className="inline-flex items-center rounded-lg border border-border bg-muted/40 p-0.5">
+            <div className="grid grid-cols-2 sm:inline-flex items-center rounded-lg border border-border bg-muted/40 p-0.5 max-w-full w-full sm:w-auto">
               <button
                 type="button"
                 onClick={() => setPreviewMode("phone")}
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all cursor-pointer",
+                  "inline-flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all cursor-pointer min-w-0",
                   previewMode === "phone"
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                <Smartphone className="h-3.5 w-3.5" />
-                {t(language, "socialQr.bioPhonePreviewTab")}
+                <Smartphone className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{t(language, "socialQr.bioPhonePreviewTab")}</span>
               </button>
               <button
                 type="button"
                 onClick={() => setPreviewMode("qr")}
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all cursor-pointer",
+                  "inline-flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all cursor-pointer min-w-0",
                   previewMode === "qr"
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                <QrCode className="h-3.5 w-3.5" />
-                {t(language, "socialQr.bioMasterQrTab")}
+                <QrCode className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{t(language, "socialQr.bioMasterQrTab")}</span>
               </button>
             </div>
 
-            <Badge variant="outline" className="text-[10px] font-mono">
-              {shareUrl.length} chars · ECC-H
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-[10px] font-mono",
+                shareUrl.length > 1150
+                  ? "border-amber-500/50 text-amber-600 dark:text-amber-400"
+                  : ""
+              )}
+            >
+              {shareUrl.length} chars · ECC-{eccInfo.level}
             </Badge>
           </CardHeader>
 
           <CardContent className="space-y-3">
+            {shareUrl.length > 750 && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300">
+                {isMy
+                  ? `QR ဒေတာရှည်နေပါသည် (${shareUrl.length} chars) — စာသားတိုတိုထားပါက ဖုန်းကင်မရာဖြင့် ပိုမြန်စွာ Scan ဖတ်နိုင်ပါမည်။`
+                  : `QR payload is dense (${shareUrl.length} chars). Keep labels/URLs concise for faster camera scanning.`}
+              </div>
+            )}
             {/* Mobile Phone Frame Preview */}
             {previewMode === "phone" && (
               <div className="flex justify-center py-1">
@@ -955,25 +983,25 @@ export function BioLinkStudio() {
             </div>
 
             {/* Download Actions */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-2">
               <Button
                 type="button"
                 onClick={handleDownloadMasterCard}
-                disabled={exportingCard}
-                className="gap-2 w-full"
+                disabled={exportingCard || renderingQr}
+                className="gap-2 w-full h-auto min-h-9 py-2 whitespace-normal text-center"
               >
-                <Download className="h-4 w-4" />
-                {t(language, "socialQr.downloadMasterCardPng")}
+                <Download className="h-4 w-4 shrink-0" />
+                <span>{t(language, "socialQr.downloadMasterCardPng")}</span>
               </Button>
               <Button
                 type="button"
                 variant="outline"
                 onClick={handleDownloadTransparentQr}
                 disabled={exportingQrOnly}
-                className="gap-2 w-full"
+                className="gap-2 w-full h-auto min-h-9 py-2 whitespace-normal text-center"
               >
-                <QrCode className="h-4 w-4" />
-                {t(language, "socialQr.downloadQrOnlyPng")}
+                <QrCode className="h-4 w-4 shrink-0" />
+                <span>{t(language, "socialQr.downloadQrOnlyPng")}</span>
               </Button>
             </div>
           </CardContent>

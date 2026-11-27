@@ -181,7 +181,12 @@ export function extractBioTokenFromLocation(): string | null {
   if (hash) {
     const cleanedHash = hash.replace(/^#\/?/, "")
     if (cleanedHash.startsWith("bio=")) {
-      return decodeURIComponent(cleanedHash.slice(4))
+      const raw = cleanedHash.slice(4)
+      try {
+        return decodeURIComponent(raw)
+      } catch {
+        return raw
+      }
     }
     const hashQueryIdx = cleanedHash.indexOf("?")
     if (hashQueryIdx >= 0) {

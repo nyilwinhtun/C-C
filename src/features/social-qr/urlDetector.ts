@@ -204,6 +204,7 @@ export function detectPlatformFromUrl(url: URL): SocialPlatformId {
     host === "facebook.com" ||
     host.endsWith(".facebook.com") ||
     host === "fb.com" ||
+    host === "fb.me" ||
     host === "fb.watch" ||
     host === "m.me"
   ) {

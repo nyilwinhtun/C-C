@@ -24,32 +24,32 @@ export function SocialQrPage() {
         </div>
 
         {/* Clean mode switcher architected for Step 1 + Step 2 */}
-        <div className="inline-flex items-center rounded-xl border border-border bg-muted/40 p-1 self-start">
+        <div className="grid grid-cols-2 sm:inline-flex items-center rounded-xl border border-border bg-muted/40 p-1 w-full sm:w-auto sm:self-start">
           <button
             type="button"
             onClick={() => setStudioTab("single_qr")}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer",
+              "inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 sm:px-3 py-1.5 text-xs font-medium transition-all cursor-pointer min-w-0",
               studioTab === "single_qr"
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
-            <QrCode className="h-3.5 w-3.5" />
-            {t(language, "socialQr.tabSingleQr")}
+            <QrCode className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{t(language, "socialQr.tabSingleQr")}</span>
           </button>
           <button
             type="button"
             onClick={() => setStudioTab("bio_link")}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer",
+              "inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 sm:px-3 py-1.5 text-xs font-medium transition-all cursor-pointer min-w-0",
               studioTab === "bio_link"
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
-            <Layers className="h-3.5 w-3.5" />
-            {t(language, "socialQr.tabBioLink")}
+            <Layers className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{t(language, "socialQr.tabBioLink")}</span>
           </button>
         </div>
       </div>

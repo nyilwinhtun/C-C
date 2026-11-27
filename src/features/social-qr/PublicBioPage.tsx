@@ -95,11 +95,32 @@ function getBioThemeStyle(themeId: QrCardThemeId): BioPageThemeStyle {
   }
 }
 
+function firstGrapheme(word: string): string {
+  if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" })
+    const iter = segmenter.segment(word)[Symbol.iterator]()
+    const first = iter.next()
+    if (!first.done && first.value) return first.value.segment
+  }
+  return Array.from(word)[0] ?? ""
+}
+
 function getInitials(title: string): string {
   const words = title.trim().split(/\s+/).filter(Boolean)
   if (words.length === 0) return "S"
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase()
-  return `${words[0][0]}${words[1][0]}`.toUpperCase()
+  if (words.length === 1) {
+    if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+      const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" })
+      const graphemes: string[] = []
+      for (const seg of segmenter.segment(words[0])) {
+        graphemes.push(seg.segment)
+        if (graphemes.length === 2) break
+      }
+      return graphemes.join("").toUpperCase()
+    }
+    return Array.from(words[0]).slice(0, 2).join("").toUpperCase()
+  }
+  return `${firstGrapheme(words[0])}${firstGrapheme(words[1])}`.toUpperCase()
 }
 
 function formatLinkSubtitle(url: string): string {
@@ -213,17 +234,17 @@ export function PublicBioPage({
             </div>
           )}
 
-          <div className="space-y-1">
+          <div className="space-y-1 max-w-full">
             <h1
               className={cn(
-                "text-xl sm:text-2xl font-extrabold tracking-tight",
+                "text-xl sm:text-2xl font-extrabold tracking-tight break-words",
                 style.titleText
               )}
             >
               {displayTitle}
             </h1>
             {displayTagline && (
-              <p className={cn("text-xs sm:text-sm max-w-xs mx-auto", style.taglineText)}>
+              <p className={cn("text-xs sm:text-sm max-w-xs mx-auto break-words", style.taglineText)}>
                 {displayTagline}
               </p>
             )}
