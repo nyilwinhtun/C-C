@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { HomePage } from "@/features/home/page"
 import { GeneratorPage } from "@/features/generator/page"
 import { VideoToContentSection } from "@/features/generator/VideoToContentSection"
 import { TranscriberPage } from "@/features/transcriber/page"
@@ -16,12 +17,14 @@ import { SettingsDialog } from "@/components/shared/settings-dialog"
 import { PWAInstallBanner } from "@/components/shared/pwa-install-banner"
 import { IosSegmentedControl } from "@/components/shared/ios-segmented-control"
 import { WORKSPACE_ROOMS, getRoomForPageKey, getRoomShort, getRoomTitle, getTabLabel } from "@/components/shared/rooms"
+import { t } from "@/locales/translations"
 import { useUIStore } from "@/store/useUIStore"
 import { useContentStore } from "@/store/useContentStore"
 import { useShallow } from "zustand/react/shallow"
 import { cn, triggerHaptic } from "@/lib/utils"
 
 const pages: Record<string, React.FC> = {
+  home: HomePage,
   text: GeneratorPage,
   video: VideoToContentSection,
   transcriber: TranscriberPage,
@@ -87,7 +90,7 @@ export function Layout() {
 
   const activeRoom = getRoomForPageKey(activePageKey)
   const roomTitle = getRoomTitle(activeRoom, language)
-  const Page = pages[activePageKey] ?? GeneratorPage
+  const Page = pages[activePageKey] ?? HomePage
 
   return (
     <div className="flex h-[100dvh] bg-background text-foreground">
@@ -130,6 +133,17 @@ export function Layout() {
                           </span>
                         )}
                       </span>
+                    ) : tab.badge ? (
+                      <span
+                        className={cn(
+                          "hidden sm:inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none",
+                          tab.badge === "instant"
+                            ? "bg-emerald-500/12 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300"
+                            : "bg-stone-500/10 text-stone-600 dark:bg-zinc-400/15 dark:text-zinc-300"
+                        )}
+                      >
+                        {t(language, tab.badge === "instant" ? "home.badge.instant" : "home.badge.noApi")}
+                      </span>
                     ) : undefined,
                 }))}
               />
@@ -139,7 +153,7 @@ export function Layout() {
         </main>
       </div>
 
-      {/* Mobile iOS Frosted Glass Bottom Tab Bar */}
+      {/* Mobile iOS Frosted Glass Bottom Tab Bar (5 Clean Primary Tabs) */}
       <nav
         aria-label="Primary sections"
         className={cn(
@@ -149,7 +163,7 @@ export function Layout() {
             : "translate-y-full opacity-0 pointer-events-none"
         )}
       >
-        <div className="grid grid-cols-4 h-[58px] px-1.5">
+        <div className="grid grid-cols-5 h-[58px] px-1">
           {WORKSPACE_ROOMS.map((room) => {
             const Icon = room.icon
             const isActive = activeRoom.id === room.id
@@ -164,7 +178,7 @@ export function Layout() {
                 }}
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
-                  "flex flex-col items-center justify-center gap-0.5 transition-all duration-200 active:scale-95 cursor-pointer",
+                  "flex flex-col items-center justify-center gap-0.5 transition-all duration-200 active:scale-95 cursor-pointer min-w-0",
                   isActive
                     ? room.activeColorClass
                     : "text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300"
@@ -173,9 +187,9 @@ export function Layout() {
                 <span
                   key={`${room.id}-${isActive ? "active" : "idle"}`}
                   className={cn(
-                    "relative inline-flex items-center justify-center px-3 py-1 rounded-full transition-transform duration-300 ease-out",
+                    "relative inline-flex items-center justify-center px-2.5 py-1 rounded-full transition-transform duration-300 ease-out",
                     isActive
-                      ? cn(room.activePillClass, "animate-ios-tab-pop scale-110 -translate-y-0.5")
+                      ? cn(room.activePillClass, "animate-ios-tab-pop scale-105 -translate-y-0.5")
                       : "bg-transparent scale-100 translate-y-0"
                   )}
                 >
@@ -186,14 +200,14 @@ export function Layout() {
                   />
                   {room.id === "audio" && isBgTtsActive && (
                     <span
-                      className="absolute top-0.5 right-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-[#FAF8F5] dark:ring-[#18181B] animate-pulse"
+                      className="absolute top-0.5 right-1 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-[#FAF8F5] dark:ring-[#18181B] animate-pulse"
                       aria-label="Voiceover generating in background"
                     />
                   )}
                 </span>
                 <span
                   className={cn(
-                    "text-[10px] leading-none font-myanmar truncate max-w-[76px]",
+                    "text-[10px] leading-none font-myanmar truncate max-w-[64px]",
                     isActive ? "font-bold" : "font-medium"
                   )}
                 >

@@ -3,11 +3,14 @@
 import { useState } from "react"
 import {
   ChevronRight,
+  FolderKanban,
   Globe,
+  Home,
   LogOut,
   Moon,
   Plus,
   Sun,
+  type LucideIcon,
 } from "lucide-react"
 import { cn, triggerHaptic } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -15,42 +18,46 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { t } from "@/locales/translations"
 import { CCLogo } from "@/components/shared/cc-logo"
 import { QuickIdeaDialog } from "@/components/shared/quick-idea-dialog"
-import { SquircleIcon } from "@/components/shared/squircle-icon"
-import { getRoomForPageKey, getRoomTitle, WORKSPACE_ROOMS, type WorkspaceRoom } from "@/components/shared/rooms"
+import { SquircleIcon, type SquircleTone } from "@/components/shared/squircle-icon"
+import { STUDIO_TOOLS, type ToolBadgeKind } from "@/components/shared/rooms"
 import { useUIStore, type UIState } from "@/store/useUIStore"
 import { useContentStore } from "@/store/useContentStore"
 import { useShallow } from "zustand/react/shallow"
 import { supabase } from "@/lib/supabase"
 import { toast } from "@/components/ui/sonner"
 
-interface RoomNavButtonProps {
-  room: WorkspaceRoom
-  language: "en" | "my"
+interface SidebarNavItemProps {
+  icon: LucideIcon
+  tone: SquircleTone
+  label: string
   active: boolean
-  onSelect: (defaultPageKey: string) => void
+  onSelect: () => void
   collapsed: boolean
+  badge?: ToolBadgeKind
+  language: "en" | "my"
   bgIndicator?: { current: number; total: number } | boolean
 }
 
-function RoomNavButton({
-  room,
-  language,
+function SidebarNavItem({
+  icon,
+  tone,
+  label,
   active,
   onSelect,
   collapsed,
+  badge,
+  language,
   bgIndicator,
-}: RoomNavButtonProps) {
-  const label = getRoomTitle(room, language)
-
+}: SidebarNavItemProps) {
   return (
     <button
       type="button"
       onClick={() => {
         triggerHaptic(8)
-        onSelect(room.defaultPageKey)
+        onSelect()
       }}
       className={cn(
-        "relative flex w-full items-center gap-3 rounded-[14px] px-2.5 py-2 text-sm font-medium transition-all duration-150 active:scale-[0.98] leading-relaxed font-myanmar cursor-pointer",
+        "relative flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-sm font-medium transition-all duration-150 active:scale-[0.98] leading-relaxed font-myanmar cursor-pointer",
         active
           ? "bg-[#1C1917] dark:bg-[#F5F5F4] text-[#FAF8F5] dark:text-[#18181B]"
           : "text-foreground/80 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
@@ -60,7 +67,7 @@ function RoomNavButton({
     >
       {collapsed ? (
         <span className="relative mx-auto">
-          <SquircleIcon icon={room.icon} tone={room.tone} size="sm" active={active} />
+          <SquircleIcon icon={icon} tone={tone} size="sm" active={active} />
           {bgIndicator && (
             <span
               className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-[#FAF8F5] dark:ring-[#18181B] animate-pulse"
@@ -70,9 +77,9 @@ function RoomNavButton({
         </span>
       ) : (
         <>
-          <SquircleIcon icon={room.icon} tone={room.tone} size="sm" active={active} />
+          <SquircleIcon icon={icon} tone={tone} size="sm" active={active} />
           <span className="flex-1 text-left truncate text-[13px] font-medium">{label}</span>
-          {bgIndicator && (
+          {bgIndicator ? (
             <span
               className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-amber-700 dark:text-amber-300 shrink-0"
               aria-label="Voiceover generating in background"
@@ -84,7 +91,20 @@ function RoomNavButton({
                 </span>
               )}
             </span>
-          )}
+          ) : badge ? (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none shrink-0",
+                active
+                  ? "bg-white/15 text-[#FAF8F5] dark:bg-black/15 dark:text-[#18181B]"
+                  : badge === "instant"
+                    ? "bg-emerald-500/12 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300"
+                    : "bg-stone-500/10 text-stone-600 dark:bg-zinc-400/15 dark:text-zinc-300"
+              )}
+            >
+              {t(language, badge === "instant" ? "home.badge.instant" : "home.badge.noApi")}
+            </span>
+          ) : null}
         </>
       )}
     </button>
@@ -122,7 +142,6 @@ export function Sidebar() {
   } = useUIStore(sidebarSelector)
 
   const collapsed = sidebarCollapsed && !hovered
-  const activeRoom = getRoomForPageKey(activePageKey)
 
   const { ttsStatus, ttsProgress } = useContentStore(
     useShallow((state) => ({
@@ -156,14 +175,21 @@ export function Sidebar() {
         onMouseLeave={() => setHovered(false)}
       >
         <div className="flex h-14 items-center justify-between gap-2 border-b border-[#E7E5E4] dark:border-[#3F3F46] px-3">
-          <div className="flex items-center gap-2.5 min-w-0">
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic(8)
+              setActivePageKey("home")
+            }}
+            className="flex items-center gap-2.5 min-w-0 cursor-pointer"
+          >
             <CCLogo size={28} className="h-7 w-7 shrink-0 rounded-[9px] shadow-xs" />
             {!collapsed && (
               <span className="font-semibold text-sm tracking-tight leading-relaxed truncate">
                 {t(language, "sidebar.title")}
               </span>
             )}
-          </div>
+          </button>
           {!collapsed && (
             <Button
               variant="ghost"
@@ -184,24 +210,52 @@ export function Sidebar() {
         </div>
 
         <ScrollArea className="flex-1">
-          <nav className="flex flex-col gap-1.5 px-2.5 pt-3 pb-4">
-            {WORKSPACE_ROOMS.map((room) => (
-              <RoomNavButton
-                key={room.id}
-                room={room}
-                language={language}
-                active={activeRoom.id === room.id}
-                onSelect={(key) => {
-                  setActivePageKey(key)
-                }}
+          <nav className="flex flex-col gap-1 px-2.5 pt-3 pb-4">
+            {/* Home / Dashboard */}
+            <SidebarNavItem
+              icon={Home}
+              tone="slate"
+              label={t(language, "rooms.home.title")}
+              active={activePageKey === "home"}
+              onSelect={() => setActivePageKey("home")}
+              collapsed={collapsed}
+              language={language}
+            />
+
+            <div className="my-1.5 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80" />
+
+            {/* Prioritized 5 Studio Tools — Instant Zero-API Tools First */}
+            {STUDIO_TOOLS.map((tool) => (
+              <SidebarNavItem
+                key={tool.id}
+                icon={tool.icon}
+                tone={tool.tone}
+                label={t(language, tool.shortTitleKey)}
+                active={tool.matchPageKeys.includes(activePageKey)}
+                onSelect={() => setActivePageKey(tool.pageKey)}
                 collapsed={collapsed}
+                badge={tool.badges?.[0]}
+                language={language}
                 bgIndicator={
-                  room.id === "audio" && isBgTtsActive
+                  tool.id === "voiceover" && isBgTtsActive
                     ? ttsProgress ?? true
                     : undefined
                 }
               />
             ))}
+
+            <div className="my-1.5 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80" />
+
+            {/* Vault & Calendar */}
+            <SidebarNavItem
+              icon={FolderKanban}
+              tone="slate"
+              label={t(language, "rooms.vault.title")}
+              active={activePageKey === "vault"}
+              onSelect={() => setActivePageKey("vault")}
+              collapsed={collapsed}
+              language={language}
+            />
           </nav>
         </ScrollArea>
 

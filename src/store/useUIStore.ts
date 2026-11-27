@@ -156,6 +156,8 @@ interface LegacyPersistedUIState extends Partial<UIState> {
 
 function normalizePageKey(key: string): string {
   switch (key) {
+    case "home":
+      return "home"
     case "generator":
       return "text"
     case "photo-studio":
@@ -174,7 +176,7 @@ function normalizePageKey(key: string): string {
     case "vault":
       return key
     default:
-      return "text"
+      return "home"
   }
 }
 
@@ -194,7 +196,7 @@ export const useUIStore = create<UIState>()(
         }),
       sidebarCollapsed: false,
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
-      activePageKey: "text",
+      activePageKey: "home",
       setActivePageKey: (activePageKey) => set({ activePageKey: normalizePageKey(activePageKey) }),
       language: "en",
       setLanguage: (language) => set({ language }),
