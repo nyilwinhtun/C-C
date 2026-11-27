@@ -482,3 +482,59 @@ export function createSampleMascotCutoutDataUrl(): string {
   canvas.height = 0
   return cachedMascotDataUrl
 }
+
+let cachedSampleAudioBlob: Blob | null = null
+
+/**
+ * Generates a short 2.0-second synthetic speech-cadence WAV audio blob
+ * (16 kHz mono PCM) so 2D Mascot Presenter `Try Sample` immediately enables
+ * lip-sync preview and a 2-second test video export without requiring an audio upload.
+ */
+export function createSampleVoiceoverWavBlob(durationSec = 2.0): Blob {
+  if (cachedSampleAudioBlob) return cachedSampleAudioBlob
+
+  const sampleRate = 16000
+  const numSamples = Math.max(1, Math.floor(sampleRate * durationSec))
+  const dataBytes = numSamples * 2
+  const buffer = new ArrayBuffer(44 + dataBytes)
+  const view = new DataView(buffer)
+
+  const writeAscii = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) {
+      view.setUint8(offset + i, text.charCodeAt(i))
+    }
+  }
+
+  writeAscii(0, "RIFF")
+  view.setUint32(4, 36 + dataBytes, true)
+  writeAscii(8, "WAVE")
+  writeAscii(12, "fmt ")
+  view.setUint32(16, 16, true) // PCM chunk size
+  view.setUint16(20, 1, true) // PCM format = 1
+  view.setUint16(22, 1, true) // Mono = 1 channel
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true) // byte rate
+  view.setUint16(32, 2, true) // block align
+  view.setUint16(34, 16, true) // bits per sample
+  writeAscii(36, "data")
+  view.setUint32(40, dataBytes, true)
+
+  // Soft warm syllable-cadence envelope so the lip-sync analyzer & waveform animate naturally
+  for (let i = 0; i < numSamples; i++) {
+    const t = i / sampleRate
+    const syllableEnvelope =
+      Math.max(0, Math.sin(t * Math.PI * 5.2)) *
+      (0.65 + 0.35 * Math.sin(t * Math.PI * 2.1))
+    const fadeEdge =
+      Math.min(1, t / 0.08) * Math.min(1, Math.max(0, durationSec - t) / 0.12)
+    const carrier =
+      0.55 * Math.sin(2 * Math.PI * 195 * t) +
+      0.3 * Math.sin(2 * Math.PI * 390 * t) +
+      0.15 * Math.sin(2 * Math.PI * 620 * t)
+    const sample = Math.max(-1, Math.min(1, carrier * syllableEnvelope * fadeEdge * 0.32))
+    view.setInt16(44 + i * 2, Math.round(sample * 32767), true)
+  }
+
+  cachedSampleAudioBlob = new Blob([buffer], { type: "audio/wav" })
+  return cachedSampleAudioBlob
+}

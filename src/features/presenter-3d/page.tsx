@@ -37,7 +37,10 @@ import {
 } from "@/lib/iosAudio"
 import { revokeBlobUrlAfterDelay } from "@/lib/videoAudioMerger"
 import { shareMediaFile } from "@/lib/nativeShare"
-import { createSampleMascotCutoutDataUrl } from "@/lib/sampleAssets"
+import {
+  createSampleMascotCutoutDataUrl,
+  createSampleVoiceoverWavBlob,
+} from "@/lib/sampleAssets"
 import {
   extractForegroundCutout,
   isMobileViewport,
@@ -1474,10 +1477,20 @@ export function Presenter3DPage() {
             ? "မင်္ဂလာပါရှင့်! ဒီနေ့ ပစ္စည်းအသစ်လေးနဲ့ အထူးလျှော့ဈေးအကြောင်း ပြောပြပေးပါမယ်။"
             : "Hello everyone! Today I'm sharing our newest studio gadget and limited-time launch offer."
       )
+      if (!activeAudioSource) {
+        setLocalAudioFile({
+          blob: createSampleVoiceoverWavBlob(2.0),
+          title:
+            language === "my"
+              ? "နမူနာ အသံဖိုင် (2s)"
+              : "Sample Voiceover (2s)",
+        })
+      }
       toast.success(t(language, "sample.loadedToast"))
     }
     img.src = sampleUrl
   }, [
+    activeAudioSource,
     language,
     setPresenter3dPopCutoutUrl,
     setPresenterMascotDataUrl,
