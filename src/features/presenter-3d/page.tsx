@@ -22,7 +22,6 @@ import {
   Sparkles,
   Square,
   Upload,
-  User,
   Video,
   Wand2,
   X,
@@ -55,9 +54,7 @@ import {
   type ImageTo3dProgress,
 } from "@/lib/imageTo3d"
 import {
-  BUILTIN_PRESENTER_PRESETS,
   createLipSyncAnalyzer,
-  createProceduralPresenterController,
   createStudioBackdropGroup,
   drawBroadcastLowerThird,
   drawCaptionBar,
@@ -67,8 +64,6 @@ import {
   drawPresenterCardFrame,
   loadAvatarController,
   type AvatarController,
-  type BuiltinPresenterId,
-  type BuiltinPresenterMeta,
   type CaptionStyle,
   type LipSyncAnalyzer,
   type PipCorner,
@@ -117,83 +112,6 @@ const CANVAS_DIMENSIONS_BY_QUALITY: Record<
     "9:16": { width: 720, height: 1280 },
     "1:1": { width: 1080, height: 1080 },
   },
-}
-
-function PresetPortraitThumb({ meta }: { meta: BuiltinPresenterMeta }) {
-  const { bgFrom, bgTo, skin, hair, outfit, accent, eye, lip } = meta.palette
-  const gradId = `preset-bg-${meta.id}`
-  return (
-    <svg
-      viewBox="0 0 80 80"
-      className="h-14 w-14 rounded-xl shrink-0 shadow-xs border border-black/10 dark:border-white/10"
-      aria-hidden="true"
-    >
-      <defs>
-        <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor={bgFrom} />
-          <stop offset="100%" stopColor={bgTo} />
-        </linearGradient>
-      </defs>
-      <rect width="80" height="80" rx="14" fill={`url(#${gradId})`} />
-      {/* Shoulders & outfit */}
-      <path d="M12 80 C14 60 26 55 40 55 C54 55 66 60 68 80 Z" fill={outfit} />
-      <path d="M33 56 L40 67 L47 56 Z" fill={meta.id === "preset_2" ? "#F8FAFC" : "#18181B"} />
-      {/* Accent detail */}
-      {meta.id === "preset_1" && <circle cx="51" cy="64" r="2.6" fill={accent} />}
-      {meta.id === "preset_2" && (
-        <>
-          <rect x="48" y="61" width="5" height="7" rx="1.5" fill="#111827" />
-          <circle cx="50.5" cy="63" r="1.1" fill={accent} />
-        </>
-      )}
-      {meta.id === "preset_3" && (
-        <ellipse cx="40" cy="56" rx="9" ry="2.2" fill="none" stroke={accent} strokeWidth="2" />
-      )}
-      {/* Back hair volume */}
-      {meta.id === "preset_1" && <ellipse cx="40" cy="39" rx="20" ry="21" fill={hair} />}
-      {meta.id === "preset_3" && <ellipse cx="39" cy="37" rx="19" ry="20" fill={hair} />}
-      {/* Neck & Face */}
-      <rect x="35" y="47" width="10" height="10" rx="4" fill={skin} />
-      <ellipse cx="40" cy="35" rx="14.5" ry="16.5" fill={skin} />
-      {/* Front hair */}
-      {meta.id === "preset_1" && (
-        <path d="M24 33 C25 18 38 15 50 20 C56 23 56 32 54 36 C49 27 36 25 24 33 Z" fill={hair} />
-      )}
-      {meta.id === "preset_2" && (
-        <path d="M25 31 C25 18 35 14 47 17 C54 19 56 26 55 31 C50 24 33 23 25 31 Z" fill={hair} />
-      )}
-      {meta.id === "preset_3" && (
-        <path d="M24 34 C24 18 36 14 49 18 C55 21 56 29 55 34 C46 24 33 26 24 34 Z" fill={hair} />
-      )}
-      {/* Eyes */}
-      <circle cx="34.5" cy="36" r="2.2" fill={eye} />
-      <circle cx="45.5" cy="36" r="2.2" fill={eye} />
-      <circle cx="35.3" cy="35.2" r="0.8" fill="#FFFFFF" />
-      <circle cx="46.3" cy="35.2" r="0.8" fill="#FFFFFF" />
-      {/* Glasses for Preset 2 / Broadcast earpiece for Preset 3 */}
-      {meta.id === "preset_2" && (
-        <g fill="none" stroke="#1E293B" strokeWidth="1.4">
-          <circle cx="34.5" cy="36" r="4.8" />
-          <circle cx="45.5" cy="36" r="4.8" />
-          <line x1="39.3" y1="36" x2="40.7" y2="36" />
-        </g>
-      )}
-      {meta.id === "preset_3" && (
-        <>
-          <circle cx="55.5" cy="37" r="3" fill="#18181B" stroke={accent} strokeWidth="1.2" />
-          <path d="M55 39 Q52 45 45 45" fill="none" stroke="#27272A" strokeWidth="1.3" />
-        </>
-      )}
-      {/* Warm smile */}
-      <path
-        d="M35.5 44 Q40 47.5 44.5 44"
-        fill="none"
-        stroke={lip}
-        strokeWidth="2.1"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
 }
 
 function encodeCanvasForStorage(canvas: HTMLCanvasElement): string {
@@ -333,9 +251,7 @@ export function Presenter3DPage() {
     }))
   )
 
-  const defaultPreset: BuiltinPresenterId = "preset_1"
-
-  // Character & Scene state (3D Presenter Preset 1 is ready immediately on initial load)
+  // Character & Scene state (2D-to-3D Photo Converter is primary in 3D mode)
   const [characterKind, setCharacterKind] = useState<CharacterKind>("model")
   const [photoDims, setPhotoDims] = useState<{ w: number; h: number } | null>(null)
   const [photoName, setPhotoName] = useState("")
@@ -361,17 +277,16 @@ export function Presenter3DPage() {
   const characterPhotoRef = useRef<HTMLImageElement | null>(null)
   const cutoutPhotoRef = useRef<HTMLImageElement | null>(null)
   const characterPhotoUrlRef = useRef<string | null>(null)
-  const [avatarMode, setAvatarMode] = useState<"preset" | "custom">("preset")
-  const [presetId, setPresetId] = useState<BuiltinPresenterId>(defaultPreset)
   const [customAvatarName, setCustomAvatarName] = useState<string>("")
   const [hasLoaded3dAvatar, setHasLoaded3dAvatar] = useState(false)
   const [isLoadingAvatar, setIsLoadingAvatar] = useState(false)
 
-  // Step 2: 2D Photo -> 3D .glb Converter state
-  const [converterOpen, setConverterOpen] = useState(true)
+  // Primary 2D Photo -> 3D .glb Converter state
   const [convert3dMode, setConvert3dMode] = useState<ImageTo3dMode>(() =>
     detectMobileDevice() ? "fast_25d" : "full_3d"
   )
+  // User-adjustable 3D Depth Strength (0 = Low, 50 = Medium, 100 = High)
+  const [reliefDepthStrength, setReliefDepthStrength] = useState<number>(50)
   const [hfTokenOpen, setHfTokenOpen] = useState(false)
   const [converterSourceUrl, setConverterSourceUrl] = useState<string | null>(null)
   const [converterSourceName, setConverterSourceName] = useState("")
@@ -466,8 +381,6 @@ export function Presenter3DPage() {
     presenterShowCornerLogo,
     badgeText,
     characterKind,
-    avatarMode,
-    presetId,
     customAvatarName,
     hasLoaded3dAvatar,
     photoName,
@@ -494,8 +407,6 @@ export function Presenter3DPage() {
     presenterShowCornerLogo,
     badgeText,
     characterKind,
-    avatarMode,
-    presetId,
     customAvatarName,
     hasLoaded3dAvatar,
     photoName,
@@ -644,33 +555,33 @@ export function Presenter3DPage() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 1.08
+    renderer.toneMappingExposure = 1.02
     rendererRef.current = renderer
 
     const scene = new THREE.Scene()
     sceneRef.current = scene
 
-    // Balanced 3-Point Studio Lighting (warm key, cool fill, soft back rim)
-    const hemiLight = new THREE.HemisphereLight(0xfffaf3, 0xd6d3d1, 0.65)
+    // Balanced 3-Point Studio Lighting (soft warm key, cool fill, gentle back rim — zero harsh glare)
+    const hemiLight = new THREE.HemisphereLight(0xfffaf3, 0xd6d3d1, 0.75)
     scene.add(hemiLight)
 
-    const ambientLight = new THREE.AmbientLight(0xfffaf3, 0.28)
+    const ambientLight = new THREE.AmbientLight(0xfffaf3, 0.24)
     scene.add(ambientLight)
 
-    const keyLight = new THREE.DirectionalLight(0xfff2e0, 2.1)
-    keyLight.position.set(1.6, 2.2, 2.4)
+    const keyLight = new THREE.DirectionalLight(0xfff4e6, 1.55)
+    keyLight.position.set(1.5, 2.1, 2.5)
     scene.add(keyLight)
 
-    const fillLight = new THREE.DirectionalLight(0xdbeafe, 0.9)
-    fillLight.position.set(-1.9, 1.5, 1.6)
+    const fillLight = new THREE.DirectionalLight(0xdbeafe, 0.85)
+    fillLight.position.set(-1.9, 1.4, 1.8)
     scene.add(fillLight)
 
-    const rimLight = new THREE.DirectionalLight(0xfde68a, 1.35)
-    rimLight.position.set(-0.4, 2.1, -2.1)
+    const rimLight = new THREE.DirectionalLight(0xfde68a, 1.15)
+    rimLight.position.set(-0.5, 2.1, -2.0)
     scene.add(rimLight)
 
-    const hairRimLight = new THREE.DirectionalLight(0xe0f2fe, 0.55)
-    hairRimLight.position.set(1.1, 1.9, -1.8)
+    const hairRimLight = new THREE.DirectionalLight(0xe0f2fe, 0.45)
+    hairRimLight.position.set(1.2, 1.8, -1.8)
     scene.add(hairRimLight)
 
     const camera = new THREE.PerspectiveCamera(32, 9 / 16, 0.1, 30)
@@ -684,12 +595,6 @@ export function Presenter3DPage() {
     })
     scene.add(studioBackdrop.object)
     studioBackdropRef.current = studioBackdrop
-
-    // Load Preset 1 immediately on initial mount so the 3D stage is ready with zero wait
-    const initialAvatar = createProceduralPresenterController("preset_1")
-    scene.add(initialAvatar.object)
-    avatarRef.current = initialAvatar
-    setHasLoaded3dAvatar(true)
 
     const clock = new THREE.Clock()
     let rafId = 0
@@ -850,13 +755,11 @@ export function Presenter3DPage() {
 
       // 4. TV-Style Lower-Third Nameplate
       if (settings.presenterShowLowerThird) {
-        const presetNum =
-          settings.presetId === "preset_3" ? 3 : settings.presetId === "preset_2" ? 2 : 1
         const presenterName =
           settings.characterKind === "model"
-            ? settings.avatarMode === "preset"
-              ? settings.badgeText.trim() || `Preset ${presetNum}`
-              : settings.customAvatarName.replace(/\.(vrm|glb)$/i, "") || "3D Presenter"
+            ? settings.customAvatarName.replace(/\.(vrm|glb)$/i, "") ||
+              settings.badgeText.trim() ||
+              "3D Presenter"
             : settings.mascotName.trim() ||
               settings.photoName.replace(/\.[^.]+$/, "") ||
               "Mascot"
@@ -932,6 +835,8 @@ export function Presenter3DPage() {
         studioBackdropRef.current.dispose()
         studioBackdropRef.current = null
       }
+      scene.clear()
+      renderer.renderLists.dispose()
       renderer.dispose()
       rendererRef.current = null
       sceneRef.current = null
@@ -961,7 +866,7 @@ export function Presenter3DPage() {
         audioCtxRef.current = null
       }
     }
-  }, [applyCameraFraming, defaultPreset, stopAudioPlayback])
+  }, [applyCameraFraming, stopAudioPlayback])
 
   // Re-apply camera framing whenever user toggles Upper-Body / Close-Up, Aspect Ratio, or Quality
   useEffect(() => {
@@ -1142,28 +1047,6 @@ export function Presenter3DPage() {
     studioBackdropRef.current?.setShopName(badgeText)
   }, [badgeText])
 
-  const loadBuiltinPreset = useCallback(
-    (id: BuiltinPresenterId) => {
-      setPresetId(id)
-      setAvatarMode("preset")
-      setCustomAvatarName("")
-      setCharacterKind("model")
-      const controller = createProceduralPresenterController(id)
-      orbitDragRef.current.currentYaw = 0
-      orbitDragRef.current.currentPitch = 0
-      controller.setOrbitRotation?.(0, 0)
-      controller.setAutoOrbit?.(false)
-      setAutoOrbit3d(false)
-      swapAvatarController(controller)
-    },
-    [swapAvatarController]
-  )
-
-  const handleSelectPreset = (id: BuiltinPresenterId) => {
-    triggerHaptic(8)
-    loadBuiltinPreset(id)
-  }
-
   const handleUploadUniformLogo = (e: React.ChangeEvent<HTMLInputElement> | File) => {
     const file = e instanceof File ? e : e.target.files?.[0]
     if (!(e instanceof File)) e.target.value = ""
@@ -1299,7 +1182,6 @@ export function Presenter3DPage() {
     try {
       const controller = await loadAvatarController(file)
       swapAvatarController(controller)
-      setAvatarMode("custom")
       setCustomAvatarName(file.name)
       toast.success(t(language, "presenter3d.avatarLoaded"))
     } catch (err) {
@@ -1380,9 +1262,18 @@ export function Presenter3DPage() {
     toast.info(t(language, "presenter3d.img3dCancelled"))
   }
 
-  const handleConvertImageTo3d = async () => {
+  const handleChangeReliefDepthStrength = (nextValue: number) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(nextValue)))
+    setReliefDepthStrength(clamped)
+    // Live-scale the active 2D-to-3D relief mesh depth (0 -> 0.55x, 50 -> 1.0x, 100 -> 1.55x)
+    const liveScale = 0.55 + (clamped / 100) * 1.0
+    avatarRef.current?.setDepthScale?.(liveScale)
+  }
+
+  const handleConvertImageTo3d = async (sourceOverride?: File | string) => {
     if (isRenderingRef.current || isPlayingRef.current) return
-    const source = converterSourceFile || converterSourceUrl || photoDataUrl || presenterMascotDataUrl
+    const source =
+      sourceOverride || converterSourceFile || converterSourceUrl || photoDataUrl || presenterMascotDataUrl
     if (!source) {
       toast.error(t(language, "presenter3d.img3dNoImageError"))
       return
@@ -1402,6 +1293,7 @@ export function Presenter3DPage() {
 
     try {
       const mobile = detectMobileDevice()
+      const mappedReliefDepth = 0.10 + (reliefDepthStrength / 100) * 0.26
       const result = await convertImageToGlb(source, {
         mode: convert3dMode,
         timeoutMs: convert3dMode === "full_3d" ? 45_000 : 12_000,
@@ -1409,6 +1301,7 @@ export function Presenter3DPage() {
         removeBg: true,
         cutoutMode: foregroundCutoutMode,
         maxCutoutSize: mobile ? 512 : 768,
+        reliefDepth: mappedReliefDepth,
         signal: controller.signal,
         onProgress: setConvert3dProgress,
       })
@@ -1441,7 +1334,6 @@ export function Presenter3DPage() {
       avatarController.setAutoOrbit?.(true)
       setAutoOrbit3d(true)
       swapAvatarController(avatarController)
-      setAvatarMode("custom")
       setCustomAvatarName(result.fileName)
       setCharacterKind("model")
 
@@ -1469,6 +1361,18 @@ export function Presenter3DPage() {
       setIsConverting3d(false)
       setIsLoadingAvatar(false)
     }
+  }
+
+  const handleQuickUpload2dTo3d = (e: React.ChangeEvent<HTMLInputElement> | File) => {
+    const file = e instanceof File ? e : e.target.files?.[0]
+    if (!(e instanceof File)) e.target.value = ""
+    if (!file) return
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) && !/\.(jpe?g|png|webp)$/i.test(file.name)) {
+      toast.error(t(language, "presenter3d.photoInvalid"))
+      return
+    }
+    handleSelectConverterImage(file)
+    void handleConvertImageTo3d(file)
   }
 
   const handleDownloadConvertedGlb = () => {
@@ -1943,12 +1847,22 @@ export function Presenter3DPage() {
 
           {/* Canvas Preview Container */}
           <FileDropzone
-            accept={characterKind === "photo" ? [".jpg", ".jpeg", ".png", ".webp"] : [".vrm", ".glb"]}
-            onFiles={(f) =>
+            accept={
               characterKind === "photo"
-                ? handleUploadCharacterPhoto(f[0])
-                : void handleUploadAvatarFile(f[0])
+                ? [".jpg", ".jpeg", ".png", ".webp"]
+                : [".jpg", ".jpeg", ".png", ".webp", ".vrm", ".glb"]
             }
+            onFiles={(f) => {
+              const file = f[0]
+              if (!file) return
+              if (characterKind === "photo") {
+                handleUploadCharacterPhoto(file)
+              } else if (/\.(vrm|glb)$/i.test(file.name)) {
+                void handleUploadAvatarFile(file)
+              } else {
+                handleQuickUpload2dTo3d(file)
+              }
+            }}
           >
           <div className="flex items-center justify-center rounded-2xl bg-[#EFEAE1]/70 dark:bg-[#09090B]/70 p-3 border border-[#E7E5E4]/80 dark:border-[#27272A]">
             <div
@@ -2034,10 +1948,12 @@ export function Presenter3DPage() {
                   </div>
                 </div>
               )}
-              {characterKind === "model" && !hasLoaded3dAvatar && !isLoadingAvatar && (
+              {characterKind === "model" && !hasLoaded3dAvatar && !isLoadingAvatar && !isConverting3d && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-5 text-center">
-                  <div className="rounded-2xl bg-white/90 dark:bg-[#18181B]/90 backdrop-blur-xs border border-[#E7E5E4] dark:border-[#3F3F46] p-4 shadow-sm space-y-3 max-w-[245px]">
-                    <User className="h-6 w-6 mx-auto text-amber-600 dark:text-amber-400" />
+                  <div className="rounded-2xl bg-white/92 dark:bg-[#18181B]/92 backdrop-blur-sm border border-[#E7E5E4] dark:border-[#3F3F46] p-4 shadow-sm space-y-3 max-w-[250px]">
+                    <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                      <Box className="h-5 w-5" />
+                    </div>
                     <div className="space-y-1">
                       <p className="text-xs font-semibold text-[#1C1917] dark:text-[#F5F5F4] font-myanmar">
                         {t(language, "presenter3d.emptyVrmTitle")}
@@ -2047,7 +1963,17 @@ export function Presenter3DPage() {
                       </p>
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      <label className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B] px-3 py-2 text-[11px] font-semibold cursor-pointer font-myanmar">
+                      <label className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B] px-3 py-2 text-[11px] font-semibold cursor-pointer font-myanmar hover:opacity-95 transition-opacity">
+                        <Wand2 className="h-3.5 w-3.5" />
+                        <span>{t(language, "presenter3d.emptyUpload2dBtn")}</span>
+                        <input
+                          type="file"
+                          accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                          onChange={handleQuickUpload2dTo3d}
+                          className="hidden"
+                        />
+                      </label>
+                      <label className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#27272A] px-3 py-1.5 text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#EFEAE1] dark:hover:bg-[#3F3F46] cursor-pointer font-myanmar">
                         <Upload className="h-3.5 w-3.5" />
                         <span>{t(language, "presenter3d.uploadCustomAvatar")}</span>
                         <input
@@ -2063,7 +1989,7 @@ export function Presenter3DPage() {
                           triggerHaptic(6)
                           setCharacterKind("photo")
                         }}
-                        className="inline-flex items-center justify-center rounded-xl border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#27272A] px-3 py-1.5 text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#EFEAE1] dark:hover:bg-[#3F3F46] cursor-pointer font-myanmar"
+                        className="inline-flex items-center justify-center rounded-xl px-3 py-1 text-[10px] font-medium text-[#57534E] dark:text-[#A1A1AA] hover:text-[#1C1917] dark:hover:text-[#F5F5F4] cursor-pointer font-myanmar"
                       >
                         {t(language, "presenter3d.switchToMascotBtn")}
                       </button>
@@ -2071,10 +1997,17 @@ export function Presenter3DPage() {
                   </div>
                 </div>
               )}
-              {isLoadingAvatar && (
-                <div className="absolute inset-0 bg-black/45 backdrop-blur-xs flex flex-col items-center justify-center gap-2 text-white text-xs font-myanmar">
-                  <Loader2 className="h-6 w-6 animate-spin" />
-                  <span>{t(language, "presenter3d.loadingAvatar")}</span>
+              {(isLoadingAvatar || (characterKind === "model" && isConverting3d)) && (
+                <div className="absolute inset-0 bg-black/45 backdrop-blur-xs flex flex-col items-center justify-center gap-2 text-white text-xs font-myanmar px-4 text-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-amber-400" />
+                  <span>
+                    {isConverting3d && convert3dProgress
+                      ? convert3dProgress.stage === "cutting_out" ||
+                        convert3dProgress.stage === "preparing"
+                        ? t(language, "presenter3d.stageCuttingOut")
+                        : t(language, "presenter3d.stageBuilding3d")
+                      : t(language, "presenter3d.loadingAvatar")}
+                  </span>
                 </div>
               )}
               {characterKind === "photo" && isExtracting3dPop && (
@@ -2240,7 +2173,7 @@ export function Presenter3DPage() {
               <Label className="text-xs font-semibold uppercase tracking-wider text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
                 {t(language, "presenter3d.characterTitle")}
               </Label>
-              {characterKind === "model" && avatarMode === "custom" && customAvatarName && (
+              {characterKind === "model" && customAvatarName && (
                 <span className="text-[11px] text-amber-700 dark:text-amber-300 truncate max-w-[180px]">
                   {customAvatarName}
                 </span>
@@ -2272,9 +2205,6 @@ export function Presenter3DPage() {
                     triggerHaptic(6)
                     if (isRenderingVideo) return
                     setCharacterKind(opt.id)
-                    if (opt.id === "model" && !hasLoaded3dAvatar && !isLoadingAvatar) {
-                      loadBuiltinPreset(presetId)
-                    }
                   }}
                   className={cn(
                     "rounded-xl py-2 px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer font-myanmar",
@@ -2567,314 +2497,321 @@ export function Presenter3DPage() {
 
             {characterKind === "model" && (
             <div className="space-y-3">
-              {/* 1. Three Unnamed Instant-Ready 3D Presenter Presets */}
-              <div className="grid grid-cols-3 gap-2">
-                {BUILTIN_PRESENTER_PRESETS.map((meta) => {
-                  const isActive = avatarMode === "preset" && presetId === meta.id
-                  return (
-                    <button
-                      key={meta.id}
-                      type="button"
-                      onClick={() => handleSelectPreset(meta.id)}
-                      className={cn(
-                        "flex flex-col items-center gap-1.5 rounded-2xl border p-2 text-center transition-all cursor-pointer",
-                        isActive
-                          ? "border-[#1C1917] dark:border-[#F5F5F4] bg-[#1C1917] text-[#FAF8F5] dark:bg-[#F5F5F4] dark:text-[#18181B] shadow-xs"
-                          : "border-[#E7E5E4] dark:border-[#3F3F46] bg-white dark:bg-[#27272A] text-[#1C1917] dark:text-[#F5F5F4] hover:border-amber-500/60"
-                      )}
-                    >
-                      <PresetPortraitThumb meta={meta} />
-                      <div className="text-[11px] font-semibold leading-tight font-myanmar">
-                        {t(language, "presenter3d.presetLabel", { n: String(meta.index) })}
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* 2. Custom 2D-to-3D Photo Upload & Conversion Underneath */}
-              <div className="rounded-2xl border border-amber-500/30 bg-white dark:bg-[#27272A] overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setConverterOpen((v) => !v)}
-                  className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-[#FAF8F5] dark:hover:bg-[#18181B]/50 transition-colors cursor-pointer"
-                >
+              {/* Primary 2D-to-3D Photo Upload & Converter */}
+              <div className="rounded-2xl border border-amber-500/30 bg-white dark:bg-[#27272A] p-3 space-y-2.5">
+                <div className="space-y-1">
                   <span className="text-xs font-semibold text-[#1C1917] dark:text-[#F5F5F4] font-myanmar flex items-center gap-1.5">
                     <Box className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                     <span>{t(language, "presenter3d.img3dTitle")}</span>
                   </span>
-                  {converterOpen ? (
-                    <ChevronUp className="h-4 w-4 text-[#78716C] shrink-0" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4 text-[#78716C] shrink-0" />
-                  )}
-                </button>
+                  <p className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar leading-relaxed">
+                    {t(language, "presenter3d.img3dSubtitle")}
+                  </p>
+                </div>
 
-                {converterOpen && (
-                  <div className="px-3 pb-3 pt-1 space-y-2.5 border-t border-[#E7E5E4]/80 dark:border-[#3F3F46]/80">
-                    <p className="text-[11px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar leading-relaxed">
-                      {t(language, "presenter3d.img3dSubtitle")}
-                    </p>
-
-                    {/* Mode Toggle: Fast Mobile 2.5D (default on mobile) vs Full 3D Mesh (Desktop) */}
-                    <div className="space-y-1">
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {(
-                          [
-                            { id: "fast_25d", labelKey: "presenter3d.img3dModeFast" },
-                            { id: "full_3d", labelKey: "presenter3d.img3dModeFull" },
-                          ] as const
-                        ).map((modeOpt) => (
-                          <button
-                            key={modeOpt.id}
-                            type="button"
-                            disabled={isConverting3d}
-                            onClick={() => {
-                              triggerHaptic(6)
-                              setConvert3dMode(modeOpt.id)
-                            }}
-                            className={cn(
-                              "rounded-xl border py-1.5 px-2 text-[11px] font-semibold leading-snug text-center transition-all cursor-pointer font-myanmar disabled:opacity-50",
-                              convert3dMode === modeOpt.id
-                                ? "border-amber-600 dark:border-amber-400 bg-amber-500/15 text-amber-800 dark:text-amber-200"
-                                : "border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
-                            )}
-                          >
-                            {t(language, modeOpt.labelKey)}
-                          </button>
-                        ))}
-                      </div>
-                      <p className="text-[10px] text-[#78716C] dark:text-[#A1A1AA] font-myanmar">
-                        {convert3dMode === "fast_25d"
-                          ? t(language, "presenter3d.img3dModeFastHint")
-                          : t(language, "presenter3d.img3dModeFullHint")}
-                      </p>
-                    </div>
-
-                    {/* Foreground Cutout Mode: Instant Cutout (No Model) vs Smart Cutout */}
-                    <div className="space-y-1">
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {(
-                          [
-                            { id: "instant", labelKey: "presenter3d.cutoutModeInstant" },
-                            { id: "smart", labelKey: "presenter3d.cutoutModeSmart" },
-                          ] as const satisfies readonly {
-                            id: ForegroundCutoutMode
-                            labelKey: string
-                          }[]
-                        ).map((opt) => (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            disabled={isConverting3d}
-                            onClick={() => {
-                              triggerHaptic(6)
-                              setForegroundCutoutMode(opt.id)
-                            }}
-                            className={cn(
-                              "rounded-xl border py-1.5 px-2 text-[10px] font-semibold leading-snug text-center transition-all cursor-pointer font-myanmar disabled:opacity-50",
-                              foregroundCutoutMode === opt.id
-                                ? "border-amber-600 dark:border-amber-400 bg-amber-500/15 text-amber-800 dark:text-amber-200"
-                                : "border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
-                            )}
-                          >
-                            {t(language, opt.labelKey)}
-                          </button>
-                        ))}
-                      </div>
-                      <p className="text-[10px] text-[#78716C] dark:text-[#A1A1AA] font-myanmar">
-                        {foregroundCutoutMode === "instant"
-                          ? t(language, "presenter3d.cutoutModeInstantHint")
-                          : t(language, "presenter3d.cutoutModeSmartHint")}
-                      </p>
-                    </div>
-
-                    <FileDropzone
-                      accept={[".jpg", ".jpeg", ".png", ".webp"]}
-                      onFiles={(f) => handleSelectConverterImage(f[0])}
-                    >
-                      <label className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-[#FAF8F5] dark:bg-[#18181B] py-2.5 px-3 text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#EFEAE1]/60 dark:hover:bg-[#18181B]/80 cursor-pointer transition-colors font-myanmar">
-                        <ImagePlus className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                        <span className="truncate">
-                          {converterSourceName || t(language, "presenter3d.img3dDropzone")}
-                        </span>
-                        <input
-                          type="file"
-                          accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-                          onChange={handleSelectConverterImage}
-                          className="hidden"
-                        />
-                      </label>
-                    </FileDropzone>
-
-                    {(converterSourceUrl || photoDataUrl || presenterMascotDataUrl) && (
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        {converterSourceUrl ? (
-                          <div className="flex items-center gap-2 min-w-0 flex-1">
-                            <img
-                              src={converterSourceUrl}
-                              alt=""
-                              className="h-8 w-8 rounded-lg object-cover border border-black/10 shrink-0"
-                            />
-                            <span className="text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] truncate font-myanmar">
-                              {converterSourceName}
-                            </span>
-                          </div>
-                        ) : (
-                          <span />
+                {/* Mode Toggle: Fast Mobile 2.5D (default on mobile) vs Full 3D Mesh (Desktop) */}
+                <div className="space-y-1">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(
+                      [
+                        { id: "fast_25d", labelKey: "presenter3d.img3dModeFast" },
+                        { id: "full_3d", labelKey: "presenter3d.img3dModeFull" },
+                      ] as const
+                    ).map((modeOpt) => (
+                      <button
+                        key={modeOpt.id}
+                        type="button"
+                        disabled={isConverting3d}
+                        onClick={() => {
+                          triggerHaptic(6)
+                          setConvert3dMode(modeOpt.id)
+                        }}
+                        className={cn(
+                          "rounded-xl border py-1.5 px-2 text-[11px] font-semibold leading-snug text-center transition-all cursor-pointer font-myanmar disabled:opacity-50",
+                          convert3dMode === modeOpt.id
+                            ? "border-amber-600 dark:border-amber-400 bg-amber-500/15 text-amber-800 dark:text-amber-200"
+                            : "border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
                         )}
+                      >
+                        {t(language, modeOpt.labelKey)}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-[#78716C] dark:text-[#A1A1AA] font-myanmar">
+                    {convert3dMode === "fast_25d"
+                      ? t(language, "presenter3d.img3dModeFastHint")
+                      : t(language, "presenter3d.img3dModeFullHint")}
+                  </p>
+                </div>
 
-                        {(photoDataUrl || presenterMascotDataUrl) && (
-                          <button
-                            type="button"
-                            onClick={handleUseCurrentMascotFor3d}
-                            className="inline-flex items-center gap-1 rounded-lg border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] px-2 py-1 text-[10px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#EFEAE1] dark:hover:bg-[#3F3F46] cursor-pointer shrink-0 font-myanmar"
-                          >
-                            <Sparkles className="h-3 w-3 text-amber-600 dark:text-amber-400" />
-                            <span>{t(language, "presenter3d.img3dUseMascotBtn")}</span>
-                          </button>
+                {/* Foreground Cutout Mode: Instant Cutout (No Model) vs Smart Cutout */}
+                <div className="space-y-1">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(
+                      [
+                        { id: "instant", labelKey: "presenter3d.cutoutModeInstant" },
+                        { id: "smart", labelKey: "presenter3d.cutoutModeSmart" },
+                      ] as const satisfies readonly {
+                        id: ForegroundCutoutMode
+                        labelKey: string
+                      }[]
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        disabled={isConverting3d}
+                        onClick={() => {
+                          triggerHaptic(6)
+                          setForegroundCutoutMode(opt.id)
+                        }}
+                        className={cn(
+                          "rounded-xl border py-1.5 px-2 text-[10px] font-semibold leading-snug text-center transition-all cursor-pointer font-myanmar disabled:opacity-50",
+                          foregroundCutoutMode === opt.id
+                            ? "border-amber-600 dark:border-amber-400 bg-amber-500/15 text-amber-800 dark:text-amber-200"
+                            : "border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] text-[#57534E] dark:text-[#A1A1AA]"
                         )}
-                      </div>
-                    )}
+                      >
+                        {t(language, opt.labelKey)}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-[#78716C] dark:text-[#A1A1AA] font-myanmar">
+                    {foregroundCutoutMode === "instant"
+                      ? t(language, "presenter3d.cutoutModeInstantHint")
+                      : t(language, "presenter3d.cutoutModeSmartHint")}
+                  </p>
+                </div>
 
-                    {/* Optional Collapsible Hugging Face Token (Desktop Full 3D Mode only) */}
-                    {convert3dMode === "full_3d" && (
-                      <div className="rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] px-2.5 py-1.5 border border-[#E7E5E4]/80 dark:border-[#3F3F46]/80">
-                        <button
-                          type="button"
-                          onClick={() => setHfTokenOpen((v) => !v)}
-                          className="w-full flex items-center justify-between text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] cursor-pointer font-myanmar"
-                        >
-                          <span className="inline-flex items-center gap-1.5">
-                            <KeyRound className="h-3 w-3 text-amber-600 dark:text-amber-400" />
-                            <span>{t(language, "presenter3d.img3dTokenToggle")}</span>
-                            {hfToken && (
-                              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
-                                • Saved
-                              </span>
-                            )}
-                          </span>
-                          {hfTokenOpen ? (
-                            <ChevronUp className="h-3.5 w-3.5" />
-                          ) : (
-                            <ChevronDown className="h-3.5 w-3.5" />
-                          )}
-                        </button>
-
-                        {hfTokenOpen && (
-                          <div className="mt-2 space-y-1">
-                            <Input
-                              type="password"
-                              value={hfToken}
-                              onChange={(e) => setHfToken(e.target.value)}
-                              placeholder="hf_..."
-                              className="h-8 rounded-lg bg-white dark:bg-[#27272A] border-[#E7E5E4] dark:border-[#3F3F46] text-xs font-mono"
-                            />
-                            <p className="text-[10px] text-[#78716C] dark:text-[#A1A1AA] font-myanmar">
-                              {t(language, "presenter3d.img3dTokenHint")}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Convert to 3D (.glb) Action */}
-                    <Button
+                {/* User-Adjustable 3D Depth Strength Slider (Low / Medium / High) */}
+                <div className="rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] px-2.5 py-2 border border-[#E7E5E4]/80 dark:border-[#3F3F46]/80 space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] font-medium font-myanmar text-[#57534E] dark:text-[#A1A1AA]">
+                    <span>{t(language, "presenter3d.depthStrengthLabel")}</span>
+                    <span className="font-semibold text-amber-700 dark:text-amber-300">
+                      {reliefDepthStrength < 34
+                        ? t(language, "presenter3d.depthLow")
+                        : reliefDepthStrength < 67
+                          ? t(language, "presenter3d.depthMedium")
+                          : t(language, "presenter3d.depthHigh")}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={5}
+                    value={reliefDepthStrength}
+                    onChange={(e) => handleChangeReliefDepthStrength(Number(e.target.value))}
+                    className="w-full accent-amber-600 cursor-pointer"
+                  />
+                  <div className="flex items-center justify-between text-[10px] text-[#78716C] dark:text-[#A1A1AA] font-myanmar">
+                    <button
                       type="button"
-                      size="sm"
-                      onClick={() => void handleConvertImageTo3d()}
-                      disabled={isConverting3d || (!converterSourceUrl && !photoDataUrl && !presenterMascotDataUrl)}
-                      className="w-full h-9 rounded-xl bg-[#1C1917] text-[#FAF8F5] hover:bg-[#292524] dark:bg-[#F5F5F4] dark:text-[#18181B] dark:hover:bg-[#E7E5E4] text-xs font-semibold font-myanmar cursor-pointer"
+                      onClick={() => handleChangeReliefDepthStrength(15)}
+                      className="hover:text-[#1C1917] dark:hover:text-[#F5F5F4] cursor-pointer"
                     >
-                      {isConverting3d ? (
-                        <>
-                          <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                          <span>
-                            {convert3dProgress?.stage === "cutting_out" ||
-                            convert3dProgress?.stage === "preparing"
-                              ? t(language, "presenter3d.stageCuttingOut")
-                              : convert3dProgress?.stage === "building_foreground" ||
-                                  convert3dProgress?.stage === "generating_fast_25d" ||
-                                  convert3dProgress?.stage === "generating_local"
-                                ? t(language, "presenter3d.stageBuilding3d")
-                                : convert3dProgress?.stage === "fallback_fast"
-                                  ? t(language, "presenter3d.img3dProgressFallback")
-                                  : convert3dProgress?.stage === "ready"
-                                    ? t(language, "presenter3d.img3dProgressReady")
-                                    : t(language, "presenter3d.img3dProgressGenerating")}
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <Wand2 className="h-3.5 w-3.5 mr-1.5" />
-                          <span>
-                            {convert3dMode === "fast_25d"
-                              ? t(language, "presenter3d.img3dConvertFastBtn")
-                              : t(language, "presenter3d.img3dConvertBtn")}
-                          </span>
-                        </>
-                      )}
-                    </Button>
+                      {t(language, "presenter3d.depthLow")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleChangeReliefDepthStrength(50)}
+                      className="hover:text-[#1C1917] dark:hover:text-[#F5F5F4] cursor-pointer"
+                    >
+                      {t(language, "presenter3d.depthMedium")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleChangeReliefDepthStrength(90)}
+                      className="hover:text-[#1C1917] dark:hover:text-[#F5F5F4] cursor-pointer"
+                    >
+                      {t(language, "presenter3d.depthHigh")}
+                    </button>
+                  </div>
+                </div>
 
-                    {isConverting3d && convert3dProgress && (
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between gap-2 text-[10px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
-                          <span className="tabular-nums font-semibold">
-                            {Math.max(8, Math.min(100, convert3dProgress.percent))}%
-                          </span>
-                          <button
-                            type="button"
-                            onClick={handleCancelConvert3d}
-                            className="inline-flex items-center gap-1 rounded-md border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[10px] font-semibold text-rose-700 dark:text-rose-300 hover:bg-rose-500/20 cursor-pointer transition-colors"
-                          >
-                            <X className="h-3 w-3" />
-                            <span>{t(language, "presenter3d.img3dCancelBtn")}</span>
-                          </button>
-                        </div>
-                        <div className="h-1.5 w-full rounded-full bg-[#EFEAE1] dark:bg-[#18181B] overflow-hidden">
-                          <div
-                            className="h-full bg-amber-600 dark:bg-amber-400 transition-all duration-200"
-                            style={{ width: `${Math.max(8, Math.min(100, convert3dProgress.percent))}%` }}
-                          />
-                        </div>
+                <FileDropzone
+                  accept={[".jpg", ".jpeg", ".png", ".webp"]}
+                  onFiles={(f) => handleSelectConverterImage(f[0])}
+                >
+                  <label className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-[#D6D3D1] dark:border-[#52525B] bg-[#FAF8F5] dark:bg-[#18181B] py-2.5 px-3 text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#EFEAE1]/60 dark:hover:bg-[#18181B]/80 cursor-pointer transition-colors font-myanmar">
+                    <ImagePlus className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span className="truncate">
+                      {converterSourceName || t(language, "presenter3d.img3dDropzone")}
+                    </span>
+                    <input
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                      onChange={handleSelectConverterImage}
+                      className="hidden"
+                    />
+                  </label>
+                </FileDropzone>
+
+                {(converterSourceUrl || photoDataUrl || presenterMascotDataUrl) && (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {converterSourceUrl ? (
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <img
+                          src={converterSourceUrl}
+                          alt=""
+                          className="h-8 w-8 rounded-lg object-cover border border-black/10 shrink-0"
+                        />
+                        <span className="text-[11px] font-medium text-[#1C1917] dark:text-[#F5F5F4] truncate font-myanmar">
+                          {converterSourceName}
+                        </span>
                       </div>
+                    ) : (
+                      <span />
                     )}
 
-                    {/* Result Actions */}
-                    {convertedGlbResult && !isConverting3d && (
-                      <div className="space-y-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-2">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 truncate font-myanmar">
-                              ✓ {t(language, "presenter3d.img3dProgressReady")}
-                            </p>
-                            <p className="text-[10px] text-[#57534E] dark:text-[#A1A1AA] truncate font-myanmar">
-                              {convertedGlbResult.engine === "fast_25d"
-                                ? t(language, "presenter3d.img3dEngineFast25d")
-                                : convertedGlbResult.usedFallback
-                                  ? t(language, "presenter3d.img3dEngineLocal")
-                                  : t(language, "presenter3d.img3dEngineCloud")}
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={handleDownloadConvertedGlb}
-                            className="h-8 rounded-lg border-emerald-500/40 bg-white dark:bg-[#18181B] text-[11px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] shrink-0 cursor-pointer font-myanmar"
-                          >
-                            <Download className="h-3.5 w-3.5 mr-1" />
-                            <span>{t(language, "presenter3d.img3dDownloadBtn")}</span>
-                          </Button>
-                        </div>
-                        {convertedGlbResult.usedFallback && (
-                          <p className="text-[10px] text-amber-700 dark:text-amber-300 font-myanmar leading-snug">
-                            {convertedGlbResult.fallbackReason === "timeout"
-                              ? t(language, "presenter3d.img3dFallbackTimeout")
-                              : t(language, "presenter3d.img3dFallbackError")}
-                          </p>
+                    {(photoDataUrl || presenterMascotDataUrl) && (
+                      <button
+                        type="button"
+                        onClick={handleUseCurrentMascotFor3d}
+                        className="inline-flex items-center gap-1 rounded-lg border border-[#E7E5E4] dark:border-[#3F3F46] bg-[#FAF8F5] dark:bg-[#18181B] px-2 py-1 text-[10px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] hover:bg-[#EFEAE1] dark:hover:bg-[#3F3F46] cursor-pointer shrink-0 font-myanmar"
+                      >
+                        <Sparkles className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                        <span>{t(language, "presenter3d.img3dUseMascotBtn")}</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Optional Collapsible Hugging Face Token (Desktop Full 3D Mode only) */}
+                {convert3dMode === "full_3d" && (
+                  <div className="rounded-xl bg-[#FAF8F5] dark:bg-[#18181B] px-2.5 py-1.5 border border-[#E7E5E4]/80 dark:border-[#3F3F46]/80">
+                    <button
+                      type="button"
+                      onClick={() => setHfTokenOpen((v) => !v)}
+                      className="w-full flex items-center justify-between text-[11px] font-medium text-[#57534E] dark:text-[#A1A1AA] cursor-pointer font-myanmar"
+                    >
+                      <span className="inline-flex items-center gap-1.5">
+                        <KeyRound className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                        <span>{t(language, "presenter3d.img3dTokenToggle")}</span>
+                        {hfToken && (
+                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                            • Saved
+                          </span>
                         )}
+                      </span>
+                      {hfTokenOpen ? (
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      ) : (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+
+                    {hfTokenOpen && (
+                      <div className="mt-2 space-y-1">
+                        <Input
+                          type="password"
+                          value={hfToken}
+                          onChange={(e) => setHfToken(e.target.value)}
+                          placeholder="hf_..."
+                          className="h-8 rounded-lg bg-white dark:bg-[#27272A] border-[#E7E5E4] dark:border-[#3F3F46] text-xs font-mono"
+                        />
+                        <p className="text-[10px] text-[#78716C] dark:text-[#A1A1AA] font-myanmar">
+                          {t(language, "presenter3d.img3dTokenHint")}
+                        </p>
                       </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Convert to 3D (.glb) Action */}
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void handleConvertImageTo3d()}
+                  disabled={isConverting3d || (!converterSourceUrl && !photoDataUrl && !presenterMascotDataUrl)}
+                  className="w-full h-9 rounded-xl bg-[#1C1917] text-[#FAF8F5] hover:bg-[#292524] dark:bg-[#F5F5F4] dark:text-[#18181B] dark:hover:bg-[#E7E5E4] text-xs font-semibold font-myanmar cursor-pointer"
+                >
+                  {isConverting3d ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      <span>
+                        {convert3dProgress?.stage === "cutting_out" ||
+                        convert3dProgress?.stage === "preparing"
+                          ? t(language, "presenter3d.stageCuttingOut")
+                          : convert3dProgress?.stage === "building_foreground" ||
+                              convert3dProgress?.stage === "generating_fast_25d" ||
+                              convert3dProgress?.stage === "generating_local"
+                            ? t(language, "presenter3d.stageBuilding3d")
+                            : convert3dProgress?.stage === "fallback_fast"
+                              ? t(language, "presenter3d.img3dProgressFallback")
+                              : convert3dProgress?.stage === "ready"
+                                ? t(language, "presenter3d.img3dProgressReady")
+                                : t(language, "presenter3d.img3dProgressGenerating")}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="h-3.5 w-3.5 mr-1.5" />
+                      <span>
+                        {convert3dMode === "fast_25d"
+                          ? t(language, "presenter3d.img3dConvertFastBtn")
+                          : t(language, "presenter3d.img3dConvertBtn")}
+                      </span>
+                    </>
+                  )}
+                </Button>
+
+                {isConverting3d && convert3dProgress && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 text-[10px] text-[#57534E] dark:text-[#A1A1AA] font-myanmar">
+                      <span className="tabular-nums font-semibold">
+                        {Math.max(8, Math.min(100, convert3dProgress.percent))}%
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleCancelConvert3d}
+                        className="inline-flex items-center gap-1 rounded-md border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[10px] font-semibold text-rose-700 dark:text-rose-300 hover:bg-rose-500/20 cursor-pointer transition-colors"
+                      >
+                        <X className="h-3 w-3" />
+                        <span>{t(language, "presenter3d.img3dCancelBtn")}</span>
+                      </button>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-[#EFEAE1] dark:bg-[#18181B] overflow-hidden">
+                      <div
+                        className="h-full bg-amber-600 dark:bg-amber-400 transition-all duration-200"
+                        style={{ width: `${Math.max(8, Math.min(100, convert3dProgress.percent))}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Result Actions */}
+                {convertedGlbResult && !isConverting3d && (
+                  <div className="space-y-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 truncate font-myanmar">
+                          ✓ {t(language, "presenter3d.img3dProgressReady")}
+                        </p>
+                        <p className="text-[10px] text-[#57534E] dark:text-[#A1A1AA] truncate font-myanmar">
+                          {convertedGlbResult.engine === "fast_25d"
+                            ? t(language, "presenter3d.img3dEngineFast25d")
+                            : convertedGlbResult.usedFallback
+                              ? t(language, "presenter3d.img3dEngineLocal")
+                              : t(language, "presenter3d.img3dEngineCloud")}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleDownloadConvertedGlb}
+                        className="h-8 rounded-lg border-emerald-500/40 bg-white dark:bg-[#18181B] text-[11px] font-semibold text-[#1C1917] dark:text-[#F5F5F4] shrink-0 cursor-pointer font-myanmar"
+                      >
+                        <Download className="h-3.5 w-3.5 mr-1" />
+                        <span>{t(language, "presenter3d.img3dDownloadBtn")}</span>
+                      </Button>
+                    </div>
+                    {convertedGlbResult.usedFallback && (
+                      <p className="text-[10px] text-amber-700 dark:text-amber-300 font-myanmar leading-snug">
+                        {convertedGlbResult.fallbackReason === "timeout"
+                          ? t(language, "presenter3d.img3dFallbackTimeout")
+                          : t(language, "presenter3d.img3dFallbackError")}
+                      </p>
                     )}
                   </div>
                 )}

@@ -94,8 +94,12 @@ const DEFAULT_FULL_3D_TIMEOUT_MS = 12_000
 const DEFAULT_SMART_CUTOUT_TIMEOUT_MS = 12_000
 const MOBILE_MAX_CUTOUT_SIZE = 512
 const DESKTOP_MAX_CUTOUT_SIZE = 640
-const FAST_25D_DEPTH_SIZE = 256
-const FAST_25D_TEXTURE_SIZE = 512
+const MOBILE_RELIEF_DEPTH_SIZE = 256
+const DESKTOP_RELIEF_DEPTH_SIZE = 320
+const MOBILE_RELIEF_TEXTURE_SIZE = 512
+const DESKTOP_RELIEF_TEXTURE_SIZE = 768
+const MOBILE_RELIEF_SEGMENTS = 96
+const DESKTOP_RELIEF_SEGMENTS = 160
 
 export function isMobileViewport(): boolean {
   if (typeof window === "undefined") return false
@@ -1091,6 +1095,10 @@ export async function createLocalReliefGlb(
   cutoutCanvas: HTMLCanvasElement,
   reliefDepth = 0.22
 ): Promise<Blob> {
+  if (!cutoutCanvas || cutoutCanvas.width <= 0 || cutoutCanvas.height <= 0) {
+    throw new Error("Invalid cutout canvas for 3D .glb export.")
+  }
+
   const cardW = 0.94
   const cardH = 1.12
   const cornerR = 0.085
@@ -1112,8 +1120,8 @@ export async function createLocalReliefGlb(
 
   const slabMat = new THREE.MeshStandardMaterial({
     color: 0x1e1b18,
-    roughness: 0.16,
-    metalness: 0.2,
+    roughness: 0.42,
+    metalness: 0.12,
   })
   const slabMesh = new THREE.Mesh(slabGeom, slabMat)
   slabMesh.name = "ShowcaseAcrylicSlab"
@@ -1134,8 +1142,8 @@ export async function createLocalReliefGlb(
 
   const rimMat = new THREE.MeshStandardMaterial({
     color: 0xd4af37,
-    roughness: 0.24,
-    metalness: 0.86,
+    roughness: 0.34,
+    metalness: 0.68,
   })
   const rimMesh = new THREE.Mesh(rimGeom, rimMat)
   rimMesh.name = "ShowcaseMetallicRim"
@@ -1155,8 +1163,8 @@ export async function createLocalReliefGlb(
   flipPlaneUvForGltf(frontGeom)
   const frontMat = new THREE.MeshStandardMaterial({
     map: frontTex,
-    roughness: 0.35,
-    metalness: 0.05,
+    roughness: 0.52,
+    metalness: 0.0,
   })
   const frontMesh = new THREE.Mesh(frontGeom, frontMat)
   frontMesh.name = "ShowcaseFrontFace"
@@ -1173,8 +1181,8 @@ export async function createLocalReliefGlb(
   flipPlaneUvForGltf(backGeom)
   const backMat = new THREE.MeshStandardMaterial({
     map: backTex,
-    roughness: 0.32,
-    metalness: 0.14,
+    roughness: 0.48,
+    metalness: 0.08,
   })
   const backMesh = new THREE.Mesh(backGeom, backMat)
   backMesh.name = "ShowcaseBackFace"
@@ -1184,11 +1192,12 @@ export async function createLocalReliefGlb(
   const group = new THREE.Group()
   group.name = "StudioShowcaseCard3D"
   group.add(slabMesh, rimMesh, frontMesh, backMesh)
+  group.updateMatrixWorld(true)
 
   const exporter = new GLTFExporter()
   try {
     const glbBuffer = await exporter.parseAsync(group, { binary: true })
-    if (glbBuffer instanceof ArrayBuffer) {
+    if (glbBuffer instanceof ArrayBuffer && glbBuffer.byteLength > 0) {
       return new Blob([glbBuffer], { type: "model/gltf-binary" })
     }
     throw new Error("Expected binary ArrayBuffer from GLTFExporter.")
@@ -1208,56 +1217,275 @@ export async function createLocalReliefGlb(
   }
 }
 
+interface SubjectEllipseBounds {
+  cx: number
+  cy: number
+  rx: number
+  ry: number
+  hasTransparency: boolean
+}
+
 /**
- * Computes a normalized 256×256 luminance heightmap with alpha modulation
- * and smooth perimeter tapering so the displaced 2.5D relief sits seamlessly
- * on the backing slab without jagged edges.
+ * Alpha-premultiplied edge erosion, feathering, and halo color decontamination.
+ * Eliminates 1-2px bright/dark fringe pixels along cutout borders so vertices
+ * never spike or bleed background color into the 3D relief edge.
  */
-function buildLuminanceDepthMap(
+function refineCutoutAlphaEdges(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number
+): void {
+  if (w <= 2 || h <= 2) return
+  const imgData = ctx.getImageData(0, 0, w, h)
+  const { data } = imgData
+  const count = w * h
+
+  const origAlpha = new Uint8Array(count)
+  let transparentPixels = 0
+  for (let i = 0; i < count; i++) {
+    const a = data[i * 4 + 3]
+    origAlpha[i] = a
+    if (a < 245) transparentPixels++
+  }
+
+  // Skip erosion if image is fully opaque (no cutout alpha border)
+  if (transparentPixels < Math.max(8, Math.floor(count * 0.005))) {
+    return
+  }
+
+  const erodedAlpha = new Uint8Array(count)
+
+  // Pass 1: Gentle morphological erosion + 3×3 alpha feathering on boundary pixels
+  for (let y = 0; y < h; y++) {
+    const y0 = y > 0 ? y - 1 : 0
+    const y2 = y < h - 1 ? y + 1 : h - 1
+    for (let x = 0; x < w; x++) {
+      const idx = y * w + x
+      const a = origAlpha[idx]
+      if (a <= 32) {
+        erodedAlpha[idx] = 0
+        continue
+      }
+
+      const x0 = x > 0 ? x - 1 : 0
+      const x2 = x < w - 1 ? x + 1 : w - 1
+
+      const aL = origAlpha[y * w + x0]
+      const aR = origAlpha[y * w + x2]
+      const aU = origAlpha[y0 * w + x]
+      const aD = origAlpha[y2 * w + x]
+      const min4 = Math.min(aL, aR, aU, aD)
+
+      if (min4 >= 245 && a >= 245) {
+        erodedAlpha[idx] = a
+        continue
+      }
+
+      // Erode outermost halo pixel & smooth transition band
+      const avg4 = (aL + aR + aU + aD) * 0.25
+      const blended = Math.min(a, min4 * 0.45 + avg4 * 0.55)
+      erodedAlpha[idx] = blended < 28 ? 0 : Math.min(255, Math.round(blended))
+    }
+  }
+
+  // Pass 2: Premultiplied RGB color decontamination on semi-transparent edge pixels
+  // Pulls RGB from nearby high-alpha interior pixels to eliminate halo ringing
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const idx = y * w + x
+      const newA = erodedAlpha[idx]
+      const p = idx * 4
+
+      if (newA === 0) {
+        data[p + 3] = 0
+        continue
+      }
+
+      if (newA < 235) {
+        let sumR = 0
+        let sumG = 0
+        let sumB = 0
+        let sumW = 0
+
+        for (let dy = -1; dy <= 1; dy++) {
+          const row = (y + dy) * w
+          for (let dx = -1; dx <= 1; dx++) {
+            const nIdx = row + (x + dx)
+            const nA = erodedAlpha[nIdx]
+            if (nA > newA + 12) {
+              const np = nIdx * 4
+              const wAlpha = nA / 255
+              sumR += data[np] * wAlpha
+              sumG += data[np + 1] * wAlpha
+              sumB += data[np + 2] * wAlpha
+              sumW += wAlpha
+            }
+          }
+        }
+
+        if (sumW > 0.01) {
+          const pull = Math.min(0.82, (235 - newA) / 210)
+          const invW = 1 / sumW
+          data[p] = Math.round(data[p] * (1 - pull) + sumR * invW * pull)
+          data[p + 1] = Math.round(data[p + 1] * (1 - pull) + sumG * invW * pull)
+          data[p + 2] = Math.round(data[p + 2] * (1 - pull) + sumB * invW * pull)
+        }
+      }
+
+      data[p + 3] = newA
+    }
+  }
+
+  // Clean outer 1px border
+  for (let x = 0; x < w; x++) {
+    data[x * 4 + 3] = erodedAlpha[x]
+    data[((h - 1) * w + x) * 4 + 3] = erodedAlpha[(h - 1) * w + x]
+  }
+  for (let y = 0; y < h; y++) {
+    data[(y * w) * 4 + 3] = erodedAlpha[y * w]
+    data[(y * w + (w - 1)) * 4 + 3] = erodedAlpha[y * w + (w - 1)]
+  }
+
+  ctx.putImageData(imgData, 0, 0)
+}
+
+/**
+ * Computes a normalized high-resolution relief depth map from a cleaned cutout
+ * ImageData buffer:
+ * - Masks strictly by smoothly feathered alpha so background stays flat (0)
+ * - Adds natural cylindrical + ellipsoidal subject-center volume curvature
+ *   so faces & products look genuinely 3D instead of flat embossed sheets
+ * - Blends subtle micro-luminance relief without harsh dark-spot craters
+ */
+function buildSculptedDepthMap(
   imageData: ImageData,
   size: number
-): Float32Array {
+): { depth: Float32Array; alphaMask: Float32Array; bounds: SubjectEllipseBounds } {
   const { data } = imageData
-  const depth = new Float32Array(size * size)
+  const count = size * size
+  const depth = new Float32Array(count)
+  const alphaMask = new Float32Array(count)
   const invSize = 1 / Math.max(1, size - 1)
 
+  // 1. Measure subject centroid and bounding ellipse from opaque pixels
+  let minX = size
+  let minY = size
+  let maxX = -1
+  let maxY = -1
+  let sumX = 0
+  let sumY = 0
+  let sumA = 0
+  let transparentCount = 0
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const idx = y * size + x
+      const a = data[idx * 4 + 3] / 255
+      alphaMask[idx] = a
+      if (a < 0.92) transparentCount++
+      if (a > 0.12) {
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+        sumX += x * a
+        sumY += y * a
+        sumA += a
+      }
+    }
+  }
+
+  const hasTransparency = transparentCount > Math.max(12, Math.floor(count * 0.01))
+  const cx = sumA > 1 ? (sumX / sumA) * invSize : 0.5
+  const cy = sumA > 1 ? (sumY / sumA) * invSize : 0.48
+  const rx = maxX > minX ? Math.max(0.18, ((maxX - minX) * invSize) * 0.52) : 0.44
+  const ry = maxY > minY ? Math.max(0.18, ((maxY - minY) * invSize) * 0.52) : 0.44
+
+  // 2. Smooth the alpha mask (2 passes) so cutout borders feather gently into z = 0
+  let smoothAlpha = new Float32Array(alphaMask)
+  for (let pass = 0; pass < 2; pass++) {
+    const next = new Float32Array(count)
+    for (let y = 0; y < size; y++) {
+      const y0 = y > 0 ? y - 1 : 0
+      const y2 = y < size - 1 ? y + 1 : size - 1
+      for (let x = 0; x < size; x++) {
+        const x0 = x > 0 ? x - 1 : 0
+        const x2 = x < size - 1 ? x + 1 : size - 1
+        const c = smoothAlpha[y * size + x]
+        const avg =
+          (c * 4 +
+            smoothAlpha[y0 * size + x] * 2 +
+            smoothAlpha[y2 * size + x] * 2 +
+            smoothAlpha[y * size + x0] * 2 +
+            smoothAlpha[y * size + x2] * 2 +
+            smoothAlpha[y0 * size + x0] +
+            smoothAlpha[y0 * size + x2] +
+            smoothAlpha[y2 * size + x0] +
+            smoothAlpha[y2 * size + x2]) /
+          16
+        next[y * size + x] = avg
+      }
+    }
+    smoothAlpha = next
+  }
+
+  // 3. Build natural 3D volume: cylindrical horizontal curvature + subject-center dome + soft luminance detail
   for (let y = 0; y < size; y++) {
     const ny = y * invSize
-    const dy = (ny - 0.5) * 2
+    const dy = (ny - cy) / ry
     const edgeY = Math.min(ny, 1 - ny)
 
     for (let x = 0; x < size; x++) {
       const idx = y * size + x
-      const p = idx * 4
-      const alpha = data[p + 3] / 255
-      if (alpha <= 0.02) {
+      const rawA = alphaMask[idx]
+      const featheredA = smoothAlpha[idx]
+
+      if (featheredA <= 0.025 || rawA <= 0.02) {
         depth[idx] = 0
         continue
       }
 
+      const p = idx * 4
       const luma = (0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2]) / 255
-      const nx = x * invSize
-      const dx = (nx - 0.5) * 2
-      const radial = Math.max(0, 1 - (dx * dx + dy * dy) * 0.55)
 
-      // Smooth border taper over outer 8% so mesh perimeter stays flush with slab
+      const nx = x * invSize
+      const dx = (nx - cx) / rx
+
+      // Subtle cylindrical horizontal curvature + elliptical dome around subject center
+      const cylProfile = Math.sqrt(Math.max(0, 1 - Math.min(1, dx * dx * 0.72)))
+      const rSq = Math.min(1, (dx * dx + dy * dy * 0.85) * 0.62)
+      const domeProfile = Math.sqrt(Math.max(0, 1 - rSq))
+      const volumeBase = cylProfile * 0.48 + domeProfile * 0.52
+
+      // Softly compress luminance into [0.28, 1.0] so dark hair/eyes don't carve deep holes
+      const softLuma = 0.28 + Math.pow(luma, 0.82) * 0.72
+
+      // Smoothstep alpha edge ramp eliminates boundary spikes completely
+      const aNorm = Math.max(0, Math.min(1, (featheredA - 0.06) / 0.55))
+      const alphaRamp = aNorm * aNorm * (3 - 2 * aNorm)
+
+      // Smooth outer-frame border taper over outer 6% so perimeter sits flush with backing slab
       const edgeX = Math.min(nx, 1 - nx)
-      const border = Math.min(1, Math.min(edgeX, edgeY) / 0.08)
+      const border = Math.min(1, Math.min(edgeX, edgeY) / 0.06)
       const smoothBorder = border * border * (3 - 2 * border)
 
-      // Combine luminance relief + gentle subject dome
-      const rawHeight = (luma * 0.68 + radial * 0.32) * alpha * smoothBorder
-      depth[idx] = rawHeight
+      // Combine natural 3D volume (62%) with micro-luminance relief (38%)
+      const combined = (volumeBase * 0.62 + softLuma * 0.38) * alphaRamp * smoothBorder
+      depth[idx] = combined
     }
   }
 
-  return depth
+  return {
+    depth,
+    alphaMask: smoothAlpha,
+    bounds: { cx, cy, rx, ry, hasTransparency },
+  }
 }
 
 /**
- * Fast edge-aware smoothing pass (3×3 bilateral-style filter) over a 256×256
+ * Fast edge-preserving smoothing pass (3×3 bilateral-style filter) over the
  * depth buffer. Preserves strong subject edges while removing high-frequency
- * noise so the resulting 2.5D mesh tilts smoothly under studio lighting.
+ * noise and boundary spikes so the resulting 2.5D mesh shades smoothly.
  */
 function smoothDepthEdgeAware(
   src: Float32Array,
@@ -1280,7 +1508,6 @@ function smoothDepthEdgeAware(
       let weightSum = 2.0
 
       // Unrolled 8-neighborhood with fast rational range kernel: 1 / (1 + diff^2 * k)
-      // Zero per-pixel array allocations for smooth mobile execution
       const row0 = y0 * size
       const row1 = y * size
       const row2 = y2 * size
@@ -1366,10 +1593,12 @@ function sampleDepthBilinear(
 }
 
 /**
- * Instant mobile-first 2.5D Depth Relief generator (zero heavy ML downloads).
- * Downscales the image to 256×256, builds an edge-aware smoothed luminance
- * depth map, displaces a lightweight 64×64 Three.js relief mesh mounted on a
- * sleek studio slab, and exports a binary `.glb` in under 1–2 seconds.
+ * High-resolution 2.5D Sculpted Depth Relief generator (zero heavy ML downloads).
+ * - Cleans cutout alpha edges via premultiplied erosion/feathering & color decontamination
+ * - Builds an edge-preserving smoothed depth map with natural cylindrical/subject-center volume
+ * - Displaces a 96×96 (mobile) / 160×160 (desktop) relief mesh with smooth vertex normals
+ * - Renders with balanced studio MeshStandardMaterial (zero harsh plastic glare)
+ * - Exports a clean binary `.glb` in 1–2 seconds
  */
 export async function generateFast25dRelief(
   source: File | Blob | string,
@@ -1388,6 +1617,19 @@ export async function generateFast25dRelief(
     throw new DOMException("Conversion aborted", "AbortError")
   }
 
+  const srcW = img.naturalWidth || img.width
+  const srcH = img.naturalHeight || img.height
+  if (srcW <= 0 || srcH <= 0) {
+    throw new Error("Source image has invalid dimensions for 3D conversion.")
+  }
+
+  const mobile = isMobileViewport()
+  const depthSize = mobile ? MOBILE_RELIEF_DEPTH_SIZE : DESKTOP_RELIEF_DEPTH_SIZE
+  const texW = mobile ? MOBILE_RELIEF_TEXTURE_SIZE : DESKTOP_RELIEF_TEXTURE_SIZE
+  const texH = Math.round(texW * (1.12 / 0.94))
+  const reliefSegs = mobile ? MOBILE_RELIEF_SEGMENTS : DESKTOP_RELIEF_SEGMENTS
+
+  const subjectCanvas = document.createElement("canvas")
   const depthCanvas = document.createElement("canvas")
   const textureCanvas = document.createElement("canvas")
   const backCanvas = createShowcaseBackCanvas()
@@ -1404,66 +1646,79 @@ export async function generateFast25dRelief(
   let backMat: THREE.MeshStandardMaterial | null = null
 
   try {
-    // 1. Fit source image into a clean studio card texture (512×614) & 256×256 depth canvas
-    const texW = FAST_25D_TEXTURE_SIZE
-    const texH = Math.round(FAST_25D_TEXTURE_SIZE * (1.12 / 0.94))
+    // 1. Render isolated subject onto transparent canvas and clean alpha edges
+    subjectCanvas.width = texW
+    subjectCanvas.height = texH
+    const subjCtx = subjectCanvas.getContext("2d", { willReadFrequently: true })
+    if (!subjCtx) throw new Error("2D canvas context unavailable.")
+
+    const pad = 0.9
+    const fitScale = Math.min((texW * pad) / srcW, (texH * pad) / srcH)
+    const drawW = Math.max(1, Math.round(srcW * fitScale))
+    const drawH = Math.max(1, Math.round(srcH * fitScale))
+    const drawX = Math.round((texW - drawW) / 2)
+    const drawY = Math.round((texH - drawH) / 2)
+    subjCtx.drawImage(img, drawX, drawY, drawW, drawH)
+
+    // Alpha-premultiplied edge erosion, feathering, and halo decontamination
+    refineCutoutAlphaEdges(subjCtx, texW, texH)
+
+    // 2. Composite cleaned cutout onto subtle warm studio card texture
     textureCanvas.width = texW
     textureCanvas.height = texH
     const texCtx = textureCanvas.getContext("2d")
     if (!texCtx) throw new Error("2D canvas context unavailable.")
 
-    // Subtle studio gradient behind image (visible if PNG has transparency or letterbox)
     const bg = texCtx.createRadialGradient(
       texW * 0.5,
-      texH * 0.4,
+      texH * 0.38,
       texW * 0.08,
       texW * 0.5,
       texH * 0.5,
-      texH * 0.72
+      texH * 0.74
     )
     bg.addColorStop(0, "#FAF8F5")
     bg.addColorStop(1, "#E7E0D5")
     texCtx.fillStyle = bg
     texCtx.fillRect(0, 0, texW, texH)
+    texCtx.drawImage(subjectCanvas, 0, 0)
 
-    const pad = 0.92
-    const fitScale = Math.min(
-      (texW * pad) / Math.max(img.width, 1),
-      (texH * pad) / Math.max(img.height, 1)
-    )
-    const drawW = Math.round(img.width * fitScale)
-    const drawH = Math.round(img.height * fitScale)
-    const drawX = Math.round((texW - drawW) / 2)
-    const drawY = Math.round((texH - drawH) / 2)
-    texCtx.drawImage(img, drawX, drawY, drawW, drawH)
+    const previewCutoutDataUrl = encodeCanvasDataUrl(textureCanvas)
 
-    const previewCutoutDataUrl = textureCanvas.toDataURL("image/webp", 0.86)
-
-    // Downscale onto 256×256 canvas for fast luminance depth extraction
-    depthCanvas.width = FAST_25D_DEPTH_SIZE
-    depthCanvas.height = FAST_25D_DEPTH_SIZE
+    // 3. Extract depth from the transparent cleaned cutout (preserving alpha mask!)
+    depthCanvas.width = depthSize
+    depthCanvas.height = depthSize
     const depthCtx = depthCanvas.getContext("2d", { willReadFrequently: true })
     if (!depthCtx) throw new Error("2D canvas context unavailable.")
-    depthCtx.drawImage(textureCanvas, 0, 0, FAST_25D_DEPTH_SIZE, FAST_25D_DEPTH_SIZE)
-    const depthImgData = depthCtx.getImageData(
-      0,
-      0,
-      FAST_25D_DEPTH_SIZE,
-      FAST_25D_DEPTH_SIZE
-    )
+    depthCtx.clearRect(0, 0, depthSize, depthSize)
+    depthCtx.drawImage(subjectCanvas, 0, 0, depthSize, depthSize)
+    const depthImgData = depthCtx.getImageData(0, 0, depthSize, depthSize)
 
-    onProgress?.({ stage: "generating_fast_25d", percent: 45 })
+    onProgress?.({ stage: "generating_fast_25d", percent: 42 })
     await yieldToMainThread()
 
     if (signal?.aborted) {
       throw new DOMException("Conversion aborted", "AbortError")
     }
 
-    // 2. Luminance heightmap + 2-pass edge-aware smoothing
-    let depthMap = buildLuminanceDepthMap(depthImgData, FAST_25D_DEPTH_SIZE)
-    depthMap = smoothDepthEdgeAware(depthMap, FAST_25D_DEPTH_SIZE, 28)
+    // 4. Build sculpted depth map + 3-pass edge-preserving bilateral smoothing
+    const { depth: rawDepth, alphaMask, bounds } = buildSculptedDepthMap(depthImgData, depthSize)
+    let depthMap = smoothDepthEdgeAware(rawDepth, depthSize, 32)
     await yieldToMainThread()
-    depthMap = smoothDepthEdgeAware(depthMap, FAST_25D_DEPTH_SIZE, 18)
+    depthMap = smoothDepthEdgeAware(depthMap, depthSize, 20)
+    await yieldToMainThread()
+    depthMap = smoothDepthEdgeAware(depthMap, depthSize, 12)
+
+    // Re-clamp background pixels strictly to 0 after smoothing so edges never bleed spikes
+    for (let i = 0; i < depthMap.length; i++) {
+      const a = alphaMask[i]
+      if (a <= 0.03) {
+        depthMap[i] = 0
+      } else if (a < 0.35) {
+        const t = (a - 0.03) / 0.32
+        depthMap[i] *= t * t * (3 - 2 * t)
+      }
+    }
 
     if (signal?.aborted) {
       throw new DOMException("Conversion aborted", "AbortError")
@@ -1471,11 +1726,14 @@ export async function generateFast25dRelief(
 
     onProgress?.({ stage: "generating_fast_25d", percent: 72 })
 
-    // 3. Build lightweight 2.5D sculpted relief mesh + studio backing slab
+    // 5. Build high-resolution 2.5D sculpted relief mesh + studio backing slab
     const cardW = 0.94
     const cardH = 1.12
     const cornerR = 0.085
-    const slabDepth = Math.max(0.036, Math.min(0.09, reliefDepth * 0.24))
+    const safeReliefDepth = Number.isFinite(reliefDepth)
+      ? Math.max(0.08, Math.min(0.42, reliefDepth))
+      : 0.22
+    const slabDepth = Math.max(0.036, Math.min(0.09, safeReliefDepth * 0.24))
     const bevelThickness = 0.011
     const bevelSize = 0.011
 
@@ -1491,8 +1749,8 @@ export async function generateFast25dRelief(
     slabGeom.translate(0, 0, -slabDepth / 2)
     slabMat = new THREE.MeshStandardMaterial({
       color: 0x1e1b18,
-      roughness: 0.18,
-      metalness: 0.2,
+      roughness: 0.44,
+      metalness: 0.12,
     })
     const slabMesh = new THREE.Mesh(slabGeom, slabMat)
     slabMesh.name = "Fast25dBackingSlab"
@@ -1513,8 +1771,8 @@ export async function generateFast25dRelief(
     rimGeom.translate(0, 0, -(slabDepth + bevelThickness * 1.35) / 2)
     rimMat = new THREE.MeshStandardMaterial({
       color: 0xd4af37,
-      roughness: 0.24,
-      metalness: 0.84,
+      roughness: 0.34,
+      metalness: 0.68,
     })
     const rimMesh = new THREE.Mesh(rimGeom, rimMat)
     rimMesh.name = "Fast25dMetallicRim"
@@ -1522,18 +1780,20 @@ export async function generateFast25dRelief(
     const faceW = cardW - 0.038
     const faceH = cardH - 0.038
     const faceZ = slabDepth / 2 + bevelThickness + 0.001
-    const reliefAmp = Math.max(0.045, Math.min(0.14, reliefDepth * 0.42))
+    const reliefAmp = Math.max(0.055, Math.min(0.20, safeReliefDepth * 0.56))
 
-    // 64×64 subdivided mesh for smooth 3D-tilting relief with low mobile overhead
-    const segs = 64
-    frontGeom = new THREE.PlaneGeometry(faceW, faceH, segs, segs)
+    // High-resolution relief mesh: 96×96 on mobile, 160×160 on desktop
+    frontGeom = new THREE.PlaneGeometry(faceW, faceH, reliefSegs, reliefSegs)
     const pos = frontGeom.getAttribute("position")
     const uv = frontGeom.getAttribute("uv")
+    if (!pos || !uv || pos.count === 0) {
+      throw new Error("Relief geometry attributes could not be initialized.")
+    }
 
     for (let i = 0; i < pos.count; i++) {
       const u = uv.getX(i)
       const vTopDown = 1 - uv.getY(i)
-      const h = sampleDepthBilinear(depthMap, FAST_25D_DEPTH_SIZE, u, vTopDown)
+      const h = sampleDepthBilinear(depthMap, depthSize, u, vTopDown)
       pos.setZ(i, h * reliefAmp)
     }
     pos.needsUpdate = true
@@ -1545,14 +1805,25 @@ export async function generateFast25dRelief(
     frontTex.flipY = false
     frontTex.needsUpdate = true
 
+    // Satin-matte studio finish: crisp key/rim lighting with zero harsh plastic glare
     frontMat = new THREE.MeshStandardMaterial({
       map: frontTex,
-      roughness: 0.36,
-      metalness: 0.04,
+      roughness: 0.54,
+      metalness: 0.0,
     })
     const frontMesh = new THREE.Mesh(frontGeom, frontMat)
     frontMesh.name = "Fast25dDepthRelief"
     frontMesh.position.z = faceZ
+    frontMesh.userData = {
+      isRelief25d: true,
+      subjectBounds: {
+        cx: bounds.cx,
+        cy: bounds.cy,
+        rx: bounds.rx,
+        ry: bounds.ry,
+      },
+      reliefAmp,
+    }
 
     backTex = new THREE.CanvasTexture(backCanvas)
     backTex.colorSpace = THREE.SRGBColorSpace
@@ -1563,8 +1834,8 @@ export async function generateFast25dRelief(
     flipPlaneUvForGltf(backGeom)
     backMat = new THREE.MeshStandardMaterial({
       map: backTex,
-      roughness: 0.32,
-      metalness: 0.14,
+      roughness: 0.48,
+      metalness: 0.08,
     })
     const backMesh = new THREE.Mesh(backGeom, backMat)
     backMesh.name = "Fast25dBackFace"
@@ -1574,11 +1845,12 @@ export async function generateFast25dRelief(
     const group = new THREE.Group()
     group.name = "Fast25dDepthRelief3D"
     group.add(slabMesh, rimMesh, frontMesh, backMesh)
+    group.updateMatrixWorld(true)
 
     const exporter = new GLTFExporter()
     const glbBuffer = await exporter.parseAsync(group, { binary: true })
-    if (!(glbBuffer instanceof ArrayBuffer)) {
-      throw new Error("Expected binary ArrayBuffer from GLTFExporter.")
+    if (!(glbBuffer instanceof ArrayBuffer) || glbBuffer.byteLength === 0) {
+      throw new Error("Expected non-empty binary ArrayBuffer from GLTFExporter.")
     }
 
     const blob = new Blob([glbBuffer], { type: "model/gltf-binary" })
@@ -1607,6 +1879,7 @@ export async function generateFast25dRelief(
     backGeom?.dispose()
     backTex?.dispose()
     backMat?.dispose()
+    disposeCanvas(subjectCanvas)
     disposeCanvas(depthCanvas)
     disposeCanvas(textureCanvas)
     disposeCanvas(backCanvas)
@@ -1786,7 +2059,20 @@ export async function convertImageToGlb(
     )
 
     onProgress?.({ stage: "fallback_fast", percent: 75 })
-    const fastResult = await generateFast25dRelief(source, {
+    let fallbackSource: File | Blob | string = source
+    if (removeBg) {
+      try {
+        const cutout = await extractForegroundCutout(source, {
+          mode: "instant",
+          maxDimension: maxCutoutSize,
+          signal,
+        })
+        fallbackSource = cutout.blob
+      } catch {
+        // Proceed with original source if quick cutout fails
+      }
+    }
+    const fastResult = await generateFast25dRelief(fallbackSource, {
       reliefDepth,
       signal,
       onProgress: onProgress
