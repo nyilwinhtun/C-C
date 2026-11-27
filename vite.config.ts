@@ -10,6 +10,7 @@ export default defineConfig({
   base: './',
   plugins: [react(), tailwindcss(), VitePWA({
     registerType: 'autoUpdate',
+    injectRegister: false,
     devOptions: {
       enabled: true,
     },
@@ -24,9 +25,30 @@ export default defineConfig({
     workbox: {
       skipWaiting: true,
       clientsClaim: true,
-      globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+      cleanupOutdatedCaches: true,
+      navigateFallback: null,
+      globPatterns: ['**/*.{js,css,ico,png,svg,woff2}'],
       maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       runtimeCaching: [
+        {
+          urlPattern: ({ request }) =>
+            request.mode === 'navigate' || request.destination === 'document',
+          handler: 'NetworkFirst',
+          options: {
+            cacheName: 'html-navigation-cache',
+            networkTimeoutSeconds: 4,
+            matchOptions: {
+              ignoreSearch: true,
+            },
+            expiration: {
+              maxEntries: 10,
+              maxAgeSeconds: 60 * 60 * 24 * 7,
+            },
+            cacheableResponse: {
+              statuses: [0, 200],
+            },
+          },
+        },
         {
           urlPattern: /\.wasm$/i,
           handler: 'CacheFirst',
